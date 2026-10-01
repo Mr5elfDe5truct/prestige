@@ -76,6 +76,9 @@ interface Settings {
   voice?: string;
   camera?: string;
   toolGroups?: string[]; // tool groups switched on (undefined = the defaults)
+  userName?: string; // what Prestige calls the user
+  aboutUser?: string; // optional note every model sees
+  welcomed?: boolean; // the first-run welcome has been shown
 }
 
 let settings: Settings = {};
@@ -122,9 +125,13 @@ function greet(online: boolean) {
   const h = now.getHours();
   const part = h < 5 ? "Evening" : h < 12 ? "Morning" : h < 18 ? "Afternoon" : "Evening";
   $("#date-eyebrow").textContent = now.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
-  $("#greeting").innerHTML = online
-    ? `${part}, <span>Ryan</span>. Everything is running locally.`
-    : `${part}, <span>Ryan</span>. The local services are offline.`;
+  const name = settings.userName?.trim();
+  const hello = name ? `${part}, <span>${escapeHtml(name)}</span>.` : `Good ${part.toLowerCase()}.`;
+  $("#greeting").innerHTML = `${hello} ${online ? "Everything is running locally." : "The local services are offline."}`;
+}
+
+function escapeHtml(s: string) {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 }
 
 // ---------- GPU readouts ----------
@@ -133,6 +140,7 @@ async function pollGpu() {
   try {
     const g = await invoke<Gpu>("gpu_stats");
     onGpu(g);
+    if (g.name && !pcInfo.gpu) pcInfo.gpu = `${g.name.replace(/^NVIDIA\s+/i, "")} ${Math.round(g.mem_total / 1024)} GB`;
     const set = (id: string, pct: number, text: string, hot: boolean) => {
       const el = $(`#${id}`);
       el.style.setProperty("--v", String(Math.max(0, Math.min(100, pct))));
@@ -356,9 +364,23 @@ async function renderHistory() {
 }
 
 // ---------- sending ----------
-const SYSTEM_BASE =
-  "You are Prestige, a private AI assistant running entirely on Ryan's own PC (RTX 3060, Windows 11). " +
-  "Be direct and helpful. Use Markdown when it helps.";
+// What the PC has, filled in from nvidia-smi and the OS so the prompt fits whoever runs Prestige.
+const pcInfo: { gpu?: string; ramGB?: number } = {};
+
+/** The instructions every model gets, personalised with the user's name and note from Settings. */
+function systemBase(): string {
+  const name = settings.userName?.trim();
+  const hw = [pcInfo.gpu, pcInfo.ramGB ? `${pcInfo.ramGB} GB RAM` : ""].filter(Boolean).join(", ");
+  const owner = name ? `${name}'s own PC` : "the user's own PC";
+  const lines = [
+    `You are Prestige by R.G. Studios, a private AI assistant running entirely on ${owner}${hw ? ` (${hw}, Windows)` : ""}. ` +
+      "Nothing you see or say leaves this computer.",
+    name ? `The user's name is ${name}. Address them by name when it feels natural.` : "",
+    settings.aboutUser?.trim() ? `What the user wants you to know about them: ${settings.aboutUser.trim()}` : "",
+    "Be direct and helpful. Use Markdown when it helps.",
+  ];
+  return lines.filter(Boolean).join("\n");
+}
 
 // ---------- tools ----------
 const TOOLS_HINT =
@@ -565,7 +587,7 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     }
 
     const messages: ChatMessage[] = [
-      { role: "system", content: [SYSTEM_BASE, memoryText].filter(Boolean).join("\n\n") },
+      { role: "system", content: [systemBase(), memoryText].filter(Boolean).join("\n\n") },
       ...chat.messages.filter((m) => !m.error).map((m) => ({ role: m.role, content: m.content, images: m.images })),
     ];
 
@@ -648,6 +670,10 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
       if (!reply.content) body.innerHTML = `<span class="status-line">Reading the results…</span>`;
     }
     reply.stats = stats;
+    // Llama 3.1 sometimes types a pretend tool call as plain text ({"name": ..., "parameters": ...}) instead
+    // of calling a tool. Drop it when it doesn't name a real tool, so only the actual answer is shown.
+    const fake = reply.content.match(/^\s*\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"parameters"\s*:\s*\{[^}]*\}\s*\}\s*/);
+    if (fake && !toolDefs.some((d) => d.name === fake[1])) reply.content = reply.content.slice(fake[0].length);
     reply.thinking = thinking || undefined;
     if (thinking) setThinking(bubble, thinking, false);
   } catch (e) {
@@ -853,7 +879,11 @@ function wire() {
   const urlInput = $("#owui-url") as HTMLInputElement;
   const rootInput = $("#stack-root") as HTMLInputElement;
   const keepInput = $("#keep-running") as HTMLInputElement;
+  const nameInput = $("#user-name") as HTMLInputElement;
+  const aboutInput = $("#user-about") as HTMLTextAreaElement;
   const openSettings = async () => {
+    nameInput.value = settings.userName ?? "";
+    aboutInput.value = settings.aboutUser ?? "";
     keyInput.value = settings.owuiKey ?? "";
     urlInput.value = settings.owuiUrl ?? DEFAULT_OWUI;
     const info = inTauri ? await invoke<{ root: string }>("stack_info", { root: settings.stackRoot ?? null }) : { root: "" };
@@ -884,6 +914,9 @@ function wire() {
   });
   dlg.addEventListener("close", async () => {
     if (dlg.returnValue !== "save") return;
+    settings.userName = nameInput.value.trim() || undefined;
+    settings.aboutUser = aboutInput.value.trim() || undefined;
+    greet($("#offline").hidden);
     settings.owuiKey = keyInput.value.trim() || undefined;
     const url = urlInput.value.trim();
     settings.owuiUrl = url && url !== DEFAULT_OWUI ? url : undefined;
@@ -908,6 +941,32 @@ function go(name: string) {
   showVoice(name === "voice");
   if (name !== "studio") showCameraPane(false);
   window.scrollTo({ top: 0 });
+}
+
+// ---------- first run ----------
+function showWelcome() {
+  const dlg = $("#welcome") as HTMLDialogElement;
+  const name = $("#welcome-name") as HTMLInputElement;
+  const about = $("#welcome-about") as HTMLTextAreaElement;
+  name.value = settings.userName ?? "";
+  about.value = settings.aboutUser ?? "";
+  dlg.returnValue = "";
+  dlg.addEventListener(
+    "close",
+    async () => {
+      if (dlg.returnValue === "save") {
+        settings.userName = name.value.trim() || undefined;
+        settings.aboutUser = about.value.trim() || undefined;
+      }
+      settings.welcomed = true; // skipping counts too; it's in Settings any time
+      await saveSettings();
+      greet($("#offline").hidden);
+      if (settings.userName) toast(`Nice to meet you, ${settings.userName}.`);
+    },
+    { once: true },
+  );
+  dlg.showModal();
+  name.focus();
 }
 
 async function main() {
@@ -963,9 +1022,12 @@ async function main() {
   updateToolsButton();
   // Like open-app.ps1: opening the app starts the workstation if it isn't running.
   await runSplash(true);
+  greet($("#offline").hidden);
+  if (!settings.welcomed && !settings.userName) setTimeout(showWelcome, 2600);
   renderHistory();
   pollGpu();
   setInterval(pollGpu, 1000);
+  if (inTauri) invoke<{ total: number }>("sys_memory").then((m) => (pcInfo.ramGB = Math.round(m.total / 1024))).catch(() => {});
   ($("#prompt") as HTMLTextAreaElement).focus();
 }
 

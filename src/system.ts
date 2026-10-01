@@ -7,6 +7,7 @@ import { bestFor, capsFor, chipsHtml } from "./caps";
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
 
 export interface Gpu {
+  name?: string;
   util: number;
   mem_used: number; // MiB
   mem_total: number;

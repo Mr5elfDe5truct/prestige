@@ -194,6 +194,9 @@
     <dialog class="sheet" id="settings">
       <form method="dialog">
         <h2>Settings</h2>
+        <label>Your name<input id="user-name" type="text" autocomplete="off" placeholder="What should Prestige call you?" /></label>
+        <label>About you (optional)<textarea id="user-about" rows="2" placeholder="Anything every model should know, e.g. where you live, what you do, how you like answers"></textarea></label>
+        <h2 class="sub">Workstation</h2>
         <label>Workstation folder (holds start-all.ps1 and stop-all.ps1)<input id="stack-root" type="text" spellcheck="false" /></label>
         <label class="check"><input id="keep-running" type="checkbox" /> Keep the AI services running when Prestige closes</label>
         <h2 class="sub">Shared memory</h2>
@@ -210,11 +213,25 @@
       </form>
     </dialog>
 
+    <dialog class="sheet welcome" id="welcome">
+      <form method="dialog">
+        <svg class="mark about-mark" viewBox="0 0 600 600" aria-hidden="true"><use href="#rg-mark" /></svg>
+        <h2 class="about-wm">Welcome to Prestige</h2>
+        <p class="muted">Your AI runs entirely on this PC. Tell it who you are so it can greet you and answer for you, not for a stranger. You can change this any time in Settings.</p>
+        <label>What should Prestige call you?<input id="welcome-name" type="text" autocomplete="off" placeholder="Your name" /></label>
+        <label>About you (optional)<textarea id="welcome-about" rows="3" placeholder="Anything every model should know, e.g. where you live, what you do, how you like answers"></textarea></label>
+        <div class="acts">
+          <button class="btn" value="skip">Skip</button>
+          <button class="btn primary" value="save">Save</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog class="sheet" id="about">
       <form method="dialog">
         <svg class="mark about-mark" viewBox="0 0 600 600" aria-hidden="true"><use href="#rg-mark" /></svg>
         <h2 class="about-wm">Prestige</h2>
-        <p class="eyebrow">Version 0.6.1 · Model capabilities and catalog</p>
+        <p class="eyebrow">Version 0.7.0 · Made for you</p>
         <p>Developed by <b>Ryan B. Gyles</b> · R.G. Studios</p>
         <p class="muted">Everything runs on this PC: Ollama, llama.cpp and Open WebUI's shared memory. Nothing is sent to the cloud.</p>
         <div class="acts">

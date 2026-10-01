@@ -105,6 +105,9 @@ npm run tauri build   # installer in src-tauri\target\release\bundle\nsis\
 
 ## ⚙️ First run
 
+On first launch Prestige asks **what to call you** (and, optionally, a few things about you every model should know). It uses them
+in the greeting and tells every model who it's talking to. Change them any time in **Settings**.
+
 Open **Settings** (the gear, top right):
 
 1. **Workstation folder**: where the Custom AI Workstation stack lives (the folder with `start-all.ps1`). The default is

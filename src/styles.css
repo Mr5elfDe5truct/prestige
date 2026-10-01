@@ -416,3 +416,9 @@ dialog.catalog[open] { display: flex; flex-direction: column; }
 .cat-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: auto; }
 .cat-foot .meta { font: 11px var(--mono); color: var(--muted); }
 .cat-card .progress { height: 4px; }
+
+/* ---------- 0.7: you ---------- */
+.sheet textarea { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font: 13px var(--body); padding: 9px 10px; letter-spacing: 0; text-transform: none; resize: vertical; }
+#welcome { text-align: center; }
+#welcome label { text-align: left; }
+#welcome .acts { justify-content: center; }
