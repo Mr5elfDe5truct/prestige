@@ -73,15 +73,17 @@ export const CATALOG: Entry[] = [
   { name: "Qwen3 Coder 30B", maker: "Qwen", ollama: "qwen3-coder:30b", sizeGB: 18.56, license: "Apache 2.0", caps: ["code", "tools"],
     about: "Qwen's flagship local coder (a mixture of experts, so it stays quick even partly in RAM)." },
   // ---------- llama.cpp router (experts in RAM, like Qwen3.6 35B) ----------
+  // nCpuMoe = expert layers kept in system RAM so weights + 32k context (+ vision projector) fit 12 GB.
+  // Measured: Qwen3-VL needs 36 (28 ran out of VRAM loading its projector); GLM-4.7 Flash loads at 30.
   { name: "Qwen3 30B-A3B Instruct 2507", maker: "Qwen", sizeGB: 18.56, license: "Apache 2.0", caps: ["tools"],
-    gguf: { id: "qwen3-30b-a3b-instruct", repo: "unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF", file: "Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf", nCpuMoe: 28 },
+    gguf: { id: "qwen3-30b-a3b-instruct", repo: "unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF", file: "Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf", nCpuMoe: 32 },
     about: "Fast mixture-of-experts model with experts in RAM, about 25 tok/s on the 3060. Great general chat with tools." },
   { name: "Qwen3 30B-A3B Thinking 2507", maker: "Qwen", sizeGB: 18.56, license: "Apache 2.0", caps: ["tools", "thinking"],
-    gguf: { id: "qwen3-30b-a3b-thinking", repo: "unsloth/Qwen3-30B-A3B-Thinking-2507-GGUF", file: "Qwen3-30B-A3B-Thinking-2507-Q4_K_M.gguf", nCpuMoe: 28 },
+    gguf: { id: "qwen3-30b-a3b-thinking", repo: "unsloth/Qwen3-30B-A3B-Thinking-2507-GGUF", file: "Qwen3-30B-A3B-Thinking-2507-Q4_K_M.gguf", nCpuMoe: 32 },
     about: "The reasoning version of the 30B-A3B: thinks before it answers." },
   { name: "Qwen3-VL 30B-A3B", maker: "Qwen", sizeGB: 19.64, license: "Apache 2.0", caps: ["vision", "tools"],
     gguf: { id: "qwen3-vl-30b-a3b", repo: "unsloth/Qwen3-VL-30B-A3B-Instruct-GGUF", file: "Qwen3-VL-30B-A3B-Instruct-Q4_K_M.gguf",
-            mmproj: "mmproj-F16.gguf", mmprojAs: "Qwen3-VL-30B-A3B-Instruct-mmproj-F16.gguf", nCpuMoe: 28 },
+            mmproj: "mmproj-F16.gguf", mmprojAs: "Qwen3-VL-30B-A3B-Instruct-mmproj-F16.gguf", nCpuMoe: 36 },
     about: "A big vision model run like Qwen3.6: strong at screenshots, documents and the webcam." },
   { name: "GLM-4.7 Flash", maker: "Z.ai", sizeGB: 18.31, license: "MIT", caps: ["tools", "thinking"],
     gguf: { id: "glm-4.7-flash", repo: "unsloth/GLM-4.7-Flash-GGUF", file: "GLM-4.7-Flash-Q4_K_M.gguf", nCpuMoe: 30 },
@@ -126,7 +128,7 @@ export async function openCatalog() {
   await refreshInstalled();
   render();
   try {
-    const free = await invoke<number>("disk_free", { path: `${deps.root() ?? ""}\\models` });
+    const free = await invoke<number>("disk_free", { path: `${await stackRoot()}\\models` });
     $("#cat-disk").textContent = `${(free / 1e9).toFixed(0)} GB free on the models drive`;
   } catch {
     $("#cat-disk").textContent = "";
@@ -146,6 +148,12 @@ async function refreshInstalled() {
   } catch {
     installedLlama = new Set();
   }
+}
+
+/** The Workstation folder: the one set in Settings, or Prestige's default (resolved by the Rust side). */
+async function stackRoot(): Promise<string> {
+  const info = await invoke<{ root: string }>("stack_info", { root: deps.root() });
+  return info.root;
 }
 
 const norm = (tag: string) => (tag.includes(":") ? tag : `${tag}:latest`);
@@ -233,7 +241,7 @@ const gb = (n: number) => `${(n / 1e9).toFixed(1)} GB`;
 
 async function install(e: Entry) {
   try {
-    const free = await invoke<number>("disk_free", { path: `${deps.root() ?? ""}\\models` });
+    const free = await invoke<number>("disk_free", { path: `${await stackRoot()}\\models` });
     if (free < e.sizeGB * 1e9 * 1.1) {
       deps.toast(`Not enough disk space: ${e.name} needs ${e.sizeGB.toFixed(1)} GB and ${(free / 1e9).toFixed(1)} GB is free.`, "warn");
       return;
@@ -297,7 +305,7 @@ const ggufJobs = new Map<string, { entry: Entry; files: { id: string; dest: stri
 async function downloadGguf(e: Entry) {
   const g = e.gguf!;
   const k = keyOf(e);
-  const dir = `${deps.root() ?? ""}\\models\\gguf`;
+  const dir = `${await stackRoot()}\\models\\gguf`;
   const files = [{ id: `${k}:model`, url: hf(g.repo, g.file), dest: `${dir}\\${g.file}` }];
   if (g.mmproj) files.push({ id: `${k}:mmproj`, url: hf(g.repo, g.mmproj), dest: `${dir}\\${g.mmprojAs ?? g.mmproj}` });
   ggufJobs.set(k, { entry: e, files: files.map((f) => ({ id: f.id, dest: f.dest, done: false, got: 0, total: 0 })) });

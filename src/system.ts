@@ -29,6 +29,7 @@ interface Row {
   loaded: boolean;
   vramGB?: number; // measured (Ollama) or estimated (llama.cpp)
   loading?: boolean;
+  args?: string[]; // llama.cpp router command line (for capability detection)
 }
 
 interface Deps {
@@ -214,6 +215,7 @@ async function refreshModels() {
         needGB: known ?? Math.min(disk + 1.5, 11.5),
         loaded: m.status?.value === "loaded",
         loading: m.status?.value === "loading",
+        args: m.status?.args ?? [],
       });
     });
   } else notes.push("llama.cpp isn't answering");
@@ -246,8 +248,9 @@ function renderRows() {
         ? `${r.backend === "llama" ? "~" : ""}${r.vramGB.toFixed(1)} GB in VRAM`
         : `${r.diskGB.toFixed(1)} GB on disk`;
     el.innerHTML = `<span class="n"></span><button class="btn"></button><span class="meta"></span><span class="caps"></span>`;
-    const mi = lastModels.find((m) => m.key === r.key);
-    if (mi) capsFor(mi).then((c) => {
+    // Models hidden from the chat menu (UI-TARS) still get their capabilities shown here.
+    const mi = lastModels.find((m) => m.key === r.key) ?? { key: r.key, id: r.id, backend: r.backend, name: r.name, detail: "", order: 99, args: r.args };
+    capsFor(mi).then((c) => {
       $(".caps", el).innerHTML = chipsHtml(c);
       ($(".caps", el) as HTMLElement).title = `Best for ${bestFor(c)}`;
     });
