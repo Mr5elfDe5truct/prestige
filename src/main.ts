@@ -1023,7 +1023,11 @@ async function main() {
   updateToolsButton();
   // Like open-app.ps1: opening the app starts the workstation if it isn't running.
   await runSplash(true);
-  initUpdates(toast).then(() => setTimeout(() => checkForUpdates(true), 4000));
+  // Check for a new version shortly after start, then every 6 hours while Prestige stays open.
+  initUpdates(toast).then(() => {
+    setTimeout(() => checkForUpdates(true), 4000);
+    setInterval(() => checkForUpdates(true), 6 * 60 * 60 * 1000);
+  });
   greet($("#offline").hidden);
   if (!settings.welcomed && !settings.userName) setTimeout(showWelcome, 2600);
   renderHistory();
