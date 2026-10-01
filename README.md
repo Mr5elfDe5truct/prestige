@@ -104,8 +104,8 @@ npm run tauri build   # installer in src-tauri\target\release\bundle\nsis\
 
 Open **Settings** (the gear, top right):
 
-1. **Custom AI folder**: where the workstation stack lives (the folder with `start-all.ps1`). The default is
-   `C:\Projects\Workspaces\Claude\Custom AI`.
+1. **Workstation folder**: where the Custom AI Workstation stack lives (the folder with `start-all.ps1`). The default is
+   `%USERPROFILE%\RG Studios\Workstation` (for example `C:\Users\you\RG Studios\Workstation`).
 2. **Open WebUI API key**, for shared memory and speech-to-text:
    1. In Open WebUI (http://localhost:8080) open **Admin Panel → Settings → General** and turn on **Enable API Keys**.
    2. Open **Settings → Account → API keys → Create new secret key** and copy it.

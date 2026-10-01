@@ -21,13 +21,17 @@ pub(crate) fn hidden(cmd: &mut Command) -> &mut Command {
     cmd
 }
 
-/// Where the workstation lives unless the user picks another folder in Settings.
-const DEFAULT_STACK_ROOT: &str = r"C:\Projects\Workspaces\Claude\Custom AI";
+/// Where the workstation lives unless the user picks another folder in Settings:
+/// %USERPROFILE%\RG Studios\Workstation, next to the other R.G. Studios apps.
+fn default_stack_root() -> PathBuf {
+    let home = std::env::var_os("USERPROFILE").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Users\Public"));
+    home.join("RG Studios").join("Workstation")
+}
 
 pub(crate) fn stack_root(root: Option<String>) -> PathBuf {
     match root {
         Some(r) if !r.trim().is_empty() => PathBuf::from(r.trim()),
-        _ => PathBuf::from(DEFAULT_STACK_ROOT),
+        _ => default_stack_root(),
     }
 }
 
@@ -153,7 +157,7 @@ fn stack_info(root: Option<String>) -> serde_json::Value {
     let root = stack_root(root);
     serde_json::json!({
         "root": root.to_string_lossy(),
-        "default": DEFAULT_STACK_ROOT,
+        "default": default_stack_root().to_string_lossy(),
         "startScript": root.join("start-all.ps1").exists(),
         "stopScript": root.join("stop-all.ps1").exists(),
     })

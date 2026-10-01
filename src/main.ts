@@ -655,14 +655,14 @@ function wire() {
   // services
   $("#start-services").addEventListener("click", async () => {
     const btn = $("#start-services") as HTMLButtonElement;
-    if (!inTauri) return toast("Run start-all.ps1 in the Custom AI folder.");
+    if (!inTauri) return toast("Run start-all.ps1 in the Workstation folder.");
     btn.disabled = true;
     btn.textContent = "Starting… (about a minute)";
     try {
       const up = await startStack(bootRows());
       await refreshModels();
       refreshMemoryStatus();
-      toast(up ? "Services are up." : "The services didn't come up. Check the Custom AI folder in Settings.", up ? "" : "warn");
+      toast(up ? "Services are up." : "The services didn't come up. Check the Workstation folder in Settings.", up ? "" : "warn");
     } finally {
       btn.disabled = false;
       btn.textContent = "Start them";
