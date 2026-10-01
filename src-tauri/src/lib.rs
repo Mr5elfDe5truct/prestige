@@ -2,6 +2,7 @@
 // launching the workstation's start-all.ps1, and the Studio gallery (studio.rs). All chat traffic goes from the UI to
 // Ollama / llama.cpp / Open WebUI on 127.0.0.1 through the HTTP plugin.
 
+mod models;
 mod studio;
 
 use serde::Serialize;
@@ -279,6 +280,8 @@ pub fn run() {
             }
         })
         .manage(studio::GalleryCache::default())
+        .manage(models::GgufCache::default())
+        .manage(models::Downloads::default())
         .manage(studio::ComfyListener::default())
         .invoke_handler(tauri::generate_handler![
             gpu_stats,
@@ -298,7 +301,13 @@ pub fn run() {
             studio::reveal,
             studio::read_workflow,
             studio::comfy_listen,
-            studio::comfy_upload
+            studio::comfy_upload,
+            models::gguf_info,
+            models::disk_free,
+            models::download_file,
+            models::cancel_download,
+            models::add_llama_model,
+            models::restart_llama
         ])
         .build(tauri::generate_context!())
         .expect("error while building Prestige")

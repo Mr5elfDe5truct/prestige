@@ -1,7 +1,8 @@
 // System screen: GPU meters with sparklines, every chat model with load/unload, what's in VRAM,
 // system RAM and the services. Meters update every second; model state every 3 seconds while visible.
 import { invoke } from "@tauri-apps/api/core";
-import { errMsg, http, ping, OLLAMA, LLAMA } from "./backends";
+import { errMsg, http, lastModels, ping, OLLAMA, LLAMA } from "./backends";
+import { bestFor, capsFor, chipsHtml } from "./caps";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
 
@@ -33,6 +34,7 @@ interface Row {
 interface Deps {
   toast: (msg: string, kind?: string) => void;
   nameFor: (id: string) => { name: string; role?: string; hide?: boolean; order: number };
+  openCatalog: () => void;
 }
 
 const GB = 1024; // MiB per GiB
@@ -51,6 +53,7 @@ let modelTimer = 0;
 
 export function initSystem(d: Deps) {
   deps = d;
+  document.querySelector("#sys-catalog")?.addEventListener("click", () => deps.openCatalog());
 }
 
 export function showSystem(on: boolean) {
@@ -242,7 +245,12 @@ function renderRows() {
       r.loaded && r.vramGB
         ? `${r.backend === "llama" ? "~" : ""}${r.vramGB.toFixed(1)} GB in VRAM`
         : `${r.diskGB.toFixed(1)} GB on disk`;
-    el.innerHTML = `<span class="n"></span><button class="btn"></button><span class="meta"></span>`;
+    el.innerHTML = `<span class="n"></span><button class="btn"></button><span class="meta"></span><span class="caps"></span>`;
+    const mi = lastModels.find((m) => m.key === r.key);
+    if (mi) capsFor(mi).then((c) => {
+      $(".caps", el).innerHTML = chipsHtml(c);
+      ($(".caps", el) as HTMLElement).title = `Best for ${bestFor(c)}`;
+    });
     $(".n", el).textContent = r.name;
     if (r.role) {
       const s = document.createElement("small");

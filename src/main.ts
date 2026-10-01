@@ -17,8 +17,10 @@ import { initStudio, showStudio } from "./studio";
 import { initVoice, showVoice } from "./voice";
 import { initCamera, showCameraPane } from "./camera";
 import { stopSpeaking } from "./speech";
+import { bestFor, capsFor, chipsHtml, supportsTools } from "./caps";
+import { initCatalog, openCatalog } from "./catalog";
 import { GROUPS, describeCall, loadTools, runTool, toolSpecs, type ToolDef, type ToolStep } from "./tools";
-import { errMsg, nameFor, supportsTools, listModels, ping, streamChat, OLLAMA, LLAMA, type ChatMessage, type ModelInfo, type StreamStats } from "./backends";
+import { errMsg, nameFor, listModels, ping, streamChat, OLLAMA, LLAMA, type ChatMessage, type ModelInfo, type StreamStats } from "./backends";
 import { addMemory, memoryContext, listMemories, rememberRequest, DEFAULT_OWUI, type MemoryConfig } from "./memory";
 
 const inTauri = "__TAURI_INTERNALS__" in window;
@@ -157,16 +159,32 @@ function renderModelMenu() {
     const b = document.createElement("button");
     b.setAttribute("role", "menuitem");
     b.className = m.key === current?.key ? "sel" : "";
-    b.innerHTML = `<span class="n"></span><span class="r"></span><span class="d"></span>`;
+    b.innerHTML = `<span class="n"></span><span class="r"></span><span class="caps"></span><span class="bf"></span><span class="d"></span>`;
     $(".n", b).textContent = m.name;
     $(".r", b).textContent = m.role ?? "";
     $(".d", b).textContent = m.detail;
+    // Capabilities are detected per model (Ollama /api/show or the GGUF file) and filled in as they arrive.
+    capsFor(m).then((c) => {
+      $(".caps", b).innerHTML = chipsHtml(c);
+      $(".bf", b).textContent = `Best for ${bestFor(c)}`;
+      const extra = [c.params, c.context ? `${Math.round(c.context / 1024)}k ctx` : ""].filter(Boolean).join(" · ");
+      if (extra && !m.detail.includes("ctx")) $(".d", b).textContent = `${m.detail} · ${extra}`;
+    });
     b.addEventListener("click", () => {
       selectModel(m);
       menu.hidden = true;
     });
     menu.appendChild(b);
   }
+  const more = document.createElement("button");
+  more.className = "more";
+  more.setAttribute("role", "menuitem");
+  more.innerHTML = `<span class="n">＋ Get more models</span><span class="d">Browse the catalog: what each model is good at, one-click download</span>`;
+  more.addEventListener("click", () => {
+    menu.hidden = true;
+    openCatalog();
+  });
+  menu.appendChild(more);
 }
 
 function selectModel(m: ModelInfo | null) {
@@ -895,7 +913,12 @@ function go(name: string) {
 async function main() {
   greet(true);
   wire();
-  initSystem({ toast, nameFor });
+  initSystem({ toast, nameFor, openCatalog: () => openCatalog() });
+  initCatalog({
+    toast,
+    root: () => settings.stackRoot ?? null,
+    onInstalled: () => refreshModels(),
+  });
   initStudio({
     toast,
     root: () => settings.stackRoot ?? null,

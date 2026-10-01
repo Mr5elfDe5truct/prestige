@@ -106,7 +106,7 @@
         </div>
         <div class="two">
           <div class="card">
-            <div class="card-head"><h3>Models</h3><span class="credit" id="models-note"></span></div>
+            <div class="card-head"><h3>Models</h3><span class="credit" id="models-note"></span><button class="btn" id="sys-catalog">＋ Get more models</button></div>
             <div class="list" id="model-rows"></div>
           </div>
           <div class="card">
@@ -214,7 +214,7 @@
       <form method="dialog">
         <svg class="mark about-mark" viewBox="0 0 600 600" aria-hidden="true"><use href="#rg-mark" /></svg>
         <h2 class="about-wm">Prestige</h2>
-        <p class="eyebrow">Version 0.5.0 · Tools in chat</p>
+        <p class="eyebrow">Version 0.6.0 · Model capabilities and catalog</p>
         <p>Developed by <b>Ryan B. Gyles</b> · R.G. Studios</p>
         <p class="muted">Everything runs on this PC: Ollama, llama.cpp and Open WebUI's shared memory. Nothing is sent to the cloud.</p>
         <div class="acts">
@@ -251,6 +251,20 @@
           <button class="btn primary" value="free">Unload the others, then load</button>
         </div>
       </form>
+    </dialog>
+
+    <dialog class="sheet catalog" id="catalog">
+      <div class="cat-head">
+        <div><h2>Model catalog</h2><p class="credit">Models checked to run on this workstation. Capabilities shown are what to expect; once installed, Prestige detects the real ones. <span id="cat-disk"></span></p></div>
+        <button class="btn" id="cat-close">Close</button>
+      </div>
+      <div class="cat-bar">
+        <input id="cat-search" placeholder="Search models…" autocomplete="off" />
+        <div class="cat-filters">
+          <button class="on" data-f="all">All</button><button data-f="fits">✅ Fits in VRAM</button><button data-f="tools">🔧 Tools</button><button data-f="vision">👁 Vision</button><button data-f="thinking">🧠 Thinking</button><button data-f="code">💻 Code</button><button data-f="uncensored">🔓 Uncensored</button>
+        </div>
+      </div>
+      <div class="cat-grid" id="cat-grid"></div>
     </dialog>
 
     <div class="toast" id="toast" role="status"></div>

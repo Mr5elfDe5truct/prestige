@@ -33,7 +33,13 @@ export interface ModelInfo {
   role?: string;
   detail: string;
   order: number;
+  sizeBytes?: number; // Ollama: download size
+  args?: string[]; // llama.cpp: the router's command line for this model
+  inputModalities?: string[];
 }
+
+/** The models from the last listModels() call, for screens that need their details. */
+export let lastModels: ModelInfo[] = [];
 
 export interface ToolCall {
   id: string;
@@ -120,10 +126,17 @@ const KNOWN: Known[] = [
   { match: /ui-tars/i, name: "UI-TARS", order: 99, hide: true },
 ];
 
+// Display names for models that came from the catalog (filled in by catalog.ts).
+const friendly = new Map<string, string>();
+export function setFriendlyNames(names: [string, string][]) {
+  for (const [id, name] of names) friendly.set(id.includes(":") || !/^[a-z0-9._-]+$/i.test(id) ? id : `${id}:latest`, name);
+}
+const friendlyName = (id: string) => friendly.get(id) ?? friendly.get(id.includes(":") ? id : `${id}:latest`);
+
 /** Friendly name and role for a model id; `hide` marks models that aren't for chat. */
 export function nameFor(id: string): { name: string; role?: string; hide?: boolean; order: number } {
   const k = KNOWN.find((m) => m.match.test(id));
-  return { name: k?.name ?? id, role: k?.role, hide: k?.hide, order: k?.order ?? 50 };
+  return { name: k?.name ?? friendlyName(id) ?? id, role: k?.role, hide: k?.hide, order: k?.order ?? 50 };
 }
 
 function describe(id: string, backend: Backend, detail: string): ModelInfo | null {
@@ -133,7 +146,7 @@ function describe(id: string, backend: Backend, detail: string): ModelInfo | nul
     key: `${backend}:${id}`,
     id,
     backend,
-    name: k?.name ?? id,
+    name: k?.name ?? friendlyName(id) ?? id,
     role: k?.role,
     detail,
     order: k?.order ?? 50,
@@ -174,7 +187,7 @@ export async function listModels(): Promise<{ models: ModelInfo[]; ollama: boole
     for (const m of o.value.models ?? []) {
       const gb = m.size ? `${(m.size / 1e9).toFixed(1)} GB` : "";
       const d = describe(m.name, "ollama", ["Ollama", gb, m.details?.quantization_level].filter(Boolean).join(" · "));
-      if (d) models.push(d);
+      if (d) models.push({ ...d, sizeBytes: m.size });
     }
   }
   if (l.status === "fulfilled") {
@@ -182,10 +195,11 @@ export async function listModels(): Promise<{ models: ModelInfo[]; ollama: boole
     for (const m of l.value.data ?? []) {
       const state = m.status?.value === "loaded" ? "loaded" : "loads on first message";
       const d = describe(m.id, "llama", `llama.cpp · 32k ctx · ${state}`);
-      if (d) models.push(d);
+      if (d) models.push({ ...d, args: m.status?.args ?? [], inputModalities: m.architecture?.input_modalities ?? [] });
     }
   }
   models.sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+  lastModels = models;
   return { models, ollama, llama };
 }
 
@@ -224,27 +238,6 @@ export async function freeLlamaVram() {
     );
   } catch {
     // llama.cpp may be down; Ollama can still try.
-  }
-}
-
-const toolCaps = new Map<string, boolean>();
-
-/** Whether a model can call functions: Ollama reports it in /api/show; Qwen3.6 on llama.cpp (jinja) can. */
-export async function supportsTools(m: ModelInfo): Promise<boolean> {
-  if (m.backend === "llama") return !/ui-tars/i.test(m.id);
-  if (toolCaps.has(m.id)) return toolCaps.get(m.id)!;
-  try {
-    const r = await http(`${OLLAMA}/api/show`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: m.id }),
-    });
-    const j = await r.json();
-    const ok = Array.isArray(j.capabilities) && j.capabilities.includes("tools");
-    toolCaps.set(m.id, ok);
-    return ok;
-  } catch {
-    return false;
   }
 }
 
