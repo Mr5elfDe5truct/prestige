@@ -422,3 +422,9 @@ dialog.catalog[open] { display: flex; flex-direction: column; }
 #welcome { text-align: center; }
 #welcome label { text-align: left; }
 #welcome .acts { justify-content: center; }
+
+/* ---------- 0.8: updates ---------- */
+.update-banner { width: min(820px, 100%); margin: 0 auto 8px; display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid var(--gold); border-radius: 12px; background: color-mix(in srgb, var(--gold) 8%, var(--panel)); }
+.update-banner .u-ico { color: var(--gold); font-size: 18px; }
+.update-banner .u-body { flex: 1; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; }
+.update-banner .progress { height: 4px; }

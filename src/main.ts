@@ -19,6 +19,7 @@ import { initCamera, showCameraPane } from "./camera";
 import { stopSpeaking } from "./speech";
 import { bestFor, capsFor, chipsHtml, supportsTools } from "./caps";
 import { initCatalog, openCatalog } from "./catalog";
+import { checkForUpdates, initUpdates } from "./updates";
 import { GROUPS, describeCall, loadTools, runTool, toolSpecs, type ToolDef, type ToolStep } from "./tools";
 import { errMsg, nameFor, listModels, ping, streamChat, OLLAMA, LLAMA, type ChatMessage, type ModelInfo, type StreamStats } from "./backends";
 import { addMemory, memoryContext, listMemories, rememberRequest, DEFAULT_OWUI, type MemoryConfig } from "./memory";
@@ -1022,6 +1023,7 @@ async function main() {
   updateToolsButton();
   // Like open-app.ps1: opening the app starts the workstation if it isn't running.
   await runSplash(true);
+  initUpdates(toast).then(() => setTimeout(() => checkForUpdates(true), 4000));
   greet($("#offline").hidden);
   if (!settings.welcomed && !settings.userName) setTimeout(showWelcome, 2600);
   renderHistory();

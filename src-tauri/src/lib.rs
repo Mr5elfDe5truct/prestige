@@ -175,8 +175,20 @@ fn stop_services(root: Option<String>) -> Result<(), String> {
     run_script(&stack_root(root), "stop-all.ps1", &[])
 }
 
+/// Set while an update installs: the installer closes Prestige and starts the new version straight
+/// away, so stopping the AI stack in between would only make it start again.
+static UPDATING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[tauri::command]
+fn set_updating(on: bool) {
+    UPDATING.store(on, std::sync::atomic::Ordering::SeqCst);
+}
+
 /// Like open-app.ps1: closing the window shuts the workstation down, unless "keep running" is on.
 fn stop_on_close(app: &AppHandle) {
+    if UPDATING.load(std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
     let settings = read_settings(app);
     if settings["keepRunning"].as_bool().unwrap_or(false) {
         return;
@@ -271,6 +283,8 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         // Voice and webcam: Prestige's own page may use the mic and camera without WebView2 asking every time.
         .on_permission_request(|_, kind| {
             use tauri::webview::{PermissionKind, PermissionResponse};
@@ -287,6 +301,7 @@ pub fn run() {
             gpu_stats,
             stack_info,
             start_services,
+            set_updating,
             stop_services,
             list_chats,
             load_chat,
