@@ -1,0 +1,15 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+
+
+# Local data never belongs in the repo (Prestige keeps settings, keys, chats and thumbnails in %APPDATA%)
+.env
+.env.*
+*.key
+*.pem
+settings.json
+chats/
+thumbs/
+*.log

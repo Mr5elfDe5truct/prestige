@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="author" content="Ryan B. Gyles" />
+    <title>Prestige</title>
+  </head>
+  <body>
+    <div class="splash" id="splash" role="status" aria-label="Prestige is starting">
+      <svg class="mark" viewBox="0 0 600 600" aria-hidden="true"><use href="#rg-mark" /></svg>
+      <div class="wm">Prestige</div>
+      <div class="tl">Creating the world around you</div>
+      <div class="boot" id="boot"></div>
+      <div class="studio">R.G. Studios · Ryan B. Gyles</div>
+    </div>
+
+    <div class="app">
+      <header class="hud">
+        <button class="icon-btn ghost" id="history-btn" aria-label="Past chats" title="Past chats">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10" /></svg>
+        </button>
+        <button class="brand" id="brand" title="About Prestige">
+          <svg class="mark" viewBox="0 0 600 600" aria-hidden="true"><use href="#rg-mark" /></svg>
+          <span><span class="wm">Prestige</span><span class="by">by R.G. Studios</span></span>
+        </button>
+        <div class="model-pick">
+          <button class="model-btn" id="model-btn" aria-haspopup="menu" aria-expanded="false">
+            <span class="dot" id="model-dot"></span><span class="model-name" id="model-name">No models found</span><span class="chev">▼</span>
+          </button>
+          <div class="model-menu" id="model-menu" hidden role="menu"></div>
+        </div>
+        <span class="grow"></span>
+        <div class="cell meter" id="m-gpu"><b>GPU</b><div class="bar"><i></i></div><span class="val">–</span></div>
+        <div class="cell meter" id="m-vram"><b>VRAM</b><div class="bar"><i></i></div><span class="val">–</span></div>
+        <div class="cell meter" id="m-temp"><b>TEMP</b><span class="val">–</span></div>
+        <button class="icon-btn ghost" id="settings-btn" aria-label="Settings" title="Settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg>
+        </button>
+      </header>
+      <div class="hud-line"></div>
+
+      <aside class="history" id="history" hidden>
+        <div class="history-head">
+          <span class="eyebrow">Past chats</span>
+          <button class="btn" id="new-chat">New chat</button>
+        </div>
+        <div class="history-list" id="history-list"></div>
+      </aside>
+
+      <section class="screen" data-screen="chat">
+        <div class="hello" id="hello">
+          <span class="eyebrow" id="date-eyebrow"></span>
+          <h1 id="greeting"></h1>
+        </div>
+        <div class="offline" id="offline" hidden>
+          <div>
+            <b>The local AI services aren't running.</b>
+            <span id="offline-detail">Ollama and llama.cpp didn't answer.</span>
+          </div>
+          <button class="btn primary" id="start-services">Start them</button>
+        </div>
+        <div class="thread" id="thread" aria-live="polite"></div>
+        <div class="composer-dock">
+          <div class="suggests" id="suggests">
+            <button data-suggest>What can you do on this PC?</button>
+            <button data-suggest>Remember that I like the Dragon theme</button>
+          </div>
+          <div class="attachments" id="attachments" hidden></div>
+          <form class="composer" id="composer">
+            <button type="button" class="icon-btn" id="composer-cam" aria-label="Attach a webcam frame" title="Attach a webcam frame"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7h4l2-3h6l2 3h4v12H3z" /><circle cx="12" cy="13" r="4" /></svg></button>
+            <textarea id="prompt" rows="1" autocomplete="off" placeholder="Ask anything…" aria-label="Message"></textarea>
+            <button type="button" class="icon-btn" id="stop" aria-label="Stop" title="Stop" hidden>
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1" /></svg>
+            </button>
+            <button type="button" class="icon-btn" id="composer-mic" aria-label="Talk" title="Talk (the reply is spoken)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg></button>
+            <button type="submit" class="icon-btn send" id="send" aria-label="Send">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" /></svg>
+            </button>
+          </form>
+          <div class="cam-pop" id="cam-pop" hidden>
+            <video id="cam-pop-video" muted playsinline></video>
+            <p class="credit" id="cam-pop-note"></p>
+            <div class="acts"><button class="btn" type="button" id="cam-pop-cancel">Cancel</button><button class="btn primary" type="button" id="cam-pop-attach">Attach this frame</button></div>
+          </div>
+          <div class="ctx">
+            <button class="linkish" id="memory-status">Shared memory…</button>
+            <span class="is-thinking" id="thinking" hidden>● generating</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen wide" data-screen="system" hidden>
+        <div class="grid4">
+          <div class="card" id="c-gpu"><span class="eyebrow">GPU load</span><span class="big val">–</span><canvas class="spark"></canvas><span class="credit sub">–</span></div>
+          <div class="card" id="c-vram"><span class="eyebrow">VRAM</span><span class="big val">–</span><canvas class="spark" data-color="--gold"></canvas><span class="credit sub">–</span></div>
+          <div class="card" id="c-temp"><span class="eyebrow">Temperature</span><span class="big val">–</span><div class="bar wide"><i></i></div><span class="credit sub">–</span></div>
+          <div class="card" id="c-power"><span class="eyebrow">Board power</span><span class="big val">–</span><div class="bar wide"><i></i></div><span class="credit sub">–</span></div>
+        </div>
+        <div class="two">
+          <div class="card">
+            <div class="card-head"><h3>Models</h3><span class="credit" id="models-note"></span></div>
+            <div class="list" id="model-rows"></div>
+          </div>
+          <div class="card">
+            <h3>What's in VRAM</h3>
+            <div class="vram-stack" id="vram-stack"></div>
+            <div class="legend" id="vram-legend"></div>
+            <div class="ram">
+              <div class="legend spread"><span>System RAM</span><span class="mono" id="ram-val">–</span></div>
+              <div class="bar wide" id="ram-bar"><i></i></div>
+            </div>
+            <h3 class="mt">Services</h3>
+            <div class="svc" id="svc-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen wide" data-screen="studio" hidden>
+        <div class="create" id="create">
+          <div class="modes" role="tablist">
+            <button class="on" data-mode="image" role="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="M21 15l-5-5L5 21" /></svg>Image</button>
+            <button data-mode="video" role="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2" /><path d="M16 10l5-3v10l-5-3z" /></svg>Video</button>
+            <button data-mode="webcam" role="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7h4l2-3h6l2 3h4v12H3z" /><circle cx="12" cy="13" r="4" /></svg>Webcam</button>
+            <button data-go="voice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 12h2M7 8v8M11 5v14M15 8v8M19 11v2" /></svg>Voice</button>
+          </div>
+          <div class="animate-src" id="animate-src" hidden><img id="animate-img" alt="" /><span>Animating this image with Wan 2.2 · <button class="linkish" type="button" id="animate-clear">cancel</button></span></div>
+          <form class="prompt-row" id="gen-form">
+            <input id="gen-prompt" autocomplete="off" aria-label="Prompt" placeholder="Describe what to make…" />
+            <button class="btn primary" id="gen-btn" type="submit">Generate</button>
+          </form>
+          <div class="opts" id="gen-opts"></div>
+          <div class="cam-pane" id="cam-pane" hidden>
+            <div class="cam-view" id="cam-view"><video id="cam-video" muted playsinline></video><div class="scan"></div><span class="off-note">Camera is off</span></div>
+            <div class="cam-side">
+              <div class="cam-row">
+                <select id="cam-device" aria-label="Camera"><option value="">Default camera</option></select>
+                <button class="btn" type="button" id="cam-start">Start camera</button>
+              </div>
+              <label class="field">Vision model<select id="cam-model"><option value="gemma4:12b">Gemma 4 12B</option><option value="gemma4:e4b">Gemma 4 E4B (fast)</option></select></label>
+              <form class="prompt-row" id="cam-ask-form"><input id="cam-ask" autocomplete="off" placeholder="Ask about what the camera sees…" /><button class="btn primary" type="submit">Ask about this</button></form>
+              <label class="check"><input type="checkbox" id="cam-live" /> Live describe every <input type="number" id="cam-every" min="2" max="60" value="5" /> s</label>
+              <p class="cam-caption" id="cam-caption"></p>
+              <p class="credit" id="cam-note"></p>
+            </div>
+          </div>
+          <div class="job" id="job" hidden><div class="progress"><i></i></div><span class="progress-label" id="job-label"></span></div>
+        </div>
+        <div class="gal-head">
+          <h2>Renders</h2>
+          <div class="filters"><button class="on" data-f="all">All</button><button data-f="image">Images</button><button data-f="video">Videos</button></div>
+        </div>
+        <div class="gallery" id="gallery"></div>
+        <p class="note" id="gallery-note"></p>
+      </section>
+
+      <section class="screen wide" data-screen="voice" hidden>
+        <div class="voice-wrap">
+          <div class="voice-stage">
+            <canvas id="voice-rings"></canvas>
+            <div class="voice-mark" id="voice-mark"></div>
+          </div>
+          <p class="voice-status" id="voice-status">Tap to talk, or hold Space</p>
+          <div class="voice-level" id="voice-level"><i></i></div>
+          <div class="voice-controls">
+            <button class="btn primary talk" id="voice-talk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg><span id="voice-talk-label">Tap to talk</span></button>
+            <button class="btn" id="voice-stop" hidden>Stop</button>
+          </div>
+          <div class="voice-opts">
+            <label class="check"><input type="checkbox" id="voice-hands" /> Hands-free (talk any time; talking interrupts)</label>
+            <label class="field inline">Voice<select id="voice-pick"><option value="af_heart">af_heart</option></select></label>
+          </div>
+          <div class="voice-captions"><p class="you" id="voice-you"></p><p class="reply" id="voice-reply"></p></div>
+          <p class="credit center">Speech-to-text by Open WebUI's Whisper · voice by Kokoro · replies also appear in Chat with the current model</p>
+        </div>
+      </section>
+
+      <nav class="dock" aria-label="Sections">
+        <button class="active" data-go="chat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z" /></svg>Chat</button>
+        <button data-go="system"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></svg>System</button>
+        <button data-go="studio"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="1" /><rect x="13" y="3" width="8" height="8" rx="1" /><rect x="3" y="13" width="8" height="8" rx="1" /><path d="M15 14l5 3-5 3z" /></svg>Studio</button>
+        <span class="sep"></span>
+        <button class="voice" data-go="voice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 12h2M7 8v8M11 5v14M15 8v8M19 11v2" /></svg>Voice</button>
+      </nav>
+    </div>
+
+    <dialog class="sheet" id="settings">
+      <form method="dialog">
+        <h2>Settings</h2>
+        <label>Custom AI folder (holds start-all.ps1 and stop-all.ps1)<input id="stack-root" type="text" spellcheck="false" /></label>
+        <label class="check"><input id="keep-running" type="checkbox" /> Keep the AI services running when Prestige closes</label>
+        <h2 class="sub">Shared memory</h2>
+        <p>Prestige reads and writes the same memory as Open WebUI, so every model in both apps knows the same things about you.</p>
+        <p class="muted">To connect it: in Open WebUI open <b>Admin Panel → Settings → General</b> and turn on <b>Enable API Keys</b>, then <b>Settings → Account → API keys</b> → create a key and paste it here. It's saved only on this PC, in Prestige's app data folder.</p>
+        <label>Open WebUI API key<input id="owui-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" /></label>
+        <label>Open WebUI address<input id="owui-url" type="text" spellcheck="false" /></label>
+        <p class="muted" id="settings-test"></p>
+        <div class="acts">
+          <button class="btn" value="cancel">Cancel</button>
+          <button class="btn" id="test-key" type="button">Test</button>
+          <button class="btn primary" id="save-settings" value="save">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="sheet" id="about">
+      <form method="dialog">
+        <svg class="mark about-mark" viewBox="0 0 600 600" aria-hidden="true"><use href="#rg-mark" /></svg>
+        <h2 class="about-wm">Prestige</h2>
+        <p class="eyebrow">Version 0.4.0 · Phase 4: voice &amp; webcam</p>
+        <p>Developed by <b>Ryan B. Gyles</b> · R.G. Studios</p>
+        <p class="muted">Everything runs on this PC: Ollama, llama.cpp and Open WebUI's shared memory. Nothing is sent to the cloud.</p>
+        <div class="acts">
+          <button class="btn" id="replay-splash" type="button">Replay launch screen</button>
+          <button class="btn primary" value="close">Close</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="lightbox" id="lb" hidden role="dialog" aria-modal="true" aria-label="Render preview">
+      <div class="lb-inner">
+        <div class="lb-media" id="lb-media"></div>
+        <div class="lb-side">
+          <div class="lb-p" id="lb-p"></div>
+          <dl id="lb-dl"></dl>
+          <div class="acts">
+            <button class="btn" id="lb-reveal">Open in folder</button>
+            <button class="btn" id="lb-copy">Copy prompt</button>
+            <button class="btn" id="lb-animate">Animate (image → video)</button>
+            <button class="btn primary" id="lb-reuse">Reuse prompt</button>
+            <button class="btn" id="lb-close">Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <dialog class="sheet" id="fit">
+      <form method="dialog">
+        <h2>That won't fit in VRAM</h2>
+        <p id="fit-text"></p>
+        <div class="acts">
+          <button class="btn" value="cancel">Cancel</button>
+          <button class="btn" value="anyway">Load anyway</button>
+          <button class="btn primary" value="free">Unload the others, then load</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,49 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Prestige",
+  "version": "0.4.0",
+  "identifier": "com.rgstudios.prestige",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Prestige",
+        "width": 1280,
+        "height": 900,
+        "minWidth": 720,
+        "minHeight": 560,
+        "backgroundColor": "#0a0707",
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: asset: http://asset.localhost; media-src 'self' blob: asset: http://asset.localhost; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* http://localhost:*",
+      "assetProtocol": {
+        "enable": true,
+        "scope": []
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "publisher": "R.G. Studios",
+    "copyright": "© 2026 Ryan B. Gyles",
+    "category": "Productivity",
+    "shortDescription": "Local AI chat by R.G. Studios",
+    "longDescription": "Prestige by R.G. Studios, developed by Ryan B. Gyles. AI chat that runs entirely on this PC.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ]
+  }
+}
