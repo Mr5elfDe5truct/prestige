@@ -51,6 +51,7 @@ Everything below was made on the reference PC (RTX 3060 12 GB) from inside the a
 | | Feature | How |
 |---|---|---|
 | 💬 | **Chat with every local model** | Streaming from Ollama and the llama.cpp router, a model switcher with roles (Main · Fast · Vision · General · Code), tokens per second on every reply, history saved on your PC |
+| 🔧 | **Tools in chat** | Web search, page fetching, the Reddit / Hugging Face / GitHub scout, files, PowerShell and browser control from the workstation's tool server, switched per group. Anything that changes something asks first |
 | 🧠 | **Shared long-term memory** | The same memory as Open WebUI, so every model in both apps knows you. Say *"remember that …"* |
 | 📊 | **System dashboard** | Live GPU load, VRAM, temperature and power, Load/Unload for every model, a what's-in-VRAM bar, RAM and service status, and a warning before a model won't fit |
 | 🖼️ | **Studio** | A gallery of your real ComfyUI renders, with prompts read from the files, plus image generation and text-to-video with sound, with live progress |

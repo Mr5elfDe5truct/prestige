@@ -68,6 +68,7 @@
           </div>
           <div class="attachments" id="attachments" hidden></div>
           <form class="composer" id="composer">
+            <button type="button" class="icon-btn" id="composer-tools" aria-label="Tools" title="Tools"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z" /></svg><span class="count" id="tools-count"></span></button>
             <button type="button" class="icon-btn" id="composer-cam" aria-label="Attach a webcam frame" title="Attach a webcam frame"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7h4l2-3h6l2 3h4v12H3z" /><circle cx="12" cy="13" r="4" /></svg></button>
             <textarea id="prompt" rows="1" autocomplete="off" placeholder="Ask anything…" aria-label="Message"></textarea>
             <button type="button" class="icon-btn" id="stop" aria-label="Stop" title="Stop" hidden>
@@ -78,6 +79,12 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" /></svg>
             </button>
           </form>
+          <div class="tools-pop" id="tools-pop" hidden>
+            <div class="tools-head"><b>Tools</b><span class="credit">from the Workstation's tool server (:8200)</span></div>
+            <div id="tools-list"></div>
+            <p class="credit" id="tools-note"></p>
+            <p class="credit">Read-only lookups run straight away. Anything that changes files, runs commands, uses the camera or drives the browser asks you first.</p>
+          </div>
           <div class="cam-pop" id="cam-pop" hidden>
             <video id="cam-pop-video" muted playsinline></video>
             <p class="credit" id="cam-pop-note"></p>
@@ -207,7 +214,7 @@
       <form method="dialog">
         <svg class="mark about-mark" viewBox="0 0 600 600" aria-hidden="true"><use href="#rg-mark" /></svg>
         <h2 class="about-wm">Prestige</h2>
-        <p class="eyebrow">Version 0.4.2 · Phase 4: voice &amp; webcam</p>
+        <p class="eyebrow">Version 0.5.0 · Tools in chat</p>
         <p>Developed by <b>Ryan B. Gyles</b> · R.G. Studios</p>
         <p class="muted">Everything runs on this PC: Ollama, llama.cpp and Open WebUI's shared memory. Nothing is sent to the cloud.</p>
         <div class="acts">

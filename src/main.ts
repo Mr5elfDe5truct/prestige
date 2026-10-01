@@ -17,7 +17,8 @@ import { initStudio, showStudio } from "./studio";
 import { initVoice, showVoice } from "./voice";
 import { initCamera, showCameraPane } from "./camera";
 import { stopSpeaking } from "./speech";
-import { errMsg, nameFor, listModels, ping, streamChat, OLLAMA, LLAMA, type ChatMessage, type ModelInfo, type StreamStats } from "./backends";
+import { GROUPS, describeCall, loadTools, runTool, toolSpecs, type ToolDef, type ToolStep } from "./tools";
+import { errMsg, nameFor, supportsTools, listModels, ping, streamChat, OLLAMA, LLAMA, type ChatMessage, type ModelInfo, type StreamStats } from "./backends";
 import { addMemory, memoryContext, listMemories, rememberRequest, DEFAULT_OWUI, type MemoryConfig } from "./memory";
 
 const inTauri = "__TAURI_INTERNALS__" in window;
@@ -54,6 +55,7 @@ interface StoredMessage {
   note?: string;
   error?: boolean;
   images?: string[]; // webcam frames sent with a user message (base64 JPEG)
+  tools?: ToolStep[]; // tools the model used for this reply
 }
 interface Chat {
   id: string;
@@ -71,6 +73,7 @@ interface Settings {
   keepRunning?: boolean;
   voice?: string;
   camera?: string;
+  toolGroups?: string[]; // tool groups switched on (undefined = the defaults)
 }
 
 let settings: Settings = {};
@@ -277,6 +280,7 @@ function renderChat() {
         b.insertBefore(chip, $(".msg-body", b));
       }
       if (msg.thinking) setThinking(b, msg.thinking, false);
+      for (const step of msg.tools ?? []) renderToolStep(b, step);
       $(".msg-body", b).innerHTML = md(msg.content);
       $(".msg-stat", b).textContent = statText(msg.stats);
     }
@@ -337,6 +341,111 @@ async function renderHistory() {
 const SYSTEM_BASE =
   "You are Prestige, a private AI assistant running entirely on Ryan's own PC (RTX 3060, Windows 11). " +
   "Be direct and helpful. Use Markdown when it helps.";
+
+// ---------- tools ----------
+const TOOLS_HINT =
+  "You can call tools to look things up or act on this PC. Use a tool when it actually helps; otherwise just answer. " +
+  "For current events or facts you aren't sure of, use web_search, then fetch to read a page. " +
+  "Never invent tool results, and say which tool you used when it matters.";
+
+function enabledGroups(): Set<string> {
+  return new Set(settings.toolGroups ?? GROUPS.filter((g) => g.defaultOn).map((g) => g.id));
+}
+
+function renderToolStep(bubble: HTMLElement, step: ToolStep) {
+  let box = $(".tool-steps", bubble) as HTMLElement | null;
+  if (!box) {
+    box = document.createElement("div");
+    box.className = "tool-steps";
+    bubble.insertBefore(box, $(".msg-body", bubble));
+  }
+  const steps = Array.from(box.children) as (HTMLElement & { _step?: ToolStep })[];
+  let el = steps.find((x) => x._step === step) as (HTMLDetailsElement & { _step?: ToolStep }) | undefined;
+  if (!el) {
+    el = document.createElement("details") as HTMLDetailsElement & { _step?: ToolStep };
+    el._step = step;
+    el.className = "tool-step";
+    el.innerHTML = `<summary><span class="ico"></span><span class="what"></span><span class="ms"></span></summary><pre></pre>`;
+    box.appendChild(el);
+  }
+  const state = step.denied ? "denied" : step.ok === true ? "ok" : step.ok === false ? "fail" : "run";
+  el.dataset.state = state;
+  $(".ico", el).textContent = { ok: "✓", fail: "✗", denied: "⛔", run: "…" }[state]!;
+  $(".what", el).textContent = describeCall(step.name, step.args);
+  $(".ms", el).textContent = step.denied ? "not allowed" : step.ms != null ? `${(step.ms / 1000).toFixed(1)} s` : "running";
+  $("pre", el).textContent =
+    `Arguments\n${JSON.stringify(step.args ?? {}, null, 2)}` + (step.result != null ? `\n\nResult\n${step.result}` : "");
+  scrollDown();
+}
+
+/** An inline "Allow this?" card in the reply; resolves when the user decides (or the reply is stopped). */
+function confirmTool(bubble: HTMLElement, def: ToolDef, args: any, signal: AbortSignal): Promise<boolean> {
+  return new Promise((resolve) => {
+    const card = document.createElement("div");
+    card.className = "tool-confirm";
+    const group = GROUPS.find((g) => g.id === def.group)?.label ?? def.group;
+    card.innerHTML = `<div class="q">Allow <b></b>? <span class="grp"></span></div><pre></pre>
+      <div class="acts"><button class="btn" data-a="no">Don't allow</button><button class="btn primary" data-a="yes">Allow</button></div>`;
+    $("b", card).textContent = def.name;
+    $(".grp", card).textContent = `(${group})`;
+    $("pre", card).textContent = JSON.stringify(args ?? {}, null, 2);
+    bubble.insertBefore(card, $(".msg-body", bubble));
+    scrollDown(true);
+    const done = (ok: boolean) => {
+      card.remove();
+      resolve(ok);
+    };
+    card.querySelectorAll<HTMLButtonElement>("[data-a]").forEach((b) => b.addEventListener("click", () => done(b.dataset.a === "yes")));
+    signal.addEventListener("abort", () => done(false), { once: true });
+    toast(`${model_name(def)} wants to run ${def.name}. Allow it in the chat.`);
+  });
+}
+const model_name = (_: ToolDef) => current?.name ?? "The model";
+
+async function renderToolsMenu() {
+  const pop = $("#tools-pop");
+  const list = $("#tools-list");
+  const on = enabledGroups();
+  list.innerHTML = "";
+  const { tools, errors } = await loadTools();
+  for (const g of GROUPS) {
+    const n = tools.filter((t) => t.group === g.id).length;
+    const ask = tools.filter((t) => t.group === g.id && t.confirm).length;
+    const row = document.createElement("label");
+    row.className = "tool-group";
+    row.innerHTML = `<input type="checkbox" /><span><b></b><small></small></span>`;
+    const cb = $("input", row) as HTMLInputElement;
+    cb.checked = on.has(g.id);
+    cb.disabled = n === 0;
+    $("b", row).textContent = g.label;
+    $("small", row).textContent = n ? `${g.hint} · ${n} tools${ask ? `, ${ask} ask first` : ""}` : `${g.hint} · not available`;
+    cb.addEventListener("change", () => {
+      const next = enabledGroups();
+      cb.checked ? next.add(g.id) : next.delete(g.id);
+      settings.toolGroups = [...next];
+      saveSettings();
+      updateToolsButton();
+    });
+    list.appendChild(row);
+  }
+  const note = $("#tools-note");
+  const can = current ? await supportsTools(current) : false;
+  note.textContent = [
+    errors.length ? `Not reachable: ${errors.join("; ")}` : "",
+    current && !can ? `${current.name} can't call tools; pick Qwen3.6 35B, Qwen3.5 9B, Gemma 4 or Llama 3.1.` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  pop.hidden = false;
+}
+
+function updateToolsButton() {
+  const n = enabledGroups().size;
+  const btn = $("#composer-tools");
+  btn.classList.toggle("on", n > 0);
+  btn.title = n ? `Tools: ${n} group${n === 1 ? "" : "s"} on` : "Tools are off";
+  $("#tools-count").textContent = n ? String(n) : "";
+}
 
 // ---------- attachments (webcam frames for the next message) ----------
 let attachments: string[] = [];
@@ -457,27 +566,69 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
       last.appendChild(caret);
       scrollDown();
     };
-    const stats = await streamChat(
-      model,
-      messages,
-      {
-        onToken: (t) => {
-          reply.content += t;
-          opts.hooks?.onDelta?.(t);
-          if (!pending) {
-            pending = true;
-            requestAnimationFrame(paint);
-          }
-        },
-        onThinking: (t) => {
-          thinking += t;
-          setThinking(bubble, thinking, !reply.content);
-          if (!reply.content) body.innerHTML = `<span class="status-line">Thinking…</span>`;
-        },
-        onStats: (s) => (stat.textContent = statText(s, true)),
+    // Tools: offered when any group is on and the model can call functions.
+    const groups = enabledGroups();
+    let toolDefs: ToolDef[] = [];
+    let specs: any[] | undefined;
+    if (groups.size && (await supportsTools(model))) {
+      const t = await loadTools();
+      toolDefs = t.tools.filter((x) => groups.has(x.group));
+      specs = toolDefs.length ? toolSpecs(t.tools, groups) : undefined;
+      if (specs) messages[0].content += "\n\n" + TOOLS_HINT;
+    }
+    const handlers = {
+      onToken: (t: string) => {
+        reply.content += t;
+        opts.hooks?.onDelta?.(t);
+        if (!pending) {
+          pending = true;
+          requestAnimationFrame(paint);
+        }
       },
-      busy.signal,
-    );
+      onThinking: (t: string) => {
+        thinking += t;
+        setThinking(bubble, thinking, !reply.content);
+        if (!reply.content) body.innerHTML = `<span class="status-line">Thinking…</span>`;
+      },
+      onStats: (s: StreamStats) => (stat.textContent = statText(s, true)),
+    };
+    let stats: StreamStats | undefined;
+    for (let round = 0; round < 6; round++) {
+      const before = reply.content.length;
+      const res = await streamChat(model, messages, handlers, busy.signal, specs);
+      stats = res;
+      if (!res.toolCalls.length || !busy || busy.signal.aborted) break;
+      messages.push({ role: "assistant", content: reply.content.slice(before), tool_calls: res.toolCalls });
+      for (const call of res.toolCalls) {
+        const def = toolDefs.find((d) => d.name === call.name);
+        const step: ToolStep = { name: call.name, args: call.arguments };
+        (reply.tools ??= []).push(step);
+        renderToolStep(bubble, step);
+        let result: string;
+        if (!def) {
+          result = `There is no tool called ${call.name}.`;
+          step.ok = false;
+        } else if (def.confirm && !(await confirmTool(bubble, def, call.arguments, busy.signal))) {
+          step.denied = true;
+          result = "The user did not allow this action. Don't retry it; tell them what you would have done instead.";
+        } else {
+          if (!reply.content) body.innerHTML = `<span class="status-line">Running ${def.name}…</span>`;
+          const t0 = performance.now();
+          try {
+            result = await runTool(def, call.arguments);
+            step.ok = true;
+          } catch (e) {
+            result = `Error: ${errMsg(e)}`;
+            step.ok = false;
+          }
+          step.ms = Math.round(performance.now() - t0);
+        }
+        step.result = result.length > 2000 ? result.slice(0, 2000) + "…" : result;
+        renderToolStep(bubble, step);
+        messages.push({ role: "tool", content: result, tool_call_id: call.id, tool_name: call.name });
+      }
+      if (!reply.content) body.innerHTML = `<span class="status-line">Reading the results…</span>`;
+    }
     reply.stats = stats;
     reply.thinking = thinking || undefined;
     if (thinking) setThinking(bubble, thinking, false);
@@ -611,6 +762,15 @@ function wire() {
     }
   });
   ta.addEventListener("input", autosize);
+  $("#composer-tools").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const pop = $("#tools-pop");
+    if (pop.hidden) renderToolsMenu();
+    else pop.hidden = true;
+  });
+  document.addEventListener("click", (e) => {
+    if (!(e.target as HTMLElement).closest("#tools-pop, #composer-tools")) $("#tools-pop").hidden = true;
+  });
   $("#stop").addEventListener("click", () => {
     busy?.abort();
     stopSpeaking();
@@ -777,6 +937,7 @@ async function main() {
   });
   renderChat();
   await loadSettings();
+  updateToolsButton();
   // Like open-app.ps1: opening the app starts the workstation if it isn't running.
   await runSplash(true);
   renderHistory();

@@ -35,14 +35,35 @@ export interface ModelInfo {
   order: number;
 }
 
-export interface ChatMessage {
-  role: "system" | "user" | "assistant";
-  content: string;
-  images?: string[]; // base64 JPEGs, no data: prefix
+export interface ToolCall {
+  id: string;
+  name: string;
+  arguments: any;
 }
 
-/** llama.cpp's OpenAI API takes images as content parts; Ollama takes them as images[]. */
+export interface ChatMessage {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string;
+  images?: string[]; // base64 JPEGs, no data: prefix
+  tool_calls?: ToolCall[]; // assistant asked for these
+  tool_call_id?: string; // tool result for this call
+  tool_name?: string;
+}
+
+/** llama.cpp's OpenAI API takes images as content parts and tool calls with JSON-string arguments. */
 function toOpenAI(m: ChatMessage) {
+  if (m.role === "tool") return { role: "tool", tool_call_id: m.tool_call_id, content: m.content };
+  if (m.tool_calls?.length) {
+    return {
+      role: m.role,
+      content: m.content || null,
+      tool_calls: m.tool_calls.map((c) => ({
+        id: c.id,
+        type: "function",
+        function: { name: c.name, arguments: JSON.stringify(c.arguments ?? {}) },
+      })),
+    };
+  }
   if (!m.images?.length) return { role: m.role, content: m.content };
   return {
     role: m.role,
@@ -51,6 +72,24 @@ function toOpenAI(m: ChatMessage) {
       ...m.images.map((b64) => ({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${b64}` } })),
     ],
   };
+}
+
+/** Ollama takes images[] and tool calls with object arguments; tool results name their tool. */
+function toOllama(m: ChatMessage) {
+  if (m.role === "tool") return { role: "tool", content: m.content, tool_name: m.tool_name };
+  const out: any = { role: m.role, content: m.content };
+  if (m.images?.length) out.images = m.images;
+  if (m.tool_calls?.length) out.tool_calls = m.tool_calls.map((c) => ({ function: { name: c.name, arguments: c.arguments ?? {} } }));
+  return out;
+}
+
+function parseArgs(a: any) {
+  if (typeof a !== "string") return a ?? {};
+  try {
+    return JSON.parse(a || "{}");
+  } catch {
+    return { _raw: a };
+  }
 }
 
 export interface StreamStats {
@@ -188,6 +227,27 @@ export async function freeLlamaVram() {
   }
 }
 
+const toolCaps = new Map<string, boolean>();
+
+/** Whether a model can call functions: Ollama reports it in /api/show; Qwen3.6 on llama.cpp (jinja) can. */
+export async function supportsTools(m: ModelInfo): Promise<boolean> {
+  if (m.backend === "llama") return !/ui-tars/i.test(m.id);
+  if (toolCaps.has(m.id)) return toolCaps.get(m.id)!;
+  try {
+    const r = await http(`${OLLAMA}/api/show`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: m.id }),
+    });
+    const j = await r.json();
+    const ok = Array.isArray(j.capabilities) && j.capabilities.includes("tools");
+    toolCaps.set(m.id, ok);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 export interface StreamHandlers {
   onToken: (text: string) => void;
   onThinking: (text: string) => void;
@@ -218,7 +278,10 @@ export async function streamChat(
   messages: ChatMessage[],
   h: StreamHandlers,
   signal: AbortSignal,
-): Promise<StreamStats> {
+  tools?: any[],
+): Promise<StreamStats & { toolCalls: ToolCall[] }> {
+  const toolCalls: ToolCall[] = [];
+  const withTools = tools?.length ? { tools } : {};
   const start = performance.now();
   let first = 0;
   let chunks = 0;
@@ -235,7 +298,7 @@ export async function streamChat(
     const r = await http(`${OLLAMA}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: model.id, messages, stream: true, options: { num_ctx: NUM_CTX } }),
+      body: JSON.stringify({ model: model.id, messages: messages.map(toOllama), stream: true, options: { num_ctx: NUM_CTX }, ...withTools }),
       signal,
     });
     if (!r.ok || !r.body) throw new Error(`Ollama answered ${r.status}: ${(await r.text()).slice(0, 300)}`);
@@ -249,6 +312,9 @@ export async function streamChat(
       if (j.message?.content) {
         h.onToken(j.message.content);
         live();
+      }
+      for (const c of j.message?.tool_calls ?? []) {
+        toolCalls.push({ id: `call_${toolCalls.length}`, name: c.function?.name, arguments: parseArgs(c.function?.arguments) });
       }
       if (j.done && j.eval_count) {
         const secs = (j.eval_duration ?? 0) / 1e9;
@@ -265,10 +331,11 @@ export async function streamChat(
     const r = await http(`${LLAMA}/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: model.id, messages: messages.map(toOpenAI), stream: true, stream_options: { include_usage: true } }),
+      body: JSON.stringify({ model: model.id, messages: messages.map(toOpenAI), stream: true, stream_options: { include_usage: true }, ...withTools }),
       signal,
     });
     if (!r.ok || !r.body) throw new Error(`llama.cpp answered ${r.status}: ${(await r.text()).slice(0, 300)}`);
+    const partial: { id: string; name: string; args: string }[] = [];
     await readLines(r.body, (line) => {
       if (!line.startsWith("data:")) return;
       const data = line.slice(5).trim();
@@ -283,6 +350,14 @@ export async function streamChat(
       if (d?.content) {
         h.onToken(d.content);
         live();
+      }
+      // Tool calls stream in pieces: the name first, then the JSON arguments in fragments.
+      for (const tc of d?.tool_calls ?? []) {
+        const i = tc.index ?? 0;
+        partial[i] ??= { id: tc.id ?? `call_${i}`, name: "", args: "" };
+        if (tc.id) partial[i].id = tc.id;
+        if (tc.function?.name) partial[i].name += tc.function.name;
+        if (tc.function?.arguments) partial[i].args += tc.function.arguments;
       }
       const t = j.timings;
       if (t?.predicted_n) {
@@ -302,7 +377,9 @@ export async function streamChat(
         };
       }
     });
+    for (const p of partial) if (p?.name) toolCalls.push({ id: p.id, name: p.name, arguments: parseArgs(p.args) });
   }
   const secs = first ? (performance.now() - first) / 1000 : 0;
-  return final ?? { tokens: chunks, tps: secs ? chunks / secs : 0, seconds: (performance.now() - start) / 1000 };
+  const stats = final ?? { tokens: chunks, tps: secs ? chunks / secs : 0, seconds: (performance.now() - start) / 1000 };
+  return { ...stats, toolCalls };
 }
