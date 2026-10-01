@@ -84,7 +84,8 @@ Everything below was made on the reference PC (RTX 3060 12 GB) from inside the a
 ## 🚀 Install
 
 Grab **`Prestige_<version>_x64-setup.exe`** from the [Releases](https://github.com/Mr5elfDe5truct/prestige/releases/latest)
-page and run it. It installs for your user only, with no admin prompt, and adds Prestige to the Start Menu.
+page and run it. It installs to `C:\Program Files\RG Studios\Prestige` (Windows asks for admin approval once) and adds
+Prestige to the Start Menu and the desktop.
 
 ### 🛠️ Build from source
 
