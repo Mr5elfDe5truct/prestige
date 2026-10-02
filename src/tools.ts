@@ -2,6 +2,7 @@
 // app. Prestige turns their operations into function tools for the model, runs the calls the model
 // makes, and asks first before anything that changes files, runs commands, drives the browser,
 // uses the camera or starts a render.
+import { invoke } from "@tauri-apps/api/core";
 import { errMsg, http } from "./backends";
 
 export const MCPO = "http://127.0.0.1:8200";
@@ -15,6 +16,7 @@ export interface ToolGroup {
 
 export const GROUPS: ToolGroup[] = [
   { id: "web", label: "Web search", hint: "search the web (DuckDuckGo) and read pages", defaultOn: true },
+  { id: "history", label: "Past chats", hint: "look up what you talked about in earlier chats (stays on this PC)", defaultOn: true },
   { id: "workstation", label: "Workstation", hint: "Reddit / Hugging Face / GitHub scout, webcam snapshot, video jobs", defaultOn: true },
   { id: "filesystem", label: "Files", hint: "read and write files in your folders", defaultOn: false },
   { id: "desktop", label: "PowerShell", hint: "run commands and manage processes on this PC", defaultOn: false },
@@ -81,6 +83,21 @@ export async function loadTools(force = false): Promise<{ tools: ToolDef[]; erro
       },
       confirm: false,
     },
+    {
+      name: "search_past_chats",
+      group: "history",
+      server: "",
+      op: "search_past_chats",
+      description:
+        "Search the user's earlier Prestige conversations saved on this PC. Use it when they refer to something discussed before " +
+        "(\"what did we say about…\", \"last time\"). Returns matching chats with dates and the relevant passage.",
+      parameters: {
+        type: "object",
+        properties: { query: { type: "string", description: "A few distinctive words to look for (every word must appear)" } },
+        required: ["query"],
+      },
+      confirm: false,
+    },
   ];
   const errors: string[] = [];
   const seen = new Map<string, number>();
@@ -128,8 +145,38 @@ export function toolSpecs(tools: ToolDef[], enabled: Set<string>) {
 
 const MAX_RESULT = 8000;
 
+/** The chat being answered, so search_past_chats leaves it out. */
+export const toolContext = { chatId: "" };
+
+interface ChatHit {
+  title: string;
+  updated: number;
+  hits: number;
+  snippet: string;
+  role?: string;
+}
+
+async function searchPastChats(query: string): Promise<string> {
+  if (!("__TAURI_INTERNALS__" in window)) throw new Error("past chats are only saved in the desktop app");
+  const found = await invoke<ChatHit[]>("search_chats", { query, exclude: toolContext.chatId || null, width: 500 });
+  if (!found.length) return `No earlier chats mention "${query}". Try fewer or different words.`;
+  return found
+    .slice(0, 8)
+    .map((c) => {
+      const when = new Date(c.updated).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+      const who = c.role === "user" ? "the user said" : "you said";
+      return `• "${c.title}" (${when}, ${c.hits} matching message${c.hits === 1 ? "" : "s"})` + (c.snippet ? `\n  ${who}: ${c.snippet}` : "");
+    })
+    .join("\n");
+}
+
 /** Runs one tool call and returns its result as text for the model. */
 export async function runTool(t: ToolDef, args: any): Promise<string> {
+  if (t.op === "search_past_chats") {
+    const q = String(args?.query ?? "").trim();
+    if (!q) throw new Error("empty query");
+    return searchPastChats(q);
+  }
   if (t.op === "web_search") {
     const q = String(args?.query ?? "").trim();
     if (!q) throw new Error("empty query");

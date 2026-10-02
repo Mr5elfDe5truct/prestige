@@ -253,6 +253,94 @@ fn delete_chat(app: AppHandle, id: String) -> Result<(), String> {
     fs::remove_file(path).map_err(|e| e.to_string())
 }
 
+/// A piece of `text` around byte offset `at`, about `width` characters long, on one line.
+fn snippet(text: &str, at: usize, width: usize) -> String {
+    let before = width / 3;
+    let start = text[..at].char_indices().rev().nth(before).map(|(i, _)| i).unwrap_or(0);
+    let end = text[at..].char_indices().nth(width - before).map(|(i, _)| at + i).unwrap_or(text.len());
+    let mut s = text[start..end].split_whitespace().collect::<Vec<_>>().join(" ");
+    if start > 0 {
+        s.insert(0, '…');
+    }
+    if end < text.len() {
+        s.push('…');
+    }
+    s
+}
+
+/// Where `term` (already lowercase) first appears in `text`, as a byte offset into `text`.
+fn find_ci(text: &str, term: &str) -> Option<usize> {
+    // Lowercase one character at a time, remembering where each lowercase byte came from: lowercasing can
+    // change byte lengths (and even the number of characters) outside ASCII.
+    let mut lower = String::with_capacity(text.len());
+    let mut origin = Vec::with_capacity(text.len());
+    for (b, c) in text.char_indices() {
+        for l in c.to_lowercase() {
+            lower.push(l);
+            origin.resize(lower.len(), b);
+        }
+    }
+    lower.find(term).map(|i| origin[i])
+}
+
+/// Saved chats containing every word of `query` (in the title or any message), newest first,
+/// each with a snippet from the best-matching message and that message's index.
+#[tauri::command]
+fn search_chats(app: AppHandle, query: String, exclude: Option<String>, width: Option<usize>) -> Result<Vec<serde_json::Value>, String> {
+    let terms: Vec<String> = query.to_lowercase().split_whitespace().map(String::from).collect();
+    if terms.is_empty() {
+        return Ok(Vec::new());
+    }
+    let width = width.unwrap_or(140).clamp(40, 1200);
+    let dir = data_dir(&app, "chats")?;
+    let mut out = Vec::new();
+    for entry in fs::read_dir(dir).map_err(|e| e.to_string())?.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(&path) else { continue };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else { continue };
+        if exclude.as_deref().is_some_and(|x| v["id"].as_str() == Some(x)) {
+            continue;
+        }
+        let title = v["title"].as_str().unwrap_or("");
+        let msgs: Vec<&str> = v["messages"]
+            .as_array()
+            .map(|a| a.iter().map(|m| m["content"].as_str().unwrap_or("")).collect())
+            .unwrap_or_default();
+        let all = format!("{}\n{}", title, msgs.join("\n")).to_lowercase();
+        if !terms.iter().all(|t| all.contains(t.as_str())) {
+            continue;
+        }
+        // The message with the most of the words wins; ties go to the earliest.
+        let mut best: Option<(usize, usize, usize)> = None; // (words found, message index, byte offset)
+        let mut hits = 0;
+        for (i, m) in msgs.iter().enumerate() {
+            let found: Vec<usize> = terms.iter().filter_map(|t| find_ci(m, t)).collect();
+            if found.is_empty() {
+                continue;
+            }
+            hits += 1;
+            if best.map_or(true, |b| found.len() > b.0) {
+                best = Some((found.len(), i, *found.iter().min().unwrap()));
+            }
+        }
+        let (index, snip) = match best {
+            Some((_, i, at)) => (Some(i), snippet(msgs[i], at, width)),
+            None => (None, String::new()),
+        };
+        out.push(serde_json::json!({
+            "id": v["id"], "title": v["title"], "updated": v["updated"], "model": v["model"],
+            "hits": hits, "index": index, "snippet": snip,
+            "role": index.and_then(|i| v["messages"][i]["role"].as_str()),
+        }));
+    }
+    out.sort_by(|a, b| b["updated"].as_f64().unwrap_or(0.0).total_cmp(&a["updated"].as_f64().unwrap_or(0.0)));
+    out.truncate(50);
+    Ok(out)
+}
+
 fn read_settings(app: &AppHandle) -> serde_json::Value {
     data_dir(app, "")
         .ok()
@@ -307,6 +395,7 @@ pub fn run() {
             load_chat,
             save_chat,
             delete_chat,
+            search_chats,
             get_settings,
             save_settings,
             sys_memory,
@@ -331,4 +420,25 @@ pub fn run() {
                 stop_on_close(app);
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{find_ci, snippet};
+
+    #[test]
+    fn finds_words_regardless_of_case_and_accents() {
+        assert_eq!(find_ci("Hello Dragon theme", "dragon"), Some(6));
+        assert_eq!(find_ci("İstanbul trip, then Dragon", "dragon"), Some("İstanbul trip, then ".len()));
+        assert_eq!(find_ci("nothing here", "dragon"), None);
+    }
+
+    #[test]
+    fn snippets_stay_on_char_boundaries() {
+        let text = "é".repeat(200) + " the dragon theme " + &"ü".repeat(200);
+        let at = find_ci(&text, "dragon").unwrap();
+        let s = snippet(&text, at, 60);
+        assert!(s.contains("dragon") && s.starts_with('…') && s.ends_with('…'));
+        assert_eq!(snippet("short dragon", 6, 140), "short dragon");
+    }
 }

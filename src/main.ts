@@ -11,16 +11,16 @@ import "./styles.css";
 import markSvg from "./assets/rg-mark.svg?raw";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { initSystem, onGpu, showSystem, unloadAll, type Gpu } from "./system";
-import { initStudio, showStudio } from "./studio";
+import { allowRenders, cancelRender, initStudio, openRender, renderImage, showStudio } from "./studio";
 import { initVoice, showVoice } from "./voice";
 import { initCamera, showCameraPane } from "./camera";
-import { stopSpeaking } from "./speech";
+import { onSpeakingChange, speak, speakDelta, speakEnd, stopSpeaking } from "./speech";
 import { bestFor, capsFor, chipsHtml, supportsTools } from "./caps";
 import { initCatalog, openCatalog } from "./catalog";
 import { checkForUpdates, initUpdates } from "./updates";
-import { GROUPS, describeCall, loadTools, runTool, toolSpecs, type ToolDef, type ToolStep } from "./tools";
+import { GROUPS, describeCall, loadTools, runTool, toolContext, toolSpecs, type ToolDef, type ToolStep } from "./tools";
 import { errMsg, nameFor, listModels, ping, streamChat, OLLAMA, LLAMA, type ChatMessage, type ModelInfo, type StreamStats } from "./backends";
 import { addMemory, memoryContext, listMemories, rememberRequest, DEFAULT_OWUI, type MemoryConfig } from "./memory";
 
@@ -59,6 +59,7 @@ interface StoredMessage {
   error?: boolean;
   images?: string[]; // webcam frames sent with a user message (base64 JPEG)
   tools?: ToolStep[]; // tools the model used for this reply
+  render?: { path: string; prompt: string; seconds?: number }; // an image made from chat
 }
 interface Chat {
   id: string;
@@ -80,6 +81,7 @@ interface Settings {
   userName?: string; // what Prestige calls the user
   aboutUser?: string; // optional note every model sees
   welcomed?: boolean; // the first-run welcome has been shown
+  speakReplies?: boolean; // read every chat reply aloud as it streams
 }
 
 let settings: Settings = {};
@@ -270,13 +272,53 @@ function addUserBubble(text: string, images?: string[]) {
   return m;
 }
 
-function addAiBubble(modelName: string) {
+/** `text` gives what the speaker button reads aloud (the reply as it is now, while it streams). */
+function addAiBubble(modelName: string, text?: () => string) {
   const m = document.createElement("div");
   m.className = "msg ai";
   m.innerHTML = `<div class="msg-meta"><span class="msg-who"></span><span class="msg-stat"></span></div><div class="msg-body"></div>`;
   $(".msg-who", m).textContent = modelName;
+  if (text) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "msg-speak";
+    b.title = "Read aloud";
+    b.setAttribute("aria-label", "Read aloud");
+    b.innerHTML = SPEAKER_SVG;
+    b.addEventListener("click", () => {
+      const again = speakingBubble === m;
+      stopSpeaking();
+      if (again) return;
+      speak(text());
+      markSpeaking(m);
+    });
+    $(".msg-meta", m).appendChild(b);
+  }
   $("#thread").appendChild(m);
   return m;
+}
+
+const SPEAKER_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z" /><path class="w" d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" /></svg>`;
+
+// The reply being read aloud, so its speaker button shows as playing (click again to stop).
+let speakingBubble: HTMLElement | null = null;
+function markSpeaking(b: HTMLElement | null) {
+  speakingBubble?.classList.remove("speaking");
+  speakingBubble = b;
+  b?.classList.add("speaking");
+}
+
+/** An image made from chat: the picture (click to open it in the lightbox) and where it was saved. */
+function renderFigure(bubble: HTMLElement, r: NonNullable<StoredMessage["render"]>) {
+  const body = $(".msg-body", bubble);
+  body.innerHTML = `<figure class="chat-render"><button type="button" class="pic" title="Open (Animate, Reuse prompt, Open in folder)"><img alt="" /></button><figcaption></figcaption></figure>`;
+  const img = $("img", body) as HTMLImageElement;
+  img.alt = r.prompt;
+  if (inTauri) allowRenders().then(() => (img.src = convertFileSrc(r.path)));
+  img.addEventListener("error", () => body.querySelector("figure")?.classList.add("missing"), { once: true });
+  img.addEventListener("load", () => scrollDown());
+  $("figcaption", body).textContent = `${r.prompt}${r.seconds ? ` · ${r.seconds} s` : ""}`;
+  $(".pic", body).addEventListener("click", () => openRender(r.path));
 }
 
 function setThinking(bubble: HTMLElement, text: string, open: boolean) {
@@ -295,10 +337,12 @@ function setThinking(bubble: HTMLElement, text: string, open: boolean) {
 function renderChat() {
   const th = $("#thread");
   th.innerHTML = "";
-  for (const msg of chat.messages) {
-    if (msg.role === "user") addUserBubble(msg.content, msg.images);
+  markSpeaking(null);
+  chat.messages.forEach((msg, i) => {
+    let b: HTMLElement;
+    if (msg.role === "user") b = addUserBubble(msg.content, msg.images);
     else {
-      const b = addAiBubble(msg.model ?? "Assistant");
+      b = addAiBubble(msg.model ?? "Assistant", msg.error || msg.render ? undefined : () => msg.content);
       if (msg.error) b.classList.add("error");
       if (msg.note) {
         const chip = document.createElement("div");
@@ -308,10 +352,12 @@ function renderChat() {
       }
       if (msg.thinking) setThinking(b, msg.thinking, false);
       for (const step of msg.tools ?? []) renderToolStep(b, step);
-      $(".msg-body", b).innerHTML = md(msg.content);
+      if (msg.render) renderFigure(b, msg.render);
+      else $(".msg-body", b).innerHTML = md(msg.content);
       $(".msg-stat", b).textContent = statText(msg.stats);
     }
-  }
+    b.dataset.i = String(i);
+  });
   const empty = chat.messages.length === 0;
   $("#hello").hidden = !empty;
   $("#suggests").hidden = !empty;
@@ -324,6 +370,24 @@ function scrollDown(force = false) {
 }
 
 // ---------- history ----------
+interface ChatHit {
+  id: string;
+  title: string;
+  updated: number;
+  model?: string;
+  hits?: number;
+  index?: number | null;
+  snippet?: string;
+}
+
+/** Escapes `text` and wraps each search word in <mark>. */
+function highlight(text: string, terms: string[]) {
+  if (!terms.length) return escapeHtml(text);
+  const re = new RegExp(`(${terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "gi");
+  // split() with a capture group alternates plain text and matches.
+  return text.split(re).map((part, i) => (i % 2 ? `<mark>${escapeHtml(part)}</mark>` : escapeHtml(part))).join("");
+}
+
 async function persist() {
   chat.updated = Date.now();
   if (inTauri) await invoke("save_chat", { id: chat.id, chat });
@@ -336,20 +400,45 @@ async function renderHistory() {
     list.innerHTML = `<p class="muted" style="padding:10px">History is saved in the desktop app.</p>`;
     return;
   }
-  const items = await invoke<{ id: string; title: string; updated: number; model?: string }[]>("list_chats");
-  list.innerHTML = items.length ? "" : `<p class="muted" style="padding:10px;font-size:12.5px">No saved chats yet.</p>`;
+  // With words in the search box, the list is the chats that contain all of them, each with the matching passage.
+  const query = ($("#history-search") as HTMLInputElement).value.trim();
+  const items = query
+    ? await invoke<ChatHit[]>("search_chats", { query, exclude: null, width: 140 })
+    : await invoke<ChatHit[]>("list_chats");
+  if (query !== ($("#history-search") as HTMLInputElement).value.trim()) return; // a newer search is on its way
+  list.innerHTML = items.length
+    ? ""
+    : `<p class="muted" style="padding:10px;font-size:12.5px">${query ? "No chats mention that." : "No saved chats yet."}</p>`;
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
   for (const it of items) {
     const row = document.createElement("div");
     row.className = "history-item" + (it.id === chat.id ? " sel" : "");
     row.innerHTML = `<button class="open"><span class="t"></span><span class="m"></span></button><button class="del" aria-label="Delete chat" title="Delete">✕</button>`;
     $(".t", row).textContent = it.title || "Untitled";
-    $(".m", row).textContent = [new Date(it.updated).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }), it.model].filter(Boolean).join(" · ");
+    $(".m", row).textContent = [
+      new Date(it.updated).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }),
+      it.model,
+      query && it.hits ? `${it.hits} ${it.hits === 1 ? "match" : "matches"}` : "",
+    ].filter(Boolean).join(" · ");
+    if (it.snippet) {
+      const s = document.createElement("span");
+      s.className = "s";
+      s.innerHTML = highlight(it.snippet, terms);
+      $(".open", row).appendChild(s);
+    }
     $(".open", row).addEventListener("click", async () => {
       if (busy) return toast("Wait for the reply to finish first.");
       chat = await invoke<Chat>("load_chat", { id: it.id });
       renderChat();
       renderHistory();
       $("#history").hidden = true;
+      // Jump to the message that matched.
+      if (it.index != null) {
+        const hit = $(`#thread [data-i="${it.index}"]`);
+        hit?.scrollIntoView({ block: "center" });
+        hit?.classList.add("found");
+        setTimeout(() => hit?.classList.remove("found"), 2400);
+      }
     });
     $(".del", row).addEventListener("click", async () => {
       if (!confirm(`Delete "${it.title}"?`)) return;
@@ -480,6 +569,13 @@ async function renderToolsMenu() {
   pop.hidden = false;
 }
 
+function updateSpeakButton() {
+  const btn = $("#composer-speak");
+  btn.classList.toggle("on", !!settings.speakReplies);
+  btn.title = settings.speakReplies ? "Reading replies aloud (click to turn off)" : "Read replies aloud";
+  btn.setAttribute("aria-pressed", String(!!settings.speakReplies));
+}
+
 function updateToolsButton() {
   const n = enabledGroups().size;
   const btn = $("#composer-tools");
@@ -515,6 +611,75 @@ export interface ReplyHooks {
   onDone?: (ok: boolean) => void;
 }
 
+// ---------- images from chat ----------
+// "/image a lighthouse at dusk" (or /imagine, /img), or a plain ask like "draw me…" / "make an image of…".
+const IMAGE_CMD = /^\/(?:image|imagine|img)\b\s*/i;
+const IMAGE_ASK =
+  /^(?:please\s+)?(?:(?:can|could|would)\s+you\s+)?(?:(?:draw|paint|sketch)\s+me\s+|(?:draw|paint|sketch|make|generate|create|render)\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|photo|illustration|drawing|painting|wallpaper)\s+of\s+)/i;
+
+/** The image prompt in a message, "" for a bare /image, or null when it isn't an image request. */
+function imageRequest(text: string): string | null {
+  const m = text.match(IMAGE_CMD) ?? text.match(IMAGE_ASK);
+  return m ? text.slice(m[0].length).trim().replace(/[.?!]+$/, "") : null;
+}
+
+function setBusyUi(on: boolean) {
+  document.body.classList.toggle("busy", on);
+  $("#thinking").hidden = !on;
+  $("#stop").hidden = !on;
+  ($("#send") as HTMLButtonElement).disabled = on;
+}
+
+/** Makes an image with the Studio's Z-Image-Turbo workflow and shows it in the chat. */
+async function makeImage(text: string, prompt: string, hooks?: ReplyHooks) {
+  if (!inTauri) {
+    toast("Images are made in the desktop app.");
+    return hooks?.onDone?.(false);
+  }
+  if (chat.messages.length === 0) chat.title = text.replace(/\s+/g, " ").slice(0, 60);
+  chat.messages.push({ role: "user", content: text });
+  renderChat();
+  const reply: StoredMessage = { role: "assistant", content: "", model: "Z-Image-Turbo" };
+  const bubble = addAiBubble("Z-Image-Turbo");
+  const body = $(".msg-body", bubble);
+  body.innerHTML = `<div class="render-progress"><div class="progress"><i></i></div><span class="status-line">Starting…</span></div>`;
+  scrollDown(true);
+  busy = new AbortController();
+  busy.signal.addEventListener("abort", () => cancelRender(), { once: true });
+  setBusyUi(true);
+  const t0 = Date.now();
+  try {
+    const a = await renderImage(prompt, (pct, label) => {
+      ($(".progress", body) as HTMLElement | null)?.style.setProperty("--v", String(pct));
+      const l = $(".status-line", body);
+      if (l) l.textContent = label;
+    });
+    reply.render = { path: a.path, prompt, seconds: Math.round((Date.now() - t0) / 1000) };
+    // What chat models see in later turns.
+    reply.content = `(I made an image with Z-Image-Turbo for: "${prompt}". It's saved as ${a.name}.)`;
+    renderFigure(bubble, reply.render);
+  } catch (e) {
+    if (busy?.signal.aborted) reply.content = "*(stopped)*";
+    else {
+      reply.error = true;
+      reply.content = `Couldn't make the image: ${errMsg(e)}`;
+      bubble.classList.add("error");
+    }
+    body.innerHTML = md(reply.content);
+  } finally {
+    chat.messages.push(reply);
+    bubble.dataset.i = String(chat.messages.length - 1);
+    busy = null;
+    setBusyUi(false);
+    scrollDown();
+    persist().catch((e) => toast(`Couldn't save this chat: ${e}`, "warn"));
+    if (hooks) {
+      hooks.onDelta?.(reply.render ? "Here's your image." : "I couldn't make that image.");
+      hooks.onDone?.(!!reply.render);
+    }
+  }
+}
+
 async function send(text: string, opts: { images?: string[]; vision?: string; hooks?: ReplyHooks } = {}) {
   text = text.trim();
   if (!text && (opts.images?.length || attachments.length)) text = "What do you see in this picture?";
@@ -522,6 +687,13 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     opts.hooks?.onDone?.(false);
     return;
   }
+  const imagePrompt = opts.images?.length || attachments.length ? null : imageRequest(text);
+  if (imagePrompt === "") {
+    toast("Describe the image after /image, e.g. /image a lighthouse at dusk in the rain");
+    opts.hooks?.onDone?.(false);
+    return;
+  }
+  if (imagePrompt) return makeImage(text, imagePrompt, opts.hooks);
   const images = opts.images ?? (attachments.length ? attachments : undefined);
   if (!opts.images) {
     attachments = [];
@@ -546,8 +718,12 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
   renderChat();
 
   const reply: StoredMessage = { role: "assistant", content: "", model: model.name };
-  const bubble = addAiBubble(model.name);
+  const bubble = addAiBubble(model.name, () => reply.content);
   const body = $(".msg-body", bubble);
+  // "Speak replies" reads typed chats aloud too (voice chats already speak through their own hooks).
+  const speakIt = !!settings.speakReplies && !opts.hooks;
+  if (speakIt) stopSpeaking();
+  toolContext.chatId = chat.id;
   const stat = $(".msg-stat", bubble);
   body.innerHTML = `<span class="status-line">Preparing…</span>`;
   scrollDown(true);
@@ -621,6 +797,10 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
       onToken: (t: string) => {
         reply.content += t;
         opts.hooks?.onDelta?.(t);
+        if (speakIt) {
+          if (speakingBubble !== bubble) markSpeaking(bubble);
+          speakDelta(t);
+        }
         if (!pending) {
           pending = true;
           requestAnimationFrame(paint);
@@ -691,6 +871,8 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     body.innerHTML = md(reply.content);
     stat.textContent = statText(reply.stats);
     chat.messages.push(reply);
+    bubble.dataset.i = String(chat.messages.length - 1);
+    if (speakIt && !busy?.signal.aborted) speakEnd();
     busy = null;
     document.body.classList.remove("busy");
     $("#thinking").hidden = true;
@@ -819,6 +1001,38 @@ function wire() {
   $("#stop").addEventListener("click", () => {
     busy?.abort();
     stopSpeaking();
+  });
+  // Image button: starts the message with /image, so whatever is typed next becomes the picture.
+  $("#composer-image").addEventListener("click", () => {
+    const v = ta.value.replace(IMAGE_CMD, "");
+    ta.value = `/image ${v}`;
+    autosize();
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+  });
+  $("#composer-speak").addEventListener("click", () => {
+    settings.speakReplies = !settings.speakReplies || undefined;
+    saveSettings();
+    updateSpeakButton();
+    if (!settings.speakReplies) stopSpeaking();
+    toast(settings.speakReplies ? "Replies will be read aloud." : "Replies won't be read aloud.");
+  });
+  // Searching past chats: type in the box at the top of the Past chats panel (Ctrl+K opens it).
+  let searchTimer = 0;
+  $("#history-search").addEventListener("input", () => {
+    clearTimeout(searchTimer);
+    searchTimer = window.setTimeout(renderHistory, 180);
+  });
+  document.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+      e.preventDefault();
+      go("chat");
+      $("#history").hidden = false;
+      renderHistory();
+      const s = $("#history-search") as HTMLInputElement;
+      s.focus();
+      s.select();
+    } else if (e.key === "Escape" && !$("#history").hidden) $("#history").hidden = true;
   });
   $$("[data-suggest]").forEach((b) => b.addEventListener("click", () => send(b.textContent ?? "")));
 
@@ -984,6 +1198,10 @@ async function main() {
     root: () => settings.stackRoot ?? null,
     freeGpu: () => unloadAll(),
     cameraPane: (on: boolean) => showCameraPane(on),
+    show: () => go("studio"),
+  });
+  onSpeakingChange((on) => {
+    if (!on) markSpeaking(null);
   });
   // The Voice screen's avatar is an inline copy of the mark, so its eye can follow the audio.
   $("#voice-mark").innerHTML = markSvg;
@@ -1021,6 +1239,7 @@ async function main() {
   renderChat();
   await loadSettings();
   updateToolsButton();
+  updateSpeakButton();
   // Like open-app.ps1: opening the app starts the workstation if it isn't running.
   await runSplash(true);
   // Check for a new version shortly after start, then every 6 hours while Prestige stays open.

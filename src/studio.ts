@@ -1,6 +1,7 @@
 // Studio screen: the real renders in ComfyUI's output folder, and a create bar that queues the
 // stack's own ComfyUI workflows (Z-Image-Turbo for images, LTX-2.3 for video with sound, Wan 2.2 to
-// animate an image). The Webcam mode shows the camera pane from camera.ts.
+// animate an image). The Webcam mode shows the camera pane from camera.ts. Chat uses renderImage()
+// to make an image with the same Z-Image-Turbo workflow and show it inline.
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { errMsg, http } from "./backends";
@@ -64,6 +65,8 @@ interface Deps {
   root: () => string | null;
   freeGpu: () => Promise<void>;
   cameraPane: (on: boolean) => void;
+  /** Switches to the Studio screen (from the lightbox when it was opened in chat). */
+  show: () => void;
 }
 
 let deps: Deps;
@@ -73,9 +76,12 @@ let mode: GenMode | "webcam" = "image";
 let animateSrc: Asset | null = null;
 const workflows: Partial<Record<GenMode, any>> = {};
 const clientId = `prestige-${Math.random().toString(36).slice(2, 10)}`;
-let job: { id: string; mode: GenMode; started: number; prompt: string; nodes: Record<string, string> } | null = null;
+let job: { id: string; mode: GenMode; started: number; prompt: string; nodes: Record<string, string>; outputs: string[] } | null = null;
+let starting = false; // freeing the GPU / uploading, before ComfyUI has the job
 let freshName = "";
-let loaded = false;
+let workflowsLoaded: Promise<void> | null = null;
+// A render started from chat: it hears the progress and gets the finished file.
+let waiter: { progress: (pct: number, label: string) => void; resolve: (a: Asset) => void; reject: (e: Error) => void } | null = null;
 
 const age = (ms: number) => {
   const s = (Date.now() - ms) / 1000;
@@ -123,11 +129,12 @@ export function initStudio(d: Deps) {
 export async function showStudio(on: boolean) {
   if (!on) return;
   if (mode === "webcam") deps.cameraPane(true);
-  if (!loaded) {
-    loaded = true;
-    await loadWorkflows();
-  }
+  await ensureWorkflows();
   await refresh();
+}
+
+function ensureWorkflows() {
+  return (workflowsLoaded ??= loadWorkflows());
 }
 
 async function loadWorkflows() {
@@ -155,7 +162,7 @@ function renderCreate() {
   const wf = workflows[gm];
   const m = MODES[gm];
   $("#create").classList.toggle("disabled", !wf);
-  ($("#gen-btn") as HTMLButtonElement).disabled = !wf || !!job;
+  ($("#gen-btn") as HTMLButtonElement).disabled = !wf || !!job || starting;
   ($("#gen-btn") as HTMLButtonElement).textContent = gm === "animate" ? "Animate" : "Generate";
   ($("#gen-prompt") as HTMLInputElement).placeholder =
     gm === "image"
@@ -291,6 +298,7 @@ function openLightbox(a: Asset) {
   ($("#lb-copy") as HTMLButtonElement).disabled = !a.prompt;
   ($("#lb-animate") as HTMLButtonElement).hidden = a.kind !== "image" || !workflows.animate;
   $("#lb-animate").onclick = () => {
+    deps.show();
     animateSrc = a;
     mode = "video";
     ($("#gen-prompt") as HTMLInputElement).value = "";
@@ -302,6 +310,7 @@ function openLightbox(a: Asset) {
   $("#lb-reveal").onclick = () => invoke("reveal", { path: a.path }).catch((e) => deps.toast(errMsg(e), "warn"));
   $("#lb-copy").onclick = () => copy(a.prompt || "");
   $("#lb-reuse").onclick = () => {
+    deps.show();
     ($("#gen-prompt") as HTMLInputElement).value = a.prompt || "";
     animateSrc = null;
     mode = a.kind === "video" ? "video" : "image";
@@ -338,18 +347,28 @@ async function generate() {
   const prompt = ($("#gen-prompt") as HTMLInputElement).value.trim();
   if (mode === "webcam") return;
   const gm: GenMode = mode === "video" && animateSrc ? "animate" : mode;
+  if (!prompt || !workflows[gm] || job || starting) return;
+  try {
+    await queue(gm, prompt, gm === "animate" ? animateSrc : null);
+  } catch (e) {
+    deps.toast(`Couldn't start the render: ${errMsg(e)}`, "warn");
+  }
+}
+
+/** Sends one of the workflows to ComfyUI. Throws if it couldn't be queued; progress then arrives by websocket. */
+async function queue(gm: GenMode, prompt: string, src: Asset | null) {
   const wf = workflows[gm];
-  if (!prompt || !wf || job) return;
+  if (!wf) throw new Error(`workflows\\${MODES[gm].file} wasn't found`);
+  if (job || starting) throw new Error("Studio is already rendering something; wait for it to finish");
   const m = MODES[gm];
-  const src = gm === "animate" ? animateSrc : null;
   const graph = structuredClone(wf);
   graph[m.promptNode].inputs.text = prompt;
   graph[m.seed[0]].inputs[m.seed[1]] = Math.floor(Math.random() * 2 ** 32);
   const nodes: Record<string, string> = {};
   for (const [id, n] of Object.entries<any>(graph)) nodes[id] = n.class_type;
 
-  const btn = $("#gen-btn") as HTMLButtonElement;
-  btn.disabled = true;
+  starting = true;
+  renderCreate();
   setJob(0, "Freeing the GPU (unloading chat models)…");
   $("#job").hidden = false;
   try {
@@ -370,21 +389,26 @@ async function generate() {
       const why = body.error?.message || body.node_errors ? JSON.stringify(body.node_errors ?? body.error).slice(0, 200) : `HTTP ${r.status}`;
       throw new Error(why);
     }
-    job = { id: body.prompt_id, mode: gm, started: Date.now(), prompt, nodes };
+    job = { id: body.prompt_id, mode: gm, started: Date.now(), prompt, nodes, outputs: [] };
     setJob(2, "Queued. Loading models…");
     render();
   } catch (e) {
-    const msg = errMsg(e);
-    deps.toast(`Couldn't start the render: ${msg === "not reachable" ? "ComfyUI isn't running" : msg}`, "warn");
     $("#job").hidden = true;
     job = null;
+    const msg = errMsg(e);
+    throw new Error(msg === "not reachable" ? "ComfyUI isn't running" : msg);
+  } finally {
+    starting = false;
     renderCreate();
   }
 }
 
+let jobPct = 0;
 function setJob(pct: number, label: string) {
+  jobPct = pct;
   ($("#job .progress") as HTMLElement).style.setProperty("--v", String(pct));
   $("#job-label").textContent = label;
+  waiter?.progress(pct, label);
 }
 
 function onComfy(msg: any) {
@@ -399,30 +423,81 @@ function onComfy(msg: any) {
       break;
     case "executing":
       if (d.node == null) finish(true);
-      else $("#job-label").textContent = `${job.nodes[d.node] ?? d.node} · ${elapsed}`;
+      else setJob(jobPct, `${job.nodes[d.node] ?? d.node} · ${elapsed}`);
+      break;
+    case "executed":
+      // The files a save node wrote, so the finished render can be found by name.
+      for (const list of Object.values<any>(d.output ?? {}))
+        if (Array.isArray(list)) for (const f of list) if (f?.filename && f.type !== "temp") job.outputs.push(f.filename);
       break;
     case "execution_success":
       finish(true);
       break;
+    case "execution_interrupted":
+      finish(false, "stopped");
+      break;
     case "execution_error":
-      deps.toast(`The render failed: ${d.exception_message ?? "ComfyUI reported an error"}`, "warn");
-      finish(false);
+      if (!waiter) deps.toast(`The render failed: ${d.exception_message ?? "ComfyUI reported an error"}`, "warn");
+      finish(false, d.exception_message ?? "ComfyUI reported an error");
       break;
   }
 }
 
-async function finish(ok: boolean) {
+async function finish(ok: boolean, why = "") {
   if (!job) return;
-  const took = Math.round((Date.now() - job.started) / 1000);
+  const done = job;
+  const took = Math.round((Date.now() - done.started) / 1000);
   job = null;
+  const w = waiter;
+  waiter = null;
   $("#job").hidden = true;
   renderCreate();
   const before = new Set(items.map((a) => a.path));
   await refresh();
-  const added = items.find((a) => !before.has(a.path));
+  const added = items.find((a) => done.outputs.includes(a.name)) ?? items.find((a) => !before.has(a.path));
   if (ok && added) {
     freshName = added.name;
     render();
-    deps.toast(`Done in ${took} s: ${added.name}`);
-  }
+    if (w) w.resolve(added);
+    else deps.toast(`Done in ${took} s: ${added.name}`);
+  } else w?.reject(new Error(why || "ComfyUI finished, but no new file appeared in its output folder"));
 }
+
+// ---------- used from chat ----------
+/** Makes one image with Z-Image-Turbo and resolves with the saved file. */
+export async function renderImage(prompt: string, progress: (pct: number, label: string) => void): Promise<Asset> {
+  await ensureWorkflows();
+  return new Promise<Asset>((resolve, reject) => {
+    if (job || starting) return reject(new Error("Studio is already rendering something; wait for it to finish"));
+    waiter = { progress, resolve, reject };
+    queue("image", prompt, null).catch((e) => {
+      waiter = null;
+      reject(e);
+    });
+  });
+}
+
+/** Stops the current render (ComfyUI's Cancel). */
+export async function cancelRender() {
+  await http(`${COMFY}/interrupt`, { method: "POST" }).catch(() => {});
+}
+
+let allowed: Promise<void> | null = null;
+/** Lets the webview show files from ComfyUI's output folder (needed before showing a saved render in chat). */
+export function allowRenders() {
+  return (allowed ??= refresh());
+}
+
+/** Opens a render in the lightbox (Animate, Reuse prompt and Open in folder work from there). */
+export async function openRender(path: string) {
+  await allowRenders();
+  let a = items.find((x) => x.path === path);
+  if (!a) {
+    await refresh();
+    a = items.find((x) => x.path === path);
+  }
+  if (a) openLightbox(a);
+  else deps.toast("That image isn't in ComfyUI's output folder any more.", "warn");
+}
+
+export type { Asset };

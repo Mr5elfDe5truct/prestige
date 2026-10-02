@@ -52,6 +52,9 @@ Everything below was made on the reference PC (RTX 3060 12 GB) from inside the a
 |---|---|---|
 | 💬 | **Chat with every local model** | Streaming from Ollama and the llama.cpp router, a model switcher with roles (Main · Fast · Vision · General · Code), tokens per second on every reply, history saved on your PC |
 | 🔧 | **Tools in chat** | Web search, page fetching, the Reddit / Hugging Face / GitHub scout, files, PowerShell and browser control from the workstation's tool server, switched per group. Anything that changes something asks first |
+| 🖌️ | **Images in chat** | Type `/image a lighthouse at dusk` (or *"draw me…"*, *"make an image of…"*, or click the picture button) and Z-Image-Turbo paints it right in the conversation, with live progress. Click the picture to animate it, reuse the prompt or open its folder |
+| 🔊 | **Replies read aloud** | A speaker button on every reply, or switch on **Read replies aloud** in the message box and Kokoro reads each answer as it streams. The mic button talks to it |
+| 🔎 | **Search past chats** | Search box in **Past chats** (Ctrl+K) finds every conversation containing your words, shows the passage and jumps to it. Models can search them too (*"what did we decide about…"*), via the **Past chats** tool |
 | 🏷️ | **Know your models** | Every model shows what it can do (🔧 tools, 👁 vision, 🧠 thinking, 💻 code, 🔓 uncensored) and whether it fits in VRAM, detected automatically for anything you add |
 | 🛒 | **Model catalog** | 27 models checked to run on a 12 GB card, with what each is good at. One click downloads into the workstation and it's ready to pick |
 | 🧠 | **Shared long-term memory** | The same memory as Open WebUI, so every model in both apps knows you. Say *"remember that …"* |
@@ -124,8 +127,8 @@ Mic or camera blocked? Check **Windows Settings → Privacy & security → Micro
 
 | Part | What |
 |---|---|
-| `src/` (TypeScript + Vite) | `main.ts` chat · `system.ts` dashboard · `studio.ts` gallery and generation · `voice.ts` + `speech.ts` voice · `camera.ts` webcam · `memory.ts` shared memory · `backends.ts` Ollama / llama.cpp |
-| `src-tauri/` (Rust + Tauri 2) | GPU and RAM readouts, chat files and settings, start/stop scripts, gallery thumbnails, ComfyUI websocket and uploads, mic and camera permissions |
+| `src/` (TypeScript + Vite) | `main.ts` chat (and images, read-aloud and search in it) · `system.ts` dashboard · `studio.ts` gallery and generation · `voice.ts` + `speech.ts` voice · `camera.ts` webcam · `tools.ts` chat tools · `memory.ts` shared memory · `backends.ts` Ollama / llama.cpp |
+| `src-tauri/` (Rust + Tauri 2) | GPU and RAM readouts, chat files, chat search and settings, start/stop scripts, gallery thumbnails, ComfyUI websocket and uploads, mic and camera permissions |
 | Look | Dragon red & gold · fonts Rye, Oxanium, IBM Plex Sans and JetBrains Mono, bundled from Fontsource (SIL OFL) |
 
 ## 🔗 Part of the Custom AI Workstation
