@@ -1,7 +1,7 @@
 // Studio screen: the real renders in ComfyUI's output folder, and a create bar that queues the
-// stack's own ComfyUI workflows (Z-Image-Turbo for images, LTX-2.3 for video with sound, Wan 2.2 to
-// animate an image). The Webcam mode shows the camera pane from camera.ts. Chat uses renderImage()
-// to make an image with the same Z-Image-Turbo workflow and show it inline.
+// stack's own ComfyUI workflows (Qwen-Image-2.1 or Z-Image-Turbo for images, Qwen-Image-2.1 to edit an
+// image, LTX-2.5 for video with sound, Wan 2.2 to animate an image). The Webcam mode shows the camera
+// pane from camera.ts. Chat uses renderImage() to make an image the same way and show it inline.
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { errMsg, http } from "./backends";
@@ -23,32 +23,60 @@ interface Asset {
   height?: number | null;
 }
 
-type GenMode = "image" | "video" | "animate";
+type GenMode = "image" | "fast" | "edit" | "video" | "animate";
 
 interface Mode {
   file: string;
   label: string;
   promptNode: string;
+  promptKey?: string; // the prompt input's name, "text" unless set
   seed: [string, string]; // node id, input name
   opts: string[];
-  imageNode?: string; // LoadImage node for image-to-video
+  imageNode?: string; // LoadImage node for image-to-video and edits
+  fallback?: Mode; // used when this workflow file isn't there
 }
 
 // The prompt and seed nodes in the stack's exported API workflows (workflows\*.api.json).
+const ZIMAGE: Mode = {
+  file: "z-image-turbo.api.json",
+  label: "Z-Image-Turbo",
+  promptNode: "4",
+  seed: ["7", "seed"],
+  opts: ["1024 × 1024", "8 steps", "about 30–45 s"],
+};
 const MODES: Record<GenMode, Mode> = {
   image: {
-    file: "z-image-turbo.api.json",
-    label: "Z-Image-Turbo",
+    file: "qwen-image-21.api.json",
+    label: "Qwen-Image-2.1",
     promptNode: "4",
-    seed: ["7", "seed"],
-    opts: ["Z-Image-Turbo", "1024 × 1024", "8 steps", "about 30–45 s"],
+    promptKey: "prompt",
+    seed: ["6", "seed"],
+    opts: ["1024 × 1024", "20 steps", "best with text and signs", "about 1 min"],
+    fallback: ZIMAGE,
+  },
+  fast: ZIMAGE,
+  edit: {
+    file: "qwen-image-21-edit.api.json",
+    label: "Qwen-Image-2.1 Edit",
+    promptNode: "4",
+    promptKey: "prompt",
+    seed: ["6", "seed"],
+    imageNode: "9",
+    opts: ["keeps the image's size", "about 1–2 min"],
   },
   video: {
-    file: "ltx23-t2v-distilled.api.json",
-    label: "LTX-2.3",
+    file: "ltx25-t2v-distilled.api.json",
+    label: "LTX-2.5",
     promptNode: "5",
     seed: ["16", "noise_seed"],
-    opts: ["LTX-2.3 distilled", "768 × 512", "4 s with sound", "about 6 min"],
+    opts: ["distilled", "768 × 512", "4 s with sound", "about 6 min"],
+    fallback: {
+      file: "ltx23-t2v-distilled.api.json",
+      label: "LTX-2.3",
+      promptNode: "5",
+      seed: ["16", "noise_seed"],
+      opts: ["distilled", "768 × 512", "4 s with sound", "about 6 min"],
+    },
   },
   animate: {
     file: "wan22-i2v-4step.api.json",
@@ -56,9 +84,17 @@ const MODES: Record<GenMode, Mode> = {
     promptNode: "6",
     seed: ["11", "noise_seed"],
     imageNode: "9",
-    opts: ["Wan 2.2 I2V 4-step", "832 × 480", "5 s, no sound", "about 10 min"],
+    opts: ["I2V 4-step", "832 × 480", "5 s, no sound", "about 10 min"],
   },
 };
+// The Image mode's model: Qwen-Image-2.1, or Z-Image-Turbo when "fast" is picked (remembered).
+let imageMode: "image" | "fast" = (() => {
+  try {
+    return localStorage.getItem("studio.imageModel") === "fast" ? "fast" : "image";
+  } catch {
+    return "image";
+  }
+})();
 
 interface Deps {
   toast: (msg: string, kind?: string) => void;
@@ -72,9 +108,11 @@ interface Deps {
 let deps: Deps;
 let items: Asset[] = [];
 let filter: "all" | "image" | "video" = "all";
-let mode: GenMode | "webcam" = "image";
-let animateSrc: Asset | null = null;
+let mode: "image" | "video" | "webcam" = "image";
+// The image being animated (Video mode) or edited (Image mode), picked from the lightbox.
+let srcAsset: Asset | null = null;
 const workflows: Partial<Record<GenMode, any>> = {};
+const active: Partial<Record<GenMode, Mode>> = {}; // the Mode (or fallback) each workflow was loaded from
 const clientId = `prestige-${Math.random().toString(36).slice(2, 10)}`;
 let job: { id: string; mode: GenMode; started: number; prompt: string; nodes: Record<string, string>; outputs: string[] } | null = null;
 let starting = false; // freeing the GPU / uploading, before ComfyUI has the job
@@ -103,13 +141,20 @@ export function initStudio(d: Deps) {
   $$(".modes [data-mode]").forEach((b) =>
     b.addEventListener("click", () => {
       mode = b.dataset.mode as typeof mode;
-      if (mode !== "video") animateSrc = null;
+      srcAsset = null;
       renderCreate();
     }),
   );
   $("#animate-clear").addEventListener("click", () => {
-    animateSrc = null;
-    mode = "image";
+    srcAsset = null;
+    renderCreate();
+  });
+  $("#gen-opts").addEventListener("click", (e) => {
+    if (!(e.target as HTMLElement).closest(".opt.pick")) return;
+    imageMode = imageMode === "fast" ? "image" : "fast";
+    try {
+      localStorage.setItem("studio.imageModel", imageMode);
+    } catch {}
     renderCreate();
   });
   $("#gen-form").addEventListener("submit", (e) => {
@@ -138,40 +183,62 @@ function ensureWorkflows() {
 }
 
 async function loadWorkflows() {
-  for (const m of ["image", "video", "animate"] as const) {
-    try {
-      workflows[m] = await invoke("read_workflow", { root: deps.root(), name: MODES[m].file });
-    } catch {
-      workflows[m] = null;
+  for (const gm of Object.keys(MODES) as GenMode[]) {
+    workflows[gm] = null;
+    for (let m: Mode | undefined = MODES[gm]; m; m = m.fallback) {
+      try {
+        workflows[gm] = await invoke("read_workflow", { root: deps.root(), name: m.file });
+        active[gm] = m;
+        break;
+      } catch {}
     }
   }
   renderCreate();
 }
 
+/** The workflow the create bar runs now. */
+function currentMode(): GenMode {
+  if (mode === "video") return srcAsset ? "animate" : "video";
+  if (srcAsset) return "edit";
+  return workflows[imageMode] ? imageMode : "fast";
+}
+
+const modeOf = (gm: GenMode) => active[gm] ?? MODES[gm];
+
 function renderCreate() {
   const webcam = mode === "webcam";
-  const gm: GenMode = mode === "video" && animateSrc ? "animate" : mode === "webcam" ? "image" : mode;
+  const gm = currentMode();
   $$(".modes [data-mode]").forEach((x) => x.classList.toggle("on", x.dataset.mode === mode));
   $("#gen-form").hidden = webcam;
   $("#gen-opts").hidden = webcam;
   $("#cam-pane").hidden = !webcam;
   deps?.cameraPane(webcam);
-  $("#animate-src").hidden = gm !== "animate";
-  if (animateSrc) ($("#animate-img") as HTMLImageElement).src = convertFileSrc(animateSrc.path);
+  $("#animate-src").hidden = webcam || !srcAsset;
+  if (srcAsset) {
+    ($("#animate-img") as HTMLImageElement).src = convertFileSrc(srcAsset.path);
+    $("#animate-what").textContent = `${gm === "edit" ? "Editing" : "Animating"} this image with ${modeOf(gm).label}`;
+  }
   if (webcam) return;
   const wf = workflows[gm];
-  const m = MODES[gm];
+  const m = modeOf(gm);
   $("#create").classList.toggle("disabled", !wf);
   ($("#gen-btn") as HTMLButtonElement).disabled = !wf || !!job || starting;
-  ($("#gen-btn") as HTMLButtonElement).textContent = gm === "animate" ? "Animate" : "Generate";
+  ($("#gen-btn") as HTMLButtonElement).textContent = gm === "animate" ? "Animate" : gm === "edit" ? "Edit" : "Generate";
   ($("#gen-prompt") as HTMLInputElement).placeholder =
-    gm === "image"
+    gm === "image" || gm === "fast"
       ? "Describe an image… e.g. a red and gold dragon coiled around a glowing GPU"
-      : gm === "animate"
-        ? "Describe the motion… e.g. slow push-in, snow falling, warm light flickering"
-        : "Describe a 4-second scene, including any sound…";
+      : gm === "edit"
+        ? "Say what to change… e.g. make it night, swap the car for a horse, remove the sign"
+        : gm === "animate"
+          ? "Describe the motion… e.g. slow push-in, snow falling, warm light flickering"
+          : "Describe a 4-second scene, including any sound…";
+  // In Image mode the model chip switches between Qwen-Image-2.1 and the faster Z-Image-Turbo.
+  const canPick = (gm === "image" || gm === "fast") && workflows.fast && workflows.image && active.image !== ZIMAGE;
+  const chip = canPick
+    ? `<button type="button" class="opt pick" title="Switch image model"><b>${m.label}</b> ⇄</button>`
+    : `<span class="opt"><b>${m.label}</b></span>`;
   $("#gen-opts").innerHTML = wf
-    ? m.opts.map((o) => `<span class="opt"><b>${o}</b></span>`).join("")
+    ? chip + m.opts.map((o) => `<span class="opt"><b>${o}</b></span>`).join("")
     : `<span class="opt">workflows\\${m.file} not found, so this mode is off</span>`;
 }
 
@@ -297,9 +364,19 @@ function openLightbox(a: Asset) {
   }
   ($("#lb-copy") as HTMLButtonElement).disabled = !a.prompt;
   ($("#lb-animate") as HTMLButtonElement).hidden = a.kind !== "image" || !workflows.animate;
+  ($("#lb-edit") as HTMLButtonElement).hidden = a.kind !== "image" || !workflows.edit;
+  $("#lb-edit").onclick = () => {
+    deps.show();
+    srcAsset = a;
+    mode = "image";
+    ($("#gen-prompt") as HTMLInputElement).value = "";
+    closeLightbox();
+    renderCreate();
+    $("#gen-prompt").focus();
+  };
   $("#lb-animate").onclick = () => {
     deps.show();
-    animateSrc = a;
+    srcAsset = a;
     mode = "video";
     ($("#gen-prompt") as HTMLInputElement).value = "";
     closeLightbox();
@@ -312,7 +389,7 @@ function openLightbox(a: Asset) {
   $("#lb-reuse").onclick = () => {
     deps.show();
     ($("#gen-prompt") as HTMLInputElement).value = a.prompt || "";
-    animateSrc = null;
+    srcAsset = null;
     mode = a.kind === "video" ? "video" : "image";
     renderCreate();
     closeLightbox();
@@ -346,10 +423,10 @@ async function copy(text: string) {
 async function generate() {
   const prompt = ($("#gen-prompt") as HTMLInputElement).value.trim();
   if (mode === "webcam") return;
-  const gm: GenMode = mode === "video" && animateSrc ? "animate" : mode;
+  const gm = currentMode();
   if (!prompt || !workflows[gm] || job || starting) return;
   try {
-    await queue(gm, prompt, gm === "animate" ? animateSrc : null);
+    await queue(gm, prompt, gm === "animate" || gm === "edit" ? srcAsset : null);
   } catch (e) {
     deps.toast(`Couldn't start the render: ${errMsg(e)}`, "warn");
   }
@@ -360,9 +437,9 @@ async function queue(gm: GenMode, prompt: string, src: Asset | null) {
   const wf = workflows[gm];
   if (!wf) throw new Error(`workflows\\${MODES[gm].file} wasn't found`);
   if (job || starting) throw new Error("Studio is already rendering something; wait for it to finish");
-  const m = MODES[gm];
+  const m = modeOf(gm);
   const graph = structuredClone(wf);
-  graph[m.promptNode].inputs.text = prompt;
+  graph[m.promptNode].inputs[m.promptKey ?? "text"] = prompt;
   graph[m.seed[0]].inputs[m.seed[1]] = Math.floor(Math.random() * 2 ** 32);
   const nodes: Record<string, string> = {};
   for (const [id, n] of Object.entries<any>(graph)) nodes[id] = n.class_type;
@@ -464,13 +541,19 @@ async function finish(ok: boolean, why = "") {
 }
 
 // ---------- used from chat ----------
-/** Makes one image with Z-Image-Turbo and resolves with the saved file. */
+/** The model chat images are made with: the Studio's Image mode pick. */
+export async function imageModelLabel() {
+  await ensureWorkflows();
+  return modeOf(workflows[imageMode] ? imageMode : "fast").label;
+}
+
+/** Makes one image with the Studio's image model and resolves with the saved file. */
 export async function renderImage(prompt: string, progress: (pct: number, label: string) => void): Promise<Asset> {
   await ensureWorkflows();
   return new Promise<Asset>((resolve, reject) => {
     if (job || starting) return reject(new Error("Studio is already rendering something; wait for it to finish"));
     waiter = { progress, resolve, reject };
-    queue("image", prompt, null).catch((e) => {
+    queue(workflows[imageMode] ? imageMode : "fast", prompt, null).catch((e) => {
       waiter = null;
       reject(e);
     });
