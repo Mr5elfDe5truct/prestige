@@ -72,13 +72,14 @@ let generation = 0;
 let pendingText = "";
 let inFence = false;
 let voice = DEFAULT_VOICE;
-let onState: (speaking: boolean) => void = () => {};
+const listeners: ((speaking: boolean) => void)[] = [];
+const onState = (speaking: boolean) => listeners.forEach((fn) => fn(speaking));
 
 export function setVoice(v: string) {
   voice = v || DEFAULT_VOICE;
 }
 export function onSpeakingChange(fn: (speaking: boolean) => void) {
-  onState = fn;
+  listeners.push(fn);
 }
 export const isSpeaking = () => !!playing || queue.length > 0;
 
