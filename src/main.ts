@@ -630,7 +630,7 @@ function setBusyUi(on: boolean) {
   ($("#send") as HTMLButtonElement).disabled = on;
 }
 
-/** Makes an image with the Studio's image model (Qwen-Image-2.1 or Z-Image-Turbo) and shows it in the chat. */
+/** Makes an image with the Studio's image model (Qwen-Image-2.1 or its turbo) and shows it in the chat. */
 async function makeImage(text: string, prompt: string, hooks?: ReplyHooks) {
   if (!inTauri) {
     toast("Images are made in the desktop app.");

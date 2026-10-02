@@ -1,7 +1,7 @@
 // Studio screen: the real renders in ComfyUI's output folder, and a create bar that queues the
-// stack's own ComfyUI workflows (Qwen-Image-2.1 or Z-Image-Turbo for images, Qwen-Image-2.1 to edit an
-// image, LTX-2.5 for video with sound, Wan 2.2 to animate an image). The Webcam mode shows the camera
-// pane from camera.ts. Chat uses renderImage() to make an image the same way and show it inline.
+// stack's own ComfyUI workflows (Qwen-Image-2.1 or its 4-step turbo for images, Z-Image-Turbo without
+// them, Qwen-Image-2.1 to edit an image, LTX-2.5 for video with sound, Wan 2.2 to animate an image).
+// The Webcam mode shows the camera pane from camera.ts. Chat uses renderImage() to make an image the same way and show it inline.
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { errMsg, http } from "./backends";
@@ -51,10 +51,18 @@ const MODES: Record<GenMode, Mode> = {
     promptNode: "4",
     promptKey: "prompt",
     seed: ["6", "seed"],
-    opts: ["1024 × 1024", "20 steps", "best with text and signs", "about 1 min"],
+    opts: ["1024 × 1024", "20 steps", "best with text and signs", "about 1.5 min"],
     fallback: ZIMAGE,
   },
-  fast: ZIMAGE,
+  fast: {
+    file: "qwen-image-21-turbo.api.json",
+    label: "Qwen-Image-2.1 Turbo",
+    promptNode: "4",
+    promptKey: "prompt",
+    seed: ["6", "seed"],
+    opts: ["1024 × 1024", "4 steps", "about 25 s"],
+    fallback: ZIMAGE,
+  },
   edit: {
     file: "qwen-image-21-edit.api.json",
     label: "Qwen-Image-2.1 Edit",
@@ -87,7 +95,7 @@ const MODES: Record<GenMode, Mode> = {
     opts: ["I2V 4-step", "832 × 480", "5 s, no sound", "about 10 min"],
   },
 };
-// The Image mode's model: Qwen-Image-2.1, or Z-Image-Turbo when "fast" is picked (remembered).
+// The Image mode's model: Qwen-Image-2.1, or its 4-step turbo when "fast" is picked (remembered).
 let imageMode: "image" | "fast" = (() => {
   try {
     return localStorage.getItem("studio.imageModel") === "fast" ? "fast" : "image";
@@ -232,7 +240,7 @@ function renderCreate() {
         : gm === "animate"
           ? "Describe the motion… e.g. slow push-in, snow falling, warm light flickering"
           : "Describe a 4-second scene, including any sound…";
-  // In Image mode the model chip switches between Qwen-Image-2.1 and the faster Z-Image-Turbo.
+  // In Image mode the model chip switches between Qwen-Image-2.1 and its faster turbo (or Z-Image-Turbo).
   const canPick = (gm === "image" || gm === "fast") && workflows.fast && workflows.image && active.image !== ZIMAGE;
   const chip = canPick
     ? `<button type="button" class="opt pick" title="Switch image model"><b>${m.label}</b> ⇄</button>`
