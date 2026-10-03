@@ -373,6 +373,7 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
         // Voice and webcam: Prestige's own page may use the mic and camera without WebView2 asking every time.
         .on_permission_request(|_, kind| {
             use tauri::webview::{PermissionKind, PermissionResponse};
@@ -403,6 +404,10 @@ pub fn run() {
             studio::gallery_list,
             studio::thumbnail,
             studio::reveal,
+            studio::open_render,
+            studio::delete_render,
+            studio::copy_render,
+            studio::save_render_as,
             studio::read_workflow,
             studio::comfy_listen,
             studio::comfy_upload,
