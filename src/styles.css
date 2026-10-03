@@ -353,7 +353,8 @@ body[data-voice="recording"] .voice-status, body[data-voice="speaking"] .voice-s
 .voice-captions p { margin: 0; }
 .voice-captions .you { color: var(--muted); font-size: 13px; }
 .voice-captions .reply { font-size: 15px; max-height: 9em; overflow-y: auto; }
-.credit.center { text-align: center; }
+.credit.center, .note.center { text-align: center; }
+#voice-engine-note { max-width: 560px; margin: -6px 0 0; }
 @media (max-width: 900px) { .cam-pane { grid-template-columns: 1fr; } }
 
 /* ---------- 0.5: tools ---------- */

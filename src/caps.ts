@@ -125,7 +125,10 @@ async function llamaCaps(m: ModelInfo): Promise<Caps> {
     maxContext: g.context,
     params,
     sizeGB: size,
-    fit: fitFor(size, !!arg("--n-cpu-moe") || !!arg("--cpu-moe")),
+    // The router puts every layer on the GPU, so a llama.cpp model without experts in RAM that loads at all fits
+    // (Qwen3.8 27B Q2_K_P is 10.7 GB plus a small context).
+    fit: !arg("--n-cpu-moe") && !arg("--cpu-moe") && size && size <= VRAM_GB - 1 ? "gpu"
+      : fitFor(size, !!arg("--n-cpu-moe") || !!arg("--cpu-moe")),
   };
 }
 

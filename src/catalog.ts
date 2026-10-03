@@ -20,7 +20,13 @@ interface Entry {
   sizeGB: number; // download size
   license: string;
   ollama?: string; // tag to pull
-  gguf?: { id: string; repo: string; file: string; mmproj?: string; mmprojAs?: string; nCpuMoe?: number };
+  gguf?: {
+    id: string; repo: string; file: string; mmproj?: string; mmprojAs?: string; nCpuMoe?: number;
+    /** Extra llama-server settings for its llama-models.ini section, e.g. ["c", "20480"]. */
+    options?: [string, string][];
+    /** Fits the GPU whole (a dense model, not experts in RAM). */
+    onGpu?: boolean;
+  };
 }
 
 export const CATALOG: Entry[] = [
@@ -88,6 +94,17 @@ export const CATALOG: Entry[] = [
   { name: "GLM-4.7 Flash", maker: "Z.ai", sizeGB: 18.31, license: "MIT", caps: ["tools", "thinking"],
     gguf: { id: "glm-4.7-flash", repo: "unsloth/GLM-4.7-Flash-GGUF", file: "GLM-4.7-Flash-Q4_K_M.gguf", nCpuMoe: 30 },
     about: "Z.ai's fast mixture-of-experts model: strong at agents, coding and tool use." },
+  // Dense 27B at 2-bit (HauhauCS's K_P quants keep the important tensors at higher precision), so it fits the GPU whole:
+  // ~30-38 tok/s with its built-in MTP drafting, where Q3/IQ3 with layers in RAM ran at 5-8 tok/s. The vision
+  // projector runs on the CPU to leave room for 20k of context.
+  { name: "Qwen3.8 27B Uncensored", maker: "Qwen · HauhauCS", sizeGB: 11.6, license: "Apache 2.0", caps: ["tools", "vision", "thinking", "uncensored"],
+    gguf: { id: "qwen3.8-27b-uncensored", repo: "HauhauCS/Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-MTP-GGUF",
+            file: "Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-Q2_K_P.gguf",
+            mmproj: "mmproj-Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-BF16.gguf", onGpu: true,
+            options: [["no-mmproj-offload", "true"], ["spec-type", "draft-mtp"], ["spec-draft-n-max", "2"],
+                      ["cache-type-k", "q8_0"], ["cache-type-v", "q8_0"], ["c", "20480"],
+                      ["temp", "1.0"], ["top-p", "0.95"], ["top-k", "20"], ["min-p", "0.0"]] },
+    about: "The strongest reasoner that runs here: thinks before answering, sees pictures, never refuses. About 30 tok/s, fully on the GPU." },
 ];
 
 // Installed catalog models show their catalog name in the model menu.
@@ -173,7 +190,7 @@ function expectedCaps(e: Entry): Caps {
     computerUse: false,
     embedding: false,
     sizeGB: e.sizeGB,
-    fit: fitFor(e.sizeGB, !!e.gguf?.nCpuMoe),
+    fit: e.gguf?.onGpu ? "gpu" : fitFor(e.sizeGB, !!e.gguf?.nCpuMoe),
   };
 }
 
@@ -181,7 +198,7 @@ function render() {
   const grid = $("#cat-grid");
   grid.innerHTML = "";
   const list = CATALOG.filter((e) => {
-    if (filter === "fits" && fitFor(e.sizeGB, !!e.gguf) !== "gpu") return false;
+    if (filter === "fits" && !e.gguf?.onGpu && fitFor(e.sizeGB, !!e.gguf) !== "gpu") return false;
     if (filter !== "all" && filter !== "fits" && !e.caps.includes(filter)) return false;
     if (query && !`${e.name} ${e.maker} ${e.about} ${e.caps.join(" ")}`.toLowerCase().includes(query)) return false;
     return true;
@@ -357,6 +374,7 @@ async function onDownload(p: { id: string; done: number; total: number; state: s
       mmproj: job.files[1]?.dest ?? null,
       nCpuMoe: g.nCpuMoe ?? null,
       note: `${job.entry.name} (${g.repo}), added from the Prestige model catalog.`,
+      options: g.options ?? null,
     });
     setBusy(k, 100, "Restarting llama.cpp…");
     await invoke("restart_llama", { root: deps.root() });

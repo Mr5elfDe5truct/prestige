@@ -1,6 +1,6 @@
 [package]
 name = "prestige"
-version = "0.11.0"
+version = "0.12.0"
 description = "Prestige by R.G. Studios: a local AI desktop app"
 authors = ["Ryan B. Gyles"]
 license = "MIT"

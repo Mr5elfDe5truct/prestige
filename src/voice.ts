@@ -2,7 +2,7 @@
 // The avatar (the gold top-hat mark) follows the real audio: the eye and gold/red rings track Kokoro's
 // output level while speaking, and a calmer ring tracks the mic while listening.
 import {
-  closeMic, isSpeaking, listVoices, micLevel, micRms, onSpeakingChange, openMic, outputLevel, record,
+  cloneVoice, closeMic, isSpeaking, isVox, listVoices, micLevel, micRms, onSpeakingChange, openMic, outputLevel, record,
   setVoice, speakDelta, speakEnd, stopSpeaking, transcribe, DEFAULT_VOICE,
 } from "./speech";
 import { errMsg } from "./backends";
@@ -93,6 +93,29 @@ export function initVoice(d: Deps) {
     const v = ($("#voice-pick") as HTMLSelectElement).value;
     setVoice(v);
     deps.setVoiceSetting(v);
+    engineNote();
+  });
+  $("#voice-clone").addEventListener("click", () => ($("#voice-clone-file") as HTMLInputElement).click());
+  $("#voice-clone-file").addEventListener("change", async () => {
+    const input = $("#voice-clone-file") as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+    const suggested = file.name.replace(/\.[^.]+$/, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 24);
+    const name = window.prompt("Name for this voice:", suggested)?.trim();
+    if (!name) return;
+    try {
+      const id = await cloneVoice(name, file);
+      deps.toast(`Added the voice "${id}". It speaks with VoxCPM2.`);
+      await loadVoices(true);
+      const v = `vox:${id}`;
+      ($("#voice-pick") as HTMLSelectElement).value = v;
+      setVoice(v);
+      deps.setVoiceSetting(v);
+      engineNote();
+    } catch (e) {
+      deps.toast(`Couldn't add that voice: ${errMsg(e)}`, "warn");
+    }
   });
 
   // Composer mic: talk once, the transcript is sent, and the reply is spoken.
@@ -115,19 +138,41 @@ export async function showVoice(on: boolean) {
   }
 }
 
-async function loadVoices() {
+async function loadVoices(force = false) {
   const sel = $("#voice-pick") as HTMLSelectElement;
-  if (sel.options.length > 1) return;
-  const voices = await listVoices();
+  if (sel.options.length > 1 && !force) return;
+  const { kokoro, vox } = await listVoices();
   const cur = deps.getVoice() ?? DEFAULT_VOICE;
   sel.innerHTML = "";
-  for (const v of voices.length ? voices : [cur]) {
-    const o = document.createElement("option");
-    o.value = v;
-    o.textContent = v;
-    sel.appendChild(o);
-  }
+  const group = (label: string, values: string[], text: (v: string) => string) => {
+    if (!values.length) return;
+    const g = document.createElement("optgroup");
+    g.label = label;
+    for (const v of values) {
+      const o = document.createElement("option");
+      o.value = v;
+      o.textContent = text(v);
+      g.appendChild(o);
+    }
+    sel.appendChild(g);
+  };
+  group("Kokoro · quick", kokoro.length ? kokoro : isVox(cur) ? [DEFAULT_VOICE] : [cur], (v) => v);
+  group("VoxCPM2 · expressive", vox.map((v) => `vox:${v}`), (v) => v.slice(4));
+  // A saved voice that isn't offered right now (its server is off) falls back to Kokoro's default.
   sel.value = cur;
+  if (sel.value !== cur) sel.value = DEFAULT_VOICE;
+  setVoice(sel.value);
+  ($("#voice-clone") as HTMLButtonElement).hidden = !vox.length;
+  engineNote();
+}
+
+function engineNote() {
+  const note = $("#voice-engine-note");
+  const vox = isVox(($("#voice-pick") as HTMLSelectElement).value);
+  note.hidden = !vox;
+  note.textContent = vox
+    ? "VoxCPM2 speaks once the reply is written. It needs about 6 GB of GPU memory, so the chat model steps aside while it talks and reloads for your next message."
+    : "";
 }
 
 // ---------- recording ----------

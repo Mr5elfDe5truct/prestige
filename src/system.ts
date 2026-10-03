@@ -298,7 +298,13 @@ async function unloadRow(r: Row) {
 /** Frees the GPU for something else (ComfyUI, or another model). */
 export async function unloadAll(except?: string) {
   await refreshModels();
-  await Promise.all(rows.filter((r) => r.loaded && r.key !== except).map((r) => unloadRow(r).catch(() => {})));
+  // The voice server's Whisper and VoxCPM2 too (they reload on their next use).
+  const voice = http("http://127.0.0.1:8890/v1/audio/unload", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  }).catch(() => {});
+  await Promise.all([voice, ...rows.filter((r) => r.loaded && r.key !== except).map((r) => unloadRow(r).catch(() => {}))]);
 }
 
 async function unload(r: Row) {
@@ -405,6 +411,7 @@ const SERVICES: [string, string, string][] = [
   ["Open WebUI", ":8080", "http://127.0.0.1:8080/api/config"],
   ["ComfyUI", ":8188", "http://127.0.0.1:8188/system_stats"],
   ["Kokoro voice", ":8880", "http://127.0.0.1:8880/v1/models"],
+  ["Voice server · Whisper, VoxCPM2", ":8890", "http://127.0.0.1:8890/health"],
 ];
 
 async function refreshServices() {
