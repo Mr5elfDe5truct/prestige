@@ -174,7 +174,9 @@ export function initStudio(d: Deps) {
     if (e.target === $("#lb")) closeLightbox();
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !$("#lb").hidden) closeLightbox();
+    if ($("#lb").hidden || (e.target as HTMLElement)?.closest?.("input, textarea, dialog")) return;
+    if (e.key === "Escape") closeLightbox();
+    else if (e.key === "Delete" && lbAsset) deleteRender(lbAsset);
   });
   listen<any>("comfy", (e) => onComfy(e.payload));
 }
@@ -330,15 +332,21 @@ function render() {
       });
     }
     fig.addEventListener("click", () => openLightbox(a));
+    fig.addEventListener("contextmenu", (e) => showMenu(e, a));
     g.appendChild(fig);
     io.observe(fig);
   }
 }
 
 // ---------- lightbox ----------
+let lbAsset: Asset | null = null;
+
 function openLightbox(a: Asset) {
+  closeMenu();
+  lbAsset = a;
   const media = $("#lb-media");
   media.innerHTML = "";
+  media.oncontextmenu = (e) => showMenu(e, a);
   if (a.kind === "video") {
     const v = document.createElement("video");
     v.src = convertFileSrc(a.path);
@@ -373,36 +381,14 @@ function openLightbox(a: Asset) {
   ($("#lb-copy") as HTMLButtonElement).disabled = !a.prompt;
   ($("#lb-animate") as HTMLButtonElement).hidden = a.kind !== "image" || !workflows.animate;
   ($("#lb-edit") as HTMLButtonElement).hidden = a.kind !== "image" || !workflows.edit;
-  $("#lb-edit").onclick = () => {
-    deps.show();
-    srcAsset = a;
-    mode = "image";
-    ($("#gen-prompt") as HTMLInputElement).value = "";
-    closeLightbox();
-    renderCreate();
-    $("#gen-prompt").focus();
-  };
-  $("#lb-animate").onclick = () => {
-    deps.show();
-    srcAsset = a;
-    mode = "video";
-    ($("#gen-prompt") as HTMLInputElement).value = "";
-    closeLightbox();
-    renderCreate();
-    $("#gen-prompt").focus();
-  };
+  $("#lb-edit").onclick = () => startFrom(a, "image");
+  $("#lb-animate").onclick = () => startFrom(a, "video");
   ($("#lb-reuse") as HTMLButtonElement).disabled = !a.prompt;
-  $("#lb-reveal").onclick = () => invoke("reveal", { path: a.path }).catch((e) => deps.toast(errMsg(e), "warn"));
+  $("#lb-reveal").onclick = () => revealFile(a);
   $("#lb-copy").onclick = () => copy(a.prompt || "");
-  $("#lb-reuse").onclick = () => {
-    deps.show();
-    ($("#gen-prompt") as HTMLInputElement).value = a.prompt || "";
-    srcAsset = null;
-    mode = a.kind === "video" ? "video" : "image";
-    renderCreate();
-    closeLightbox();
-    $("#gen-prompt").focus();
-  };
+  $("#lb-reuse").onclick = () => reusePrompt(a);
+  $("#lb-save").onclick = () => saveAs(a);
+  $("#lb-delete").onclick = () => deleteRender(a);
   $("#lb").hidden = false;
 }
 
@@ -411,9 +397,160 @@ function closeLightbox() {
   v?.pause();
   $("#lb-media").innerHTML = "";
   $("#lb").hidden = true;
+  lbAsset = null;
 }
 
-async function copy(text: string) {
+// ---------- actions on a render (lightbox buttons and the right-click menu) ----------
+/** Edit (Image mode) or animate (Video mode) this image: the create bar takes it as the source. */
+function startFrom(a: Asset, m: "image" | "video") {
+  deps.show();
+  srcAsset = a;
+  mode = m;
+  ($("#gen-prompt") as HTMLInputElement).value = "";
+  closeLightbox();
+  renderCreate();
+  $("#gen-prompt").focus();
+}
+
+function reusePrompt(a: Asset) {
+  deps.show();
+  ($("#gen-prompt") as HTMLInputElement).value = a.prompt || "";
+  srcAsset = null;
+  mode = a.kind === "video" ? "video" : "image";
+  renderCreate();
+  closeLightbox();
+  $("#gen-prompt").focus();
+}
+
+const revealFile = (a: Asset) => invoke("reveal", { path: a.path }).catch((e) => deps.toast(errMsg(e), "warn"));
+
+/** Runs a Studio command on a render's file and toasts the outcome. */
+async function fileAction(cmd: string, a: Asset, args: Record<string, unknown>, done?: string) {
+  try {
+    await invoke(cmd, { root: deps.root(), path: a.path, ...args });
+    if (done) deps.toast(done);
+  } catch (e) {
+    deps.toast(errMsg(e), "warn");
+  }
+}
+
+async function saveAs(a: Asset) {
+  try {
+    const dest = await invoke<string | null>("save_render_as", { root: deps.root(), path: a.path });
+    if (dest) deps.toast(`Saved a copy as ${dest}`);
+  } catch (e) {
+    deps.toast(`Couldn't save it: ${errMsg(e)}`, "warn");
+  }
+}
+
+/** Asks first, then moves the file to the Recycle Bin and takes it out of the gallery and chats. */
+async function deleteRender(a: Asset) {
+  closeMenu();
+  const dlg = $("#del-confirm") as HTMLDialogElement;
+  $("#del-name").textContent = a.name;
+  $("#del-kind").textContent = a.kind;
+  dlg.returnValue = "";
+  dlg.showModal();
+  await new Promise((r) => dlg.addEventListener("close", r, { once: true }));
+  if (dlg.returnValue !== "delete") return;
+  try {
+    await invoke("delete_render", { root: deps.root(), path: a.path, mtime: a.mtime });
+  } catch (e) {
+    deps.toast(`Couldn't delete ${a.name}: ${errMsg(e)}`, "warn");
+    return;
+  }
+  if (lbAsset?.path === a.path) closeLightbox();
+  items = items.filter((x) => x.path !== a.path);
+  render();
+  // Chat messages that showed it say it's gone instead of a broken picture.
+  $$<HTMLElement>("figure.chat-render").forEach((f) => f.dataset.path === a.path && f.classList.add("missing"));
+  deps.toast(`Moved ${a.name} to the Recycle Bin.`);
+}
+
+// ---------- right-click menu ----------
+type MenuItem = { label: string; run: () => void; key?: string; danger?: boolean } | "-";
+let menuEl: HTMLElement | null = null;
+
+function closeMenu() {
+  menuEl?.remove();
+  menuEl = null;
+}
+
+function showMenu(e: MouseEvent, a: Asset) {
+  e.preventDefault();
+  e.stopPropagation();
+  closeMenu();
+  const image = a.kind === "image";
+  const list: MenuItem[] = [
+    { label: image ? "Open" : "Play", run: () => fileAction("open_render", a, {}), key: "in default app" },
+    { label: "Show info", run: () => openLightbox(a) },
+    { label: "Open in folder", run: () => revealFile(a) },
+    "-",
+    ...(image && workflows.edit ? [{ label: "Edit with Qwen-Image…", run: () => startFrom(a, "image") }] : []),
+    ...(image && workflows.animate ? [{ label: "Animate (image → video)…", run: () => startFrom(a, "video") }] : []),
+    ...(a.prompt ? [{ label: "Reuse prompt", run: () => reusePrompt(a) }] : []),
+    "-",
+    ...(image ? [{ label: "Copy image", run: () => fileAction("copy_render", a, { asImage: true }, "Image copied.") }] : []),
+    { label: "Copy file", run: () => fileAction("copy_render", a, { asImage: false }, "File copied. Paste it into a folder or a chat app."), key: "to paste elsewhere" },
+    ...(a.prompt ? [{ label: "Copy prompt", run: () => copy(a.prompt || "") }] : []),
+    { label: "Copy file path", run: () => copy(a.path, "Path") },
+    { label: "Save a copy as…", run: () => saveAs(a) },
+    "-",
+    { label: "Delete…", run: () => deleteRender(a), key: "Recycle Bin", danger: true },
+  ];
+  const m = document.createElement("div");
+  m.className = "ctx-menu";
+  m.setAttribute("role", "menu");
+  let prev: MenuItem | null = "-";
+  for (const it of list) {
+    if (it === "-") {
+      if (prev !== "-") m.appendChild(document.createElement("hr"));
+    } else {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("role", "menuitem");
+      if (it.danger) b.className = "danger";
+      b.innerHTML = `<span></span>${it.key ? "<kbd></kbd>" : ""}`;
+      $("span", b).textContent = it.label;
+      if (it.key) $("kbd", b).textContent = it.key;
+      b.addEventListener("click", () => {
+        closeMenu();
+        it.run();
+      });
+      m.appendChild(b);
+    }
+    prev = it;
+  }
+  if (m.lastElementChild?.tagName === "HR") m.lastElementChild.remove();
+  document.body.appendChild(m);
+  // Keep it on screen: open up or left when there's no room.
+  const r = m.getBoundingClientRect();
+  m.style.left = `${Math.max(4, Math.min(e.clientX, innerWidth - r.width - 4))}px`;
+  m.style.top = `${Math.max(4, Math.min(e.clientY, innerHeight - r.height - 4))}px`;
+  menuEl = m;
+  ($("button", m) as HTMLButtonElement | null)?.focus();
+}
+
+document.addEventListener("mousedown", (e) => {
+  if (menuEl && !menuEl.contains(e.target as Node)) closeMenu();
+});
+document.addEventListener("keydown", (e) => {
+  if (!menuEl) return;
+  if (e.key === "Escape") {
+    e.stopPropagation();
+    closeMenu();
+  } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    const bs = $$<HTMLButtonElement>("button", menuEl);
+    const i = bs.indexOf(document.activeElement as HTMLButtonElement);
+    bs[(i + (e.key === "ArrowDown" ? 1 : bs.length - 1)) % bs.length]?.focus();
+  }
+}, true);
+addEventListener("blur", closeMenu);
+addEventListener("resize", closeMenu);
+addEventListener("scroll", closeMenu, true);
+
+async function copy(text: string, what = "Prompt") {
   try {
     await navigator.clipboard.writeText(text);
   } catch {
@@ -424,7 +561,7 @@ async function copy(text: string) {
     document.execCommand("copy");
     ta.remove();
   }
-  deps.toast("Prompt copied.");
+  deps.toast(`${what} copied.`);
 }
 
 // ---------- generation ----------
@@ -589,6 +726,19 @@ export async function openRender(path: string) {
   }
   if (a) openLightbox(a);
   else deps.toast("That image isn't in ComfyUI's output folder any more.", "warn");
+}
+
+/** The right-click menu for a render shown in chat. */
+export async function renderMenu(e: MouseEvent, path: string) {
+  e.preventDefault();
+  await allowRenders();
+  let a = items.find((x) => x.path === path);
+  if (!a) {
+    await refresh();
+    a = items.find((x) => x.path === path);
+  }
+  if (a) showMenu(e, a);
+  else deps.toast("That file isn't in ComfyUI's output folder any more.", "warn");
 }
 
 export type { Asset };

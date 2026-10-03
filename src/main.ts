@@ -13,7 +13,7 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { initSystem, onGpu, showSystem, unloadAll, type Gpu } from "./system";
-import { allowRenders, cancelRender, imageModelLabel, initStudio, openRender, renderImage, showStudio } from "./studio";
+import { allowRenders, cancelRender, imageModelLabel, initStudio, openRender, renderImage, renderMenu, showStudio } from "./studio";
 import { initVoice, showVoice } from "./voice";
 import { initCamera, showCameraPane } from "./camera";
 import { onSpeakingChange, speak, speakDelta, speakEnd, stopSpeaking } from "./speech";
@@ -311,7 +311,7 @@ function markSpeaking(b: HTMLElement | null) {
 /** An image made from chat: the picture (click to open it in the lightbox) and where it was saved. */
 function renderFigure(bubble: HTMLElement, r: NonNullable<StoredMessage["render"]>) {
   const body = $(".msg-body", bubble);
-  body.innerHTML = `<figure class="chat-render"><button type="button" class="pic" title="Open (Animate, Reuse prompt, Open in folder)"><img alt="" /></button><figcaption></figcaption></figure>`;
+  body.innerHTML = `<figure class="chat-render"><button type="button" class="pic" title="Open it (right-click for more: copy, save, edit, delete…)"><img alt="" /></button><figcaption></figcaption></figure>`;
   const img = $("img", body) as HTMLImageElement;
   img.alt = r.prompt;
   if (inTauri) allowRenders().then(() => (img.src = convertFileSrc(r.path)));
@@ -319,6 +319,9 @@ function renderFigure(bubble: HTMLElement, r: NonNullable<StoredMessage["render"
   img.addEventListener("load", () => scrollDown());
   $("figcaption", body).textContent = `${r.prompt}${r.seconds ? ` · ${r.seconds} s` : ""}`;
   $(".pic", body).addEventListener("click", () => openRender(r.path));
+  const fig = $("figure", body) as HTMLElement;
+  fig.dataset.path = r.path;
+  fig.addEventListener("contextmenu", (e) => renderMenu(e, r.path));
 }
 
 function setThinking(bubble: HTMLElement, text: string, open: boolean) {

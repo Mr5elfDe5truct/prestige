@@ -263,12 +263,25 @@
             <button class="btn" id="lb-copy">Copy prompt</button>
             <button class="btn" id="lb-edit">Edit (Qwen-Image)</button>
             <button class="btn" id="lb-animate">Animate (image → video)</button>
+            <button class="btn" id="lb-save">Save a copy as…</button>
+            <button class="btn danger" id="lb-delete" title="Move to the Recycle Bin (Delete key)">Delete</button>
             <button class="btn primary" id="lb-reuse">Reuse prompt</button>
             <button class="btn" id="lb-close">Close</button>
           </div>
         </div>
       </div>
     </div>
+
+    <dialog class="sheet" id="del-confirm">
+      <form method="dialog">
+        <h2>Delete this <span id="del-kind">render</span>?</h2>
+        <p><b id="del-name"></b> goes to the Recycle Bin, so you can still restore it from there.</p>
+        <div class="acts">
+          <button class="btn" value="cancel" autofocus>Cancel</button>
+          <button class="btn danger" value="delete">Delete</button>
+        </div>
+      </form>
+    </dialog>
 
     <dialog class="sheet" id="fit">
       <form method="dialog">

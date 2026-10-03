@@ -52,14 +52,16 @@ Everything below was made on the reference PC (RTX 3060 12 GB) from inside the a
 |---|---|---|
 | 💬 | **Chat with every local model** | Streaming from Ollama and the llama.cpp router, a model switcher with roles (Main · Fast · Vision · General · Code), tokens per second on every reply, history saved on your PC |
 | 🔧 | **Tools in chat** | Web search, page fetching, the Reddit / Hugging Face / GitHub scout, files, PowerShell and browser control from the workstation's tool server, switched per group. Anything that changes something asks first |
-| 🖌️ | **Images in chat** | Type `/image a lighthouse at dusk` (or *"draw me…"*, *"make an image of…"*, or click the picture button) and Z-Image-Turbo paints it right in the conversation, with live progress. Click the picture to animate it, reuse the prompt or open its folder |
+| 🖌️ | **Images in chat** | Type `/image a lighthouse at dusk` (or *"draw me…"*, *"make an image of…"*, or click the picture button) and Qwen-Image-2.1 (or its 4-step turbo) paints it right in the conversation, with live progress. Click the picture to open it; right-click for the full menu |
 | 🔊 | **Replies read aloud** | A speaker button on every reply, or switch on **Read replies aloud** in the message box and Kokoro reads each answer as it streams. The mic button talks to it |
 | 🔎 | **Search past chats** | Search box in **Past chats** (Ctrl+K) finds every conversation containing your words, shows the passage and jumps to it. Models can search them too (*"what did we decide about…"*), via the **Past chats** tool |
 | 🏷️ | **Know your models** | Every model shows what it can do (🔧 tools, 👁 vision, 🧠 thinking, 💻 code, 🔓 uncensored) and whether it fits in VRAM, detected automatically for anything you add |
 | 🛒 | **Model catalog** | 27 models checked to run on a 12 GB card, with what each is good at. One click downloads into the workstation and it's ready to pick |
 | 🧠 | **Shared long-term memory** | The same memory as Open WebUI, so every model in both apps knows you. Say *"remember that …"* |
 | 📊 | **System dashboard** | Live GPU load, VRAM, temperature and power, Load/Unload for every model, a what's-in-VRAM bar, RAM and service status, and a warning before a model won't fit |
-| 🖼️ | **Studio** | A gallery of your real ComfyUI renders, with prompts read from the files, plus image generation and text-to-video with sound, with live progress |
+| 🖼️ | **Studio** | A gallery of your real ComfyUI renders, with prompts read from the files, plus image generation (Qwen-Image-2.1, its turbo, or Z-Image-Turbo) and LTX-2.5 text-to-video with sound, with live progress |
+| ✏️ | **Edit** | Change any image by instruction with Qwen-Image-2.1 ("make it night", "swap the car for a horse") |
+| 🖱️ | **Right-click menu** | On any render in the gallery, the viewer or a chat: open, show info, open in folder, edit, animate, reuse or copy the prompt, copy the image, file or path, save a copy, and delete (to the Recycle Bin) |
 | 🎬 | **Animate** | Turn any image into a 5-second video with Wan 2.2 |
 | 🎙️ | **Voice conversation** | Push-to-talk or hands-free, with Whisper listening and Kokoro speaking each sentence as the reply streams. Talk over it to interrupt |
 | 🎩 | **A living avatar** | The top-hat's red eye and gold rings pulse with its actual voice |

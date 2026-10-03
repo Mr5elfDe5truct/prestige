@@ -13,6 +13,9 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::{data_dir, hidden, stack_root};
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 const IMAGE_EXT: &[&str] = &["png", "jpg", "jpeg", "webp", "gif"];
 const VIDEO_EXT: &[&str] = &["mp4", "webm", "mov"];
 const THUMB_SIZE: u32 = 360;
@@ -247,11 +250,133 @@ fn fxhash(s: &str) -> u64 {
     h
 }
 
-/// Shows a file selected in File Explorer.
+/// Shows a file selected in File Explorer, or its folder if the file is gone.
 #[tauri::command]
 pub fn reveal(path: String) -> Result<(), String> {
-    Command::new("explorer.exe").arg(format!("/select,{path}")).spawn().map_err(|e| e.to_string())?;
+    let p = PathBuf::from(path.replace('/', "\\"));
+    let mut cmd = Command::new("explorer.exe");
+    if p.exists() {
+        // Explorer only reads /select when the path itself is quoted, not the whole argument (which is
+        // what Command::arg does for a path with spaces, and Explorer then opens Documents instead).
+        #[cfg(windows)]
+        cmd.raw_arg(format!("/select,\"{}\"", p.display()));
+    } else if let Some(dir) = p.parent().filter(|d| d.exists()) {
+        cmd.arg(dir);
+    } else {
+        return Err("That file and its folder are gone".into());
+    }
+    cmd.spawn().map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// A render the Studio may act on: an existing image or video inside ComfyUI's output folder.
+fn render_path(root: Option<String>, path: &str) -> Result<PathBuf, String> {
+    let dir = output_dir(root).canonicalize().map_err(|_| "ComfyUI's output folder doesn't exist".to_string())?;
+    let p = PathBuf::from(path.replace('/', "\\"));
+    let real = p.canonicalize().map_err(|_| "That file doesn't exist any more".to_string())?;
+    let x = ext_of(&real);
+    if !real.starts_with(&dir) || !(IMAGE_EXT.contains(&x.as_str()) || VIDEO_EXT.contains(&x.as_str())) {
+        return Err("Only renders in ComfyUI's output folder can be changed here".into());
+    }
+    // The checked path, but without canonicalize's \\?\ prefix, which Explorer and PowerShell don't take.
+    Ok(p)
+}
+
+/// Runs a short PowerShell snippet with the file path in $env:PRESTIGE_PATH (never spliced into the script).
+fn powershell(script: &str, path: &Path, sta: bool) -> Result<(), String> {
+    let mut cmd = Command::new("powershell.exe");
+    hidden(&mut cmd).args(["-NoProfile", "-NonInteractive"]);
+    if sta {
+        cmd.arg("-STA"); // the clipboard needs a single-threaded apartment
+    }
+    let out = cmd
+        .args(["-Command", script])
+        .env("PRESTIGE_PATH", path)
+        .output()
+        .map_err(|e| format!("powershell: {e}"))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).lines().find(|l| !l.trim().is_empty()).unwrap_or("PowerShell failed").to_string())
+    }
+}
+
+/// Opens a render in its default app (Photos, the video player, ...).
+#[tauri::command]
+pub fn open_render(root: Option<String>, path: String) -> Result<(), String> {
+    let p = render_path(root, &path)?;
+    let mut cmd = Command::new("explorer.exe");
+    #[cfg(windows)]
+    cmd.raw_arg(format!("\"{}\"", p.display()));
+    cmd.spawn().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Moves a render to the Recycle Bin and forgets its cached thumbnail and metadata.
+#[tauri::command]
+pub async fn delete_render(app: AppHandle, root: Option<String>, path: String, mtime: f64) -> Result<(), String> {
+    let p = render_path(root, &path)?;
+    let p2 = p.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        powershell(
+            "Add-Type -AssemblyName Microsoft.VisualBasic; \
+             [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($env:PRESTIGE_PATH, 'OnlyErrorDialogs', 'SendToRecycleBin')",
+            &p2,
+            false,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    if p.exists() {
+        return Err("Windows didn't move the file to the Recycle Bin".into());
+    }
+    if let Ok(dir) = data_dir(&app, "thumbs") {
+        let _ = fs::remove_file(dir.join(format!("{:x}.jpg", fxhash(&format!("{path}|{mtime}")))));
+    }
+    if let Ok(mut c) = app.state::<GalleryCache>().0.lock() {
+        c.remove(&path);
+    }
+    Ok(())
+}
+
+/// Puts a render on the clipboard: the picture itself (paste into chats, Paint, ...) or the file
+/// (paste into Explorer, Discord, ...).
+#[tauri::command]
+pub async fn copy_render(root: Option<String>, path: String, as_image: bool) -> Result<(), String> {
+    let p = render_path(root, &path)?;
+    if as_image && !IMAGE_EXT.contains(&ext_of(&p).as_str()) {
+        return Err("Only images can be copied as a picture".into());
+    }
+    let script = if as_image {
+        "Add-Type -AssemblyName System.Windows.Forms, System.Drawing; \
+         $img = [System.Drawing.Image]::FromFile($env:PRESTIGE_PATH); \
+         [System.Windows.Forms.Clipboard]::SetImage($img); $img.Dispose()"
+    } else {
+        "Add-Type -AssemblyName System.Windows.Forms; \
+         $files = New-Object System.Collections.Specialized.StringCollection; [void]$files.Add($env:PRESTIGE_PATH); \
+         [System.Windows.Forms.Clipboard]::SetFileDropList($files)"
+    };
+    tauri::async_runtime::spawn_blocking(move || powershell(script, &p, true)).await.map_err(|e| e.to_string())?
+}
+
+/// Saves a copy of a render wherever the user picks. Returns the new path, or null if they cancelled.
+#[tauri::command]
+pub async fn save_render_as(app: AppHandle, root: Option<String>, path: String) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let p = render_path(root, &path)?;
+    let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let x = ext_of(&p);
+    let kind = if VIDEO_EXT.contains(&x.as_str()) { "Video" } else { "Image" };
+    let mut dialog = app.dialog().file().set_file_name(&name).add_filter(kind, &[x.as_str()]);
+    if let Some(pictures) = std::env::var_os("USERPROFILE").map(|h| PathBuf::from(h).join("Pictures")).filter(|d| d.exists()) {
+        dialog = dialog.set_directory(pictures);
+    }
+    let Some(dest) = tauri::async_runtime::spawn_blocking(move || dialog.blocking_save_file()).await.map_err(|e| e.to_string())? else {
+        return Ok(None);
+    };
+    let dest = dest.into_path().map_err(|e| e.to_string())?;
+    fs::copy(&p, &dest).map_err(|e| format!("Couldn't save to {}: {e}", dest.display()))?;
+    Ok(Some(dest.to_string_lossy().into_owned()))
 }
 
 /// The stack's ComfyUI API workflows, by name.

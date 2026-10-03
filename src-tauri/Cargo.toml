@@ -1,6 +1,6 @@
 [package]
 name = "prestige"
-version = "0.9.0"
+version = "0.10.0"
 description = "Prestige by R.G. Studios: a local AI desktop app"
 authors = ["Ryan B. Gyles"]
 license = "MIT"
@@ -24,6 +24,7 @@ tungstenite = "0.24"
 ureq = "2"
 tauri-plugin-updater = "2.13.1"
 tauri-plugin-process = "2.4.0"
+tauri-plugin-dialog = "2"
 
 [profile.release]
 codegen-units = 1
