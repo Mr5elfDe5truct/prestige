@@ -193,9 +193,12 @@
           <div class="voice-opts">
             <label class="check"><input type="checkbox" id="voice-hands" /> Hands-free (talk any time; talking interrupts)</label>
             <label class="field inline">Voice<select id="voice-pick"><option value="af_heart">af_heart</option></select></label>
+            <button class="btn mini" id="voice-clone" title="Make a VoxCPM2 voice from a 5–30 second recording of someone speaking" hidden>Clone a voice…</button>
+            <input type="file" id="voice-clone-file" accept="audio/*,.wav,.mp3,.m4a,.flac,.ogg,.webm" hidden />
           </div>
+          <p class="note center" id="voice-engine-note" hidden></p>
           <div class="voice-captions"><p class="you" id="voice-you"></p><p class="reply" id="voice-reply"></p></div>
-          <p class="credit center">Speech-to-text by Open WebUI's Whisper · voice by Kokoro · replies also appear in Chat with the current model</p>
+          <p class="credit center" id="voice-credit">Speech-to-text by Whisper · voices by Kokoro and VoxCPM2 · replies also appear in Chat with the current model</p>
         </div>
       </section>
 

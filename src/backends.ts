@@ -116,6 +116,7 @@ interface Known {
 // Friendly names and roles for the models on this PC. Unknown models still show, by their raw id.
 const KNOWN: Known[] = [
   { match: /qwen3\.6-35b/i, name: "Qwen3.6 35B Uncensored", role: "Main", order: 0 },
+  { match: /qwen3\.8-27b/i, name: "Qwen3.8 27B Uncensored", role: "Deep thinker", order: 0.5 },
   { match: /qwen3\.5-9b/i, name: "Qwen3.5 9B Uncensored", role: "Fast", order: 1 },
   { match: /^gemma4:12b/i, name: "Gemma 4 12B", role: "Vision", order: 2 },
   { match: /^gemma4:e4b/i, name: "Gemma 4 E4B", role: "Vision · small", order: 3 },
@@ -194,7 +195,9 @@ export async function listModels(): Promise<{ models: ModelInfo[]; ollama: boole
     llama = true;
     for (const m of l.value.data ?? []) {
       const state = m.status?.value === "loaded" ? "loaded" : "loads on first message";
-      const d = describe(m.id, "llama", `llama.cpp · 32k ctx · ${state}`);
+      const a: string[] = m.status?.args ?? [];
+      const ctx = Number(a[a.indexOf("--ctx-size") + 1]) || 32768;
+      const d = describe(m.id, "llama", `llama.cpp · ${Math.round(ctx / 1024)}k ctx · ${state}`);
       if (d) models.push({ ...d, args: m.status?.args ?? [], inputModalities: m.architecture?.input_modalities ?? [] });
     }
   }

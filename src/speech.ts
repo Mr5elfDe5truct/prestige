@@ -1,12 +1,19 @@
 // Speech in and out, using the engines the stack already runs:
-// - speech-to-text: Open WebUI's built-in faster-whisper (POST /api/v1/audio/transcriptions)
-// - text-to-speech: Kokoro-FastAPI on :8880 (OpenAI-compatible /v1/audio/speech), voice af_heart by default
-// Replies are spoken sentence by sentence while they stream, through a WebAudio analyser that drives the avatar.
+// - speech-to-text: the Workstation's voice server on :8890 (Whisper large-v3-turbo on the GPU), or Open WebUI's
+//   built-in Whisper when the voice pack isn't installed
+// - text-to-speech: Kokoro-FastAPI on :8880 (OpenAI-compatible /v1/audio/speech), voice af_heart by default, or
+//   VoxCPM2 on the voice server for designed and cloned voices (stored as "vox:<name>")
+// Kokoro replies are spoken sentence by sentence while they stream, through a WebAudio analyser that drives the
+// avatar. VoxCPM2 needs ~6 GB of GPU memory, so it waits for the reply to finish (the voice server unloads the
+// chat model to make room) and is unloaded again before the next message.
 import { errMsg, http } from "./backends";
 import type { MemoryConfig } from "./memory";
 
 export const KOKORO = "http://127.0.0.1:8880";
+export const VOICE_SERVER = "http://127.0.0.1:8890";
 export const DEFAULT_VOICE = "af_heart"; // AUDIO_TTS_VOICE in start-all.ps1
+/** VoxCPM2 voices are stored with this prefix; plain names are Kokoro voices. */
+export const isVox = (v: string | undefined) => !!v?.startsWith("vox:");
 
 // ---------- shared audio graph ----------
 let ctx: AudioContext | null = null;
@@ -83,21 +90,44 @@ export function onSpeakingChange(fn: (speaking: boolean) => void) {
 }
 export const isSpeaking = () => !!playing || queue.length > 0;
 
+let deferred = ""; // a VoxCPM2 reply waits here until it has finished streaming
+let warned = false;
+
 async function synth(text: string, gen: number): Promise<AudioBuffer | null> {
   try {
-    const r = await http(`${KOKORO}/v1/audio/speech`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: "kokoro", input: text, voice, response_format: "mp3", speed: 1.0 }),
-    });
-    if (!r.ok) throw new Error(`Kokoro answered ${r.status}`);
+    const vox = isVox(voice);
+    const r = vox
+      ? await http(`${VOICE_SERVER}/v1/audio/speech`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model: "voxcpm2", input: text, voice: voice.slice(4), response_format: "wav" }),
+        })
+      : await http(`${KOKORO}/v1/audio/speech`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model: "kokoro", input: text, voice, response_format: "mp3", speed: 1.0 }),
+        });
+    if (!r.ok) {
+      const detail = vox ? ((await r.json().catch(() => ({}))) as any).detail : "";
+      throw new Error(detail || `${vox ? "The voice server" : "Kokoro"} answered ${r.status}`);
+    }
     const buf = await r.arrayBuffer();
     if (gen !== generation) return null;
     return await audio().decodeAudioData(buf);
   } catch (e) {
     console.warn("TTS failed:", errMsg(e));
+    if (!warned) {
+      warned = true; // once per reply, not once per sentence
+      onError.forEach((fn) => fn(`Couldn't speak with ${isVox(voice) ? "VoxCPM2" : "Kokoro"}: ${errMsg(e)}`));
+    }
     return null;
   }
+}
+
+const onError: ((msg: string) => void)[] = [];
+/** Called with a message when speech fails (shown as a toast). */
+export function onSpeechError(fn: (msg: string) => void) {
+  onError.push(fn);
 }
 
 function enqueue(sentence: string) {
@@ -133,8 +163,16 @@ async function pump() {
   if (gen === generation) onState(false);
 }
 
-/** Feed streamed reply text; complete sentences are spoken as soon as they arrive. */
+/** Feed streamed reply text; complete sentences are spoken as soon as they arrive (VoxCPM2: once the reply ends). */
 export function speakDelta(delta: string) {
+  if (isVox(voice)) {
+    deferred += delta;
+    return;
+  }
+  feed(delta);
+}
+
+function feed(delta: string) {
   pendingText += delta;
   for (;;) {
     // Hold back fenced code until the fence closes, so it's skipped as one block.
@@ -184,6 +222,12 @@ function flushSentences(text: string, all: boolean) {
 
 /** The reply finished streaming: speak whatever is left. */
 export function speakEnd() {
+  if (deferred) {
+    const text = deferred;
+    deferred = "";
+    feed(text);
+  }
+  warned = false;
   if (!inFence) flushSentences(pendingText, true);
   pendingText = "";
   inFence = false;
@@ -199,6 +243,7 @@ export function stopSpeaking() {
   generation++;
   queue = [];
   pendingText = "";
+  deferred = "";
   inFence = false;
   try {
     playing?.stop();
@@ -210,14 +255,49 @@ export function stopSpeaking() {
   onState(false);
 }
 
-export async function listVoices(): Promise<string[]> {
+async function voiceNames(url: string): Promise<string[]> {
   try {
-    const r = await http(`${KOKORO}/v1/audio/voices`);
-    const j = await r.json();
+    const j = await (await http(url)).json();
     const v: string[] = Array.isArray(j) ? j : j.voices ?? [];
     return v.map((x: any) => (typeof x === "string" ? x : x.id ?? x.name)).filter(Boolean);
   } catch {
     return [];
+  }
+}
+
+/** Kokoro's voices, and VoxCPM2's (designed and cloned) when the voice server runs. */
+export async function listVoices(): Promise<{ kokoro: string[]; vox: string[] }> {
+  const [kokoro, vox] = await Promise.all([voiceNames(`${KOKORO}/v1/audio/voices`), voiceNames(`${VOICE_SERVER}/v1/audio/voices`)]);
+  return { kokoro, vox };
+}
+
+/** Adds a VoxCPM2 voice cloned from a recording (5-30 s of one person speaking). */
+export async function cloneVoice(name: string, file: File): Promise<string> {
+  const fd = new FormData();
+  fd.append("name", name);
+  fd.append("file", file, file.name);
+  let r: Response;
+  try {
+    r = await http(`${VOICE_SERVER}/v1/audio/voices`, { method: "POST", body: fd });
+  } catch (e) {
+    throw new Error(errMsg(e) === "not reachable" ? "the voice server isn't running (install the Workstation's voice pack)" : errMsg(e));
+  }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.detail ? String(j.detail) : `the voice server answered ${r.status}`);
+  return String(j.voice);
+}
+
+/** Before a chat reply: take VoxCPM2 off the GPU so the chat model has room (it reloads when it speaks). */
+export async function releaseSpeechGpu() {
+  if (!isVox(voice)) return;
+  try {
+    await http(`${VOICE_SERVER}/v1/audio/unload`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "tts" }),
+    });
+  } catch {
+    /* not running: nothing to free */
   }
 }
 
@@ -261,11 +341,18 @@ export function record(stream: MediaStream) {
 
 // ---------- speech to text ----------
 export async function transcribe(cfg: MemoryConfig | null, blob: Blob): Promise<string> {
-  if (!cfg) throw new Error("connect Open WebUI in Settings first (its Whisper does the speech-to-text)");
   const fd = new FormData();
   fd.append("file", new File([blob], "speech.webm", { type: "audio/webm" }));
   // Whisper guesses the language from the first seconds and can pick the wrong one on short or quiet takes.
   fd.append("language", "en");
+  // The voice server first (Whisper turbo on the GPU, no Open WebUI login needed).
+  try {
+    const v = await http(`${VOICE_SERVER}/v1/audio/transcriptions`, { method: "POST", body: fd });
+    if (v.ok) return String((await v.json()).text ?? "").trim();
+  } catch {
+    /* no voice pack: use Open WebUI's Whisper */
+  }
+  if (!cfg) throw new Error("connect Open WebUI in Settings first (its Whisper does the speech-to-text)");
   let r: Response;
   try {
     r = await http(`${cfg.url}/api/v1/audio/transcriptions`, {

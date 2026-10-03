@@ -50,13 +50,13 @@ Everything below was made on the reference PC (RTX 3060 12 GB) from inside the a
 
 | | Feature | How |
 |---|---|---|
-| 💬 | **Chat with every local model** | Streaming from Ollama and the llama.cpp router, a model switcher with roles (Main · Fast · Vision · General · Code), tokens per second on every reply, history saved on your PC |
+| 💬 | **Chat with every local model** | Streaming from Ollama and the llama.cpp router, a model switcher with roles (Main · Deep thinker · Fast · Vision · General · Code), tokens per second on every reply, history saved on your PC |
 | 🔧 | **Tools in chat** | Web search, page fetching, the Reddit / Hugging Face / GitHub scout, files, PowerShell and browser control from the workstation's tool server, switched per group. Anything that changes something asks first |
 | 🖌️ | **Images in chat** | Type `/image a lighthouse at dusk` (or *"draw me…"*, *"make an image of…"*, or click the picture button) and Qwen-Image-2.1 (or its 4-step turbo) paints it right in the conversation, with live progress. Click the picture to open it; right-click for the full menu. `/video` (or *"make a video of…"*) makes an LTX-2.5 clip with sound the same way |
 | 🔊 | **Replies read aloud** | A speaker button on every reply, or switch on **Read replies aloud** in the message box and Kokoro reads each answer as it streams. The mic button talks to it |
 | 🔎 | **Search past chats** | Search box in **Past chats** (Ctrl+K) finds every conversation containing your words, shows the passage and jumps to it. Models can search them too (*"what did we decide about…"*), via the **Past chats** tool |
 | 🏷️ | **Know your models** | Every model shows what it can do (🔧 tools, 👁 vision, 🧠 thinking, 💻 code, 🔓 uncensored) and whether it fits in VRAM, detected automatically for anything you add |
-| 🛒 | **Model catalog** | 27 models checked to run on a 12 GB card, with what each is good at. One click downloads into the workstation and it's ready to pick |
+| 🛒 | **Model catalog** | 28 models checked to run on a 12 GB card, with what each is good at, including Qwen3.8 27B Uncensored (the strongest reasoner here, ~30 tok/s fully on the GPU). One click downloads into the workstation and it's ready to pick |
 | 🧠 | **Shared long-term memory** | The same memory as Open WebUI, so every model in both apps knows you. Say *"remember that …"* |
 | 📊 | **System dashboard** | Live GPU load, VRAM, temperature and power, Load/Unload for every model, a what's-in-VRAM bar, RAM and service status, and a warning before a model won't fit |
 | 🖼️ | **Studio** | A gallery of your real ComfyUI renders, with prompts read from the files, plus image generation (Qwen-Image-2.1, its turbo, or Z-Image-Turbo) and LTX-2.5 text-to-video with sound, with live progress |
@@ -64,7 +64,8 @@ Everything below was made on the reference PC (RTX 3060 12 GB) from inside the a
 | 🖱️ | **Right-click menu** | On any render in the gallery, the viewer or a chat: open, show info, open in folder, edit, animate, reuse or copy the prompt, copy the image, file or path, save a copy, and delete (to the Recycle Bin) |
 | 🎬 | **Animate** | Turn any image into a video (5 seconds by default) with Wan 2.2 |
 | 🎛️ | **Generation settings** | Shape and size, quality (steps), how many images and seed for pictures; resolution, length, frame rate, quality and seed for video. Shared by Studio (**⚙ Settings**) and chat (the sliders button), with defaults that suit a 12 GB card, a time estimate, and a warning before a pick is likely to run out of VRAM. Right-click a render to reuse its seed |
-| 🎙️ | **Voice conversation** | Push-to-talk or hands-free, with Whisper listening and Kokoro speaking each sentence as the reply streams. Talk over it to interrupt |
+| 🎙️ | **Voice conversation** | Push-to-talk or hands-free, with Whisper large-v3-turbo listening on the GPU and Kokoro speaking each sentence as the reply streams. Talk over it to interrupt |
+| 🗣️ | **Expressive voices** | Pick a VoxCPM2 voice (Aria, Sterling, Nova, Atlas, Ember) or **Clone a voice…** from a 5–30 second recording. It speaks once the reply is written, and the chat model steps aside on the GPU while it talks |
 | 🎩 | **A living avatar** | The top-hat's red eye and gold rings pulse with its actual voice |
 | 👀 | **Webcam vision** | *Ask about this* sends the frame to Gemma 4, live captions, and a camera button in chat |
 | ⚡ | **One click** | Opening Prestige starts the AI stack; closing it shuts everything down and frees the GPU |
@@ -85,8 +86,9 @@ Everything below was made on the reference PC (RTX 3060 12 GB) from inside the a
 ## 🖥️ Requirements
 
 - **The [Custom AI Workstation](https://github.com/Mr5elfDe5truct/custom-ai-workstation) stack**, installed with its models.
-  Prestige is its front end: it talks to Ollama, llama.cpp, Open WebUI, ComfyUI and Kokoro on `127.0.0.1`, and runs the
-  stack's `start-all.ps1` and `stop-all.ps1`.
+  Prestige is its front end: it talks to Ollama, llama.cpp, Open WebUI, ComfyUI, Kokoro and the voice server on `127.0.0.1`,
+  and runs the stack's `start-all.ps1` and `stop-all.ps1`. Whisper turbo and the VoxCPM2 voices come with the workstation's
+  `voice` pack; without it, Prestige uses Open WebUI's Whisper and Kokoro.
 - **An NVIDIA GPU.** Built and tested on an RTX 3060 12 GB with 32 GB of RAM.
 - **Windows 11** (WebView2 is built in). Linux and macOS are the next goal.
 
@@ -118,7 +120,7 @@ Open **Settings** (the gear, top right):
 
 1. **Workstation folder**: where the Custom AI Workstation stack lives (the folder with `start-all.ps1`). The default is
    `%USERPROFILE%\RG Studios\Workstation` (for example `C:\Users\you\RG Studios\Workstation`).
-2. **Open WebUI API key**, for shared memory and speech-to-text:
+2. **Open WebUI API key**, for shared memory (and speech-to-text when the voice pack isn't installed):
    1. In Open WebUI (http://localhost:8080) open **Admin Panel → Settings → General** and turn on **Enable API Keys**.
    2. Open **Settings → Account → API keys → Create new secret key** and copy it.
    3. Paste it into Prestige, then click **Test** and **Save**. It's stored only on your PC, in `%APPDATA%\com.rgstudios.prestige`.
@@ -145,8 +147,9 @@ one folder, one script, one 12 GB GPU. The workstation holds the services, model
 
 Built on [Tauri](https://tauri.app), and powered by [Ollama](https://ollama.com), [llama.cpp](https://github.com/ggml-org/llama.cpp),
 [Open WebUI](https://github.com/open-webui/open-webui), [ComfyUI](https://github.com/comfyanonymous/ComfyUI),
-[Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) and [faster-whisper](https://github.com/SYSTRAN/faster-whisper).
-Models by Qwen, Google (Gemma), Meta (Llama), Lightricks (LTX), Wan-AI and Tongyi (Z-Image).
+[Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI), [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
+and [VoxCPM](https://github.com/OpenBMB/VoxCPM).
+Models by Qwen, Google (Gemma), Meta (Llama), Lightricks (LTX), Wan-AI, Tongyi (Z-Image), OpenAI (Whisper) and OpenBMB (VoxCPM2).
 
 ## 📜 License
 

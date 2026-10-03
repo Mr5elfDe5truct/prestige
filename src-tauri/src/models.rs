@@ -280,9 +280,17 @@ pub fn add_llama_model(
     mmproj: Option<String>,
     n_cpu_moe: Option<u32>,
     note: Option<String>,
+    options: Option<Vec<(String, String)>>,
 ) -> Result<bool, String> {
     if !id.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c)) {
         return Err("bad model id".into());
+    }
+    // Extra llama-server settings for this model, e.g. ("spec-type", "draft-mtp") or ("c", "20480").
+    let options = options.unwrap_or_default();
+    for (k, v) in &options {
+        if !k.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') || v.contains(['\n', '\r', '[', ';']) {
+            return Err(format!("bad option {k}"));
+        }
     }
     let ini = stack_root(root).join("bin").join("llama-models.ini");
     let text = fs::read_to_string(&ini).map_err(|e| format!("{}: {e}", ini.display()))?;
@@ -300,7 +308,12 @@ pub fn add_llama_model(
     if let Some(n) = n_cpu_moe {
         s.push_str(&format!("n-cpu-moe = {n}\n"));
     }
-    s.push_str("c = 32768\n");
+    for (k, v) in &options {
+        s.push_str(&format!("{k} = {v}\n"));
+    }
+    if !options.iter().any(|(k, _)| k == "c") {
+        s.push_str("c = 32768\n");
+    }
     fs::OpenOptions::new()
         .append(true)
         .open(&ini)

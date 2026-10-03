@@ -17,7 +17,9 @@ import { allowRenders, cancelRender, chatSettings, initStudio, modelLabel, openR
 import { onSettingsChange } from "./gensettings";
 import { initVoice, showVoice } from "./voice";
 import { initCamera, showCameraPane } from "./camera";
-import { onSpeakingChange, speak, speakDelta, speakEnd, stopSpeaking } from "./speech";
+import {
+  onSpeakingChange, onSpeechError, releaseSpeechGpu, setVoice, speak, speakDelta, speakEnd, stopSpeaking, DEFAULT_VOICE,
+} from "./speech";
 import { bestFor, capsFor, chipsHtml, supportsTools } from "./caps";
 import { initCatalog, openCatalog } from "./catalog";
 import { checkForUpdates, initUpdates } from "./updates";
@@ -803,6 +805,7 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     ];
 
     body.innerHTML = `<span class="status-line">${model.backend === "llama" ? "Loading the model if it's asleep (up to a minute)…" : "Waiting for the first token…"}</span>`;
+    await releaseSpeechGpu(); // a VoxCPM2 voice gives the GPU back to the chat model
     let thinking = "";
     let pending = false;
     const paint = () => {
@@ -1262,6 +1265,7 @@ async function main() {
   onSpeakingChange((on) => {
     if (!on) markSpeaking(null);
   });
+  onSpeechError((msg) => toast(msg, "warn"));
   // The Voice screen's avatar is an inline copy of the mark, so its eye can follow the audio.
   $("#voice-mark").innerHTML = markSvg;
   initVoice({
@@ -1297,6 +1301,7 @@ async function main() {
   });
   renderChat();
   await loadSettings();
+  setVoice(settings.voice ?? DEFAULT_VOICE); // the saved voice (initVoice ran before settings were loaded)
   updateToolsButton();
   updateSpeakButton();
   // Like open-app.ps1: opening the app starts the workstation if it isn't running.
