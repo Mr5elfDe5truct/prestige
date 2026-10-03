@@ -17,6 +17,7 @@ import { allowRenders, cancelRender, chatSettings, initStudio, modelLabel, openR
 import { onSettingsChange } from "./gensettings";
 import { initVoice, showVoice } from "./voice";
 import { initCamera, showCameraPane } from "./camera";
+import { initLive, startLive, LIVE_CTX, LIVE_MODELS } from "./live";
 import {
   onSpeakingChange, onSpeechError, releaseSpeechGpu, setVoice, speak, speakDelta, speakEnd, stopSpeaking, DEFAULT_VOICE,
 } from "./speech";
@@ -86,6 +87,7 @@ interface Settings {
   aboutUser?: string; // optional note every model sees
   welcomed?: boolean; // the first-run welcome has been shown
   speakReplies?: boolean; // read every chat reply aloud as it streams
+  liveCamera?: boolean; // Live calls start with the camera on
 }
 
 let settings: Settings = {};
@@ -481,16 +483,17 @@ async function renderHistory() {
 const pcInfo: { gpu?: string; ramGB?: number } = {};
 
 /** The instructions every model gets, personalised with the user's name and note from Settings. */
-function systemBase(): string {
+/** `live`: for a call, where the Live hint says how to talk instead. */
+function systemBase(live = false): string {
   const name = settings.userName?.trim();
   const hw = [pcInfo.gpu, pcInfo.ramGB ? `${pcInfo.ramGB} GB RAM` : ""].filter(Boolean).join(", ");
   const owner = name ? `${name}'s own PC` : "the user's own PC";
   const lines = [
     `You are Prestige by R.G. Studios, a private AI assistant running entirely on ${owner}${hw ? ` (${hw}, Windows)` : ""}. ` +
       "Nothing you see or say leaves this computer.",
-    name ? `The user's name is ${name}. Address them by name when it feels natural.` : "",
+    name ? `The user's name is ${name}.${live ? "" : " Address them by name when it feels natural."}` : "",
     settings.aboutUser?.trim() ? `What the user wants you to know about them: ${settings.aboutUser.trim()}` : "",
-    "Be direct and helpful. Use Markdown when it helps.",
+    live ? "" : "Be direct and helpful. Use Markdown when it helps.",
   ];
   return lines.filter(Boolean).join("\n");
 }
@@ -634,6 +637,42 @@ export interface ReplyHooks {
   onDone?: (ok: boolean) => void;
 }
 
+// ---------- Live mode ----------
+const LIVE_HINT =
+  "You are in a live voice call. Everything you write is spoken aloud the moment you write it, so talk the way a person " +
+  "does on a call: short, natural replies (usually one to three sentences, starting with a short one), no Markdown, " +
+  "lists, headings, code or emoji, and don't greet the user or say their name in every reply. " +
+  "Ask a short question back when it keeps the conversation going. When a camera frame is attached to a message, it is " +
+  "what the user's webcam sees right now; use it when it's relevant, and don't describe it unprompted. Without a frame " +
+  "the camera is off: if they ask what you see, tell them to turn it on with the Camera button.";
+
+/** The Live models that are installed, best first (the call picks the one that fits beside the voice). */
+const liveModels = () =>
+  LIVE_MODELS.map((x) => models.find((m) => m.backend === "ollama" && m.id === x.id)).filter((m): m is ModelInfo => !!m);
+// Shared memory is looked up once when a call starts, not on every turn, to keep replies quick.
+let liveMemory: Promise<string> = Promise.resolve("");
+
+function beginLiveChat() {
+  if (chat.messages.length) chat = newChat();
+  const when = new Date().toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  chat.title = `Live call · ${when}`;
+  renderChat();
+  renderHistory();
+  const cfg = memCfg();
+  liveMemory = cfg ? memoryContext(cfg, "").then((m) => m.text).catch(() => "") : Promise.resolve("");
+}
+
+/** Takes the last turn back out of the chat (a reply cut off before it said anything) and returns what the user said. */
+function retractLiveTurn(): string | null {
+  const n = chat.messages.length;
+  if (n < 2 || chat.messages[n - 2].role !== "user" || chat.messages[n - 1].role !== "assistant") return null;
+  const said = chat.messages[n - 2].content;
+  chat.messages.splice(n - 2, 2);
+  renderChat();
+  persist().catch(() => {});
+  return said;
+}
+
 // ---------- images and videos from chat ----------
 // "/image a lighthouse at dusk" (or /imagine, /img), or a plain ask like "draw me…" / "make an image of…".
 // "/video waves on rocks at dawn" (or /clip), or "make a video of…".
@@ -712,14 +751,15 @@ async function makeMedia(text: string, kind: MediaKind, prompt: string, hooks?: 
   }
 }
 
-async function send(text: string, opts: { images?: string[]; vision?: string; hooks?: ReplyHooks } = {}) {
+async function send(text: string, opts: { images?: string[]; vision?: string; hooks?: ReplyHooks; live?: ModelInfo } = {}) {
   text = text.trim();
   if (!text && (opts.images?.length || attachments.length)) text = "What do you see in this picture?";
   if (!text || busy) {
     opts.hooks?.onDone?.(false);
     return;
   }
-  const media = opts.images?.length || attachments.length ? null : mediaRequest(text);
+  const live = !!opts.live;
+  const media = live || opts.images?.length || attachments.length ? null : mediaRequest(text);
   if (media?.prompt === "") {
     toast(
       media.kind === "video"
@@ -730,25 +770,26 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     return;
   }
   if (media) return makeMedia(text, media.kind, media.prompt, opts.hooks);
-  const images = opts.images ?? (attachments.length ? attachments : undefined);
-  if (!opts.images) {
+  const images = live ? opts.images : opts.images ?? (attachments.length ? attachments : undefined);
+  if (!opts.images && !live) {
     attachments = [];
     renderAttachments();
   }
-  // Pictures need a model that can see; switch to Gemma 4 (or the one asked for) if needed.
-  if (images?.length && (!current || !VISION.test(current.id) || (opts.vision && current.id !== opts.vision))) {
+  // Pictures need a model that can see; switch to Gemma 4 (or the one asked for) if needed. (Live has its own model.)
+  if (!live && images?.length && (!current || !VISION.test(current.id) || (opts.vision && current.id !== opts.vision))) {
     const want = models.find((m) => m.id === opts.vision) ?? models.find((m) => m.id === "gemma4:12b") ?? models.find((m) => VISION.test(m.id));
     if (want && want.key !== current?.key) {
       selectModel(want);
       toast(`Switched to ${want.name} to look at the picture.`);
     }
   }
-  if (!current) {
+  const model = opts.live ?? current;
+  if (!model) {
     toast("No model is available. Start the services first.", "warn");
+    opts.hooks?.onDone?.(false);
     return;
   }
-  const model = current;
-  if (chat.messages.length === 0) chat.title = text.replace(/\s+/g, " ").slice(0, 60);
+  if (chat.messages.length === 0 && !live) chat.title = text.replace(/\s+/g, " ").slice(0, 60);
   chat.model = model.name;
   chat.messages.push({ role: "user", content: text, images });
   renderChat();
@@ -788,7 +829,8 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
           toast(`Couldn't save that memory: ${errMsg(e)}`, "warn");
         }
       }
-      try {
+      if (live) memoryText = await liveMemory;
+      else try {
         const recent = chat.messages.filter((m) => m.role === "user").slice(-7).map((m) => m.content).join("\n\n");
         const mem = await memoryContext(cfg, recent);
         memoryText = mem.text;
@@ -799,13 +841,22 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
       }
     }
 
+    const history = chat.messages.filter((m) => !m.error);
+    const last = history.length - 1;
     const messages: ChatMessage[] = [
-      { role: "system", content: [systemBase(), memoryText].filter(Boolean).join("\n\n") },
-      ...chat.messages.filter((m) => !m.error).map((m) => ({ role: m.role, content: m.content, images: m.images })),
+      { role: "system", content: [systemBase(live), live ? LIVE_HINT : "", memoryText].filter(Boolean).join("\n\n") },
+      ...history.map((m, i) => {
+        if (!live) return { role: m.role, content: m.content, images: m.images };
+        // In a call only the newest camera frame is sent (the older ones aren't what the camera sees now), and
+        // the small Live models are told what it is.
+        const cam = i === last && !!m.images?.length;
+        return { role: m.role, content: cam ? `${m.content}\n\n(My webcam view right now is attached, in case it helps.)` : m.content, images: cam ? m.images : undefined };
+      }),
     ];
 
     body.innerHTML = `<span class="status-line">${model.backend === "llama" ? "Loading the model if it's asleep (up to a minute)…" : "Waiting for the first token…"}</span>`;
-    await releaseSpeechGpu(); // a VoxCPM2 voice gives the GPU back to the chat model
+    // A VoxCPM2 voice gives the GPU back to the chat model (in a call the Live model and the voice share it).
+    if (!live) await releaseSpeechGpu();
     let thinking = "";
     let pending = false;
     const paint = () => {
@@ -824,7 +875,8 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     const groups = enabledGroups();
     let toolDefs: ToolDef[] = [];
     let specs: any[] | undefined;
-    if (groups.size && (await supportsTools(model))) {
+    // (Not in a call: tool rounds and "Allow?" cards don't work by voice, and they'd hold up the answer.)
+    if (!live && groups.size && (await supportsTools(model))) {
       const t = await loadTools();
       toolDefs = t.tools.filter((x) => groups.has(x.group));
       specs = toolDefs.length ? toolSpecs(t.tools, groups) : undefined;
@@ -853,7 +905,7 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     let stats: StreamStats | undefined;
     for (let round = 0; round < 6; round++) {
       const before = reply.content.length;
-      const res = await streamChat(model, messages, handlers, busy.signal, specs);
+      const res = await streamChat(model, messages, handlers, busy.signal, specs, live ? { think: false, numCtx: LIVE_CTX, keepAlive: "30m" } : {});
       stats = res;
       if (!res.toolCalls.length || !busy || busy.signal.aborted) break;
       messages.push({ role: "assistant", content: reply.content.slice(before), tool_calls: res.toolCalls });
@@ -1282,6 +1334,43 @@ async function main() {
       saveSettings();
     },
   });
+  initLive({
+    toast,
+    memCfg,
+    liveModels,
+    beginChat: beginLiveChat,
+    send: (text, images, model, hooks) => {
+      send(text, { images, hooks, live: model });
+    },
+    stopReply: () => busy?.abort(),
+    isReplying: () => !!busy,
+    retractTurn: retractLiveTurn,
+    getVoice: () => settings.voice,
+    setVoiceSetting: (v) => {
+      settings.voice = v;
+      setVoice(v);
+      saveSettings();
+    },
+    getCamera: () => settings.camera,
+    getLiveCamera: () => !!settings.liveCamera,
+    setLiveCamera: (on) => {
+      settings.liveCamera = on || undefined;
+      saveSettings();
+    },
+    openCatalog: () => openCatalog(),
+    ended: () => {
+      go("chat");
+      if (chat.messages.length) toast("The call is saved in Past chats.");
+    },
+  });
+  $$("[data-live]").forEach((b) =>
+    b.addEventListener("click", () => {
+      if (busy) return toast("Wait for the reply to finish first.");
+      stopSpeaking();
+      go("chat"); // leaving the Voice screen also ends its hands-free listening
+      startLive();
+    }),
+  );
   initCamera({
     toast,
     ask: (text, images, vision) => {

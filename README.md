@@ -56,7 +56,7 @@ Everything below was made on the reference PC (RTX 3060 12 GB) from inside the a
 | 🔊 | **Replies read aloud** | A speaker button on every reply, or switch on **Read replies aloud** in the message box and Kokoro reads each answer as it streams. The mic button talks to it |
 | 🔎 | **Search past chats** | Search box in **Past chats** (Ctrl+K) finds every conversation containing your words, shows the passage and jumps to it. Models can search them too (*"what did we decide about…"*), via the **Past chats** tool |
 | 🏷️ | **Know your models** | Every model shows what it can do (🔧 tools, 👁 vision, 🧠 thinking, 💻 code, 🔓 uncensored) and whether it fits in VRAM, detected automatically for anything you add |
-| 🛒 | **Model catalog** | 28 models checked to run on a 12 GB card, with what each is good at, including Qwen3.8 27B Uncensored (the strongest reasoner here, ~30 tok/s fully on the GPU). One click downloads into the workstation and it's ready to pick |
+| 🛒 | **Model catalog** | 29 models checked to run on a 12 GB card, with what each is good at, including Qwen3.8 27B Uncensored (the strongest reasoner here, ~30 tok/s fully on the GPU). One click downloads into the workstation and it's ready to pick |
 | 🧠 | **Shared long-term memory** | The same memory as Open WebUI, so every model in both apps knows you. Say *"remember that …"* |
 | 📊 | **System dashboard** | Live GPU load, VRAM, temperature and power, Load/Unload for every model, a what's-in-VRAM bar, RAM and service status, and a warning before a model won't fit |
 | 🖼️ | **Studio** | A gallery of your real ComfyUI renders, with prompts read from the files, plus image generation (Qwen-Image-2.1, its turbo, or Z-Image-Turbo) and LTX-2.5 text-to-video with sound, with live progress |
@@ -64,11 +64,37 @@ Everything below was made on the reference PC (RTX 3060 12 GB) from inside the a
 | 🖱️ | **Right-click menu** | On any render in the gallery, the viewer or a chat: open, show info, open in folder, edit, animate, reuse or copy the prompt, copy the image, file or path, save a copy, and delete (to the Recycle Bin) |
 | 🎬 | **Animate** | Turn any image into a video (5 seconds by default) with Wan 2.2 |
 | 🎛️ | **Generation settings** | Shape and size, quality (steps), how many images and seed for pictures; resolution, length, frame rate, quality and seed for video. Shared by Studio (**⚙ Settings**) and chat (the sliders button), with defaults that suit a 12 GB card, a time estimate, and a warning before a pick is likely to run out of VRAM. Right-click a render to reuse its seed |
+| 📞 | **Live calls** | A hands-free voice (and webcam) call: just talk. Whisper turbo hears you, Qwen3.5 answers (seeing the current camera frame when the camera is on) and the reply is spoken as it streams, about 2.5–3.5 s after you stop talking. Talk over it and it stops at once and listens. Mute, camera, voice picker (VoxCPM2 cloned voices included) and the whole call saved in **Past chats**. [How it fits a 12 GB card ↓](#-live-calls) |
 | 🎙️ | **Voice conversation** | Push-to-talk or hands-free, with Whisper large-v3-turbo listening on the GPU and Kokoro speaking each sentence as the reply streams. Talk over it to interrupt |
 | 🗣️ | **Expressive voices** | Pick a VoxCPM2 voice (Aria, Sterling, Nova, Atlas, Ember) or **Clone a voice…** from a 5–30 second recording. It speaks once the reply is written, and the chat model steps aside on the GPU while it talks |
 | 🎩 | **A living avatar** | The top-hat's red eye and gold rings pulse with its actual voice |
 | 👀 | **Webcam vision** | *Ask about this* sends the frame to Gemma 4, live captions, and a camera button in chat |
 | ⚡ | **One click** | Opening Prestige starts the AI stack; closing it shuts everything down and frees the GPU |
+
+## 📞 Live calls
+
+Click **Live** in the dock (or **Start a Live call** on the Voice screen). Prestige gets the GPU ready (about 5 s, or ~35 s
+the first time VoxCPM2 loads), then listens. Talk, pause, and it answers; talk while it's speaking and it stops and listens.
+A pause mid-sentence is fine: if you carry on before it says anything, your two halves are joined into one question.
+**Esc** or **End** hangs up, and the call is in **Past chats** as *Live call · date*.
+
+Everything stays on the GPU at once, so it fits the card instead of swapping. Measured on the RTX 3060 12 GB with
+`nvidia-smi`, including the Windows desktop's ~0.5–1 GB:
+
+| Voice | Loaded together | VRAM in use (whole card) | End of speech → first sound |
+|---|---|---|---|
+| VoxCPM2 (designed or cloned) | Whisper large-v3-turbo + VoxCPM2 + **Qwen3.5 2B** (16k context) | ~10.6 of 12 GB, ~1.4 GB free | ~2.5–3.5 s (median 3.2 s) |
+| Kokoro | Whisper large-v3-turbo + **Qwen3.5 4B** (16k context); Kokoro runs on the CPU | ~5.8 of 12 GB | ~3–4.5 s (median 3.7 s) |
+
+The times include the 0.65 s of silence that tells it you've finished. Each turn's time is shown at the top right of the
+call (hover it for where the time went). The Live model is picked to leave ~1 GB free: the 4B doesn't fit beside VoxCPM2
+(about 0.4 GB would be left, and when Windows runs short it moves GPU memory into system RAM, making speech many times
+slower rather than failing), so VoxCPM2 voices get the 2B. Get both models from the catalog (Qwen3.5 2B and 4B); the
+workstation's `voice` pack installs them.
+
+VoxCPM2 runs at about 1.2× real time here, so it streams: each sentence starts playing once enough of it is made to finish
+without a gap. Headphones work best; with speakers, echo cancellation keeps its own voice from interrupting it, and a
+transcript that's just its own words is ignored.
 
 ## 📸 Screenshots
 
@@ -132,7 +158,7 @@ Mic or camera blocked? Check **Windows Settings → Privacy & security → Micro
 
 | Part | What |
 |---|---|
-| `src/` (TypeScript + Vite) | `main.ts` chat (and images, read-aloud and search in it) · `system.ts` dashboard · `studio.ts` gallery and generation · `voice.ts` + `speech.ts` voice · `camera.ts` webcam · `tools.ts` chat tools · `memory.ts` shared memory · `backends.ts` Ollama / llama.cpp |
+| `src/` (TypeScript + Vite) | `main.ts` chat (and images, read-aloud and search in it) · `system.ts` dashboard · `studio.ts` gallery and generation · `voice.ts` + `speech.ts` voice · `live.ts` + `livespeech.ts` + `mic-worklet.js` Live calls · `camera.ts` webcam · `tools.ts` chat tools · `memory.ts` shared memory · `backends.ts` Ollama / llama.cpp |
 | `src-tauri/` (Rust + Tauri 2) | GPU and RAM readouts, chat files, chat search and settings, start/stop scripts, gallery thumbnails, ComfyUI websocket and uploads, mic and camera permissions |
 | Look | Dragon red & gold · fonts Rye, Oxanium, IBM Plex Sans and JetBrains Mono, bundled from Fontsource (SIL OFL) |
 
@@ -149,7 +175,7 @@ Built on [Tauri](https://tauri.app), and powered by [Ollama](https://ollama.com)
 [Open WebUI](https://github.com/open-webui/open-webui), [ComfyUI](https://github.com/comfyanonymous/ComfyUI),
 [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI), [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
 and [VoxCPM](https://github.com/OpenBMB/VoxCPM).
-Models by Qwen, Google (Gemma), Meta (Llama), Lightricks (LTX), Wan-AI, Tongyi (Z-Image), OpenAI (Whisper) and OpenBMB (VoxCPM2).
+Models by Qwen (including Qwen3.5 2B and 4B for Live calls), Google (Gemma), Meta (Llama), Lightricks (LTX), Wan-AI, Tongyi (Z-Image), OpenAI (Whisper) and OpenBMB (VoxCPM2).
 
 ## 📜 License
 

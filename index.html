@@ -189,6 +189,7 @@
           <div class="voice-controls">
             <button class="btn primary talk" id="voice-talk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg><span id="voice-talk-label">Tap to talk</span></button>
             <button class="btn" id="voice-stop" hidden>Stop</button>
+            <button class="btn live-start" data-live title="A hands-free call: just talk, interrupt any time, and turn on the camera if you like"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="6" width="13" height="12" rx="2" /><path d="M15 10l6-3v10l-6-3z" /><circle cx="8.5" cy="12" r="2" /></svg>Start a Live call</button>
           </div>
           <div class="voice-opts">
             <label class="check"><input type="checkbox" id="voice-hands" /> Hands-free (talk any time; talking interrupts)</label>
@@ -208,7 +209,37 @@
         <button data-go="studio"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="1" /><rect x="13" y="3" width="8" height="8" rx="1" /><rect x="3" y="13" width="8" height="8" rx="1" /><path d="M15 14l5 3-5 3z" /></svg>Studio</button>
         <span class="sep"></span>
         <button class="voice" data-go="voice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 12h2M7 8v8M11 5v14M15 8v8M19 11v2" /></svg>Voice</button>
+        <button class="live-btn" data-live title="Live: a hands-free voice (and webcam) call with Prestige"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="6" width="13" height="12" rx="2" /><path d="M15 10l6-3v10l-6-3z" /><circle cx="8.5" cy="12" r="2" /></svg>Live</button>
       </nav>
+    </div>
+
+    <div class="live" id="live" hidden role="dialog" aria-modal="true" aria-label="Live call">
+      <div class="live-top">
+        <span class="live-badge"><i></i>Live</span>
+        <span class="live-timer" id="live-timer">00:00</span>
+        <span class="live-model" id="live-model"></span>
+        <span class="grow"></span>
+        <span class="live-lat" id="live-lat" title="End of your speech to the first sound of the answer"></span>
+      </div>
+      <div class="live-stage">
+        <canvas id="live-rings"></canvas>
+        <div class="live-mark" id="live-mark"></div>
+        <video class="live-self" id="live-self" muted playsinline hidden></video>
+      </div>
+      <p class="live-status" id="live-status"></p>
+      <div class="live-level" id="live-level"><i></i></div>
+      <div class="live-need" id="live-need" hidden>
+        <p>Live calls use <b>Qwen3.5 2B</b> or <b>4B</b>: small enough to share the GPU with Whisper and the voice, and they can see through the webcam. The 2B (2.7 GB) fits beside a VoxCPM2 voice; the 4B (3.4 GB) answers better with Kokoro voices.</p>
+        <button class="btn primary" id="live-get-model" type="button">Get it from the model catalog</button>
+      </div>
+      <div class="live-captions"><p class="you" id="live-you"></p><p class="reply" id="live-reply"></p></div>
+      <div class="live-bar">
+        <button class="live-ctl" id="live-mute" type="button" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /><path class="slash" d="M4 4l16 16" /></svg><span id="live-mute-label">Mute</span></button>
+        <button class="live-ctl" id="live-cam" type="button" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="6" width="13" height="12" rx="2" /><path d="M15 10l6-3v10l-6-3z" /></svg><span>Camera</span></button>
+        <label class="live-voice"><span>Voice</span><select id="live-voice" aria-label="Voice"><option value="af_heart">af_heart</option></select></label>
+        <button class="live-ctl end" id="live-end" type="button" title="End the call (Esc)"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 9c-3.4 0-6.6.9-9.3 2.6-.5.3-.7.9-.6 1.4l.6 2.4c.1.6.7 1 1.3.9l3.2-.6c.5-.1.9-.5.9-1v-2c1.2-.4 2.5-.6 3.9-.6s2.7.2 3.9.6v2c0 .5.4.9.9 1l3.2.6c.6.1 1.2-.3 1.3-.9l.6-2.4c.1-.5-.1-1.1-.6-1.4C18.6 9.9 15.4 9 12 9z" /></svg><span>End</span></button>
+      </div>
+      <p class="credit center live-credit">Whisper hears you · the camera frame goes with each turn when it's on · everything stays on this PC · the call is saved in Past chats</p>
     </div>
 
     <dialog class="sheet" id="settings">
