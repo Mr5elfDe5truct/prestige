@@ -120,6 +120,8 @@ const KNOWN: Known[] = [
   { match: /qwen3\.5-9b/i, name: "Qwen3.5 9B Uncensored", role: "Fast", order: 1 },
   { match: /^gemma4:12b/i, name: "Gemma 4 12B", role: "Vision", order: 2 },
   { match: /^gemma4:e4b/i, name: "Gemma 4 E4B", role: "Vision · small", order: 3 },
+  { match: /^qwen3\.5:4b/i, name: "Qwen3.5 4B", role: "Live · vision", order: 3.5 },
+  { match: /^qwen3\.5:2b/i, name: "Qwen3.5 2B", role: "Live · vision", order: 3.6 },
   { match: /^llama3\.1/i, name: "Llama 3.1 8B", role: "General", order: 4 },
   { match: /^qwen2\.5-coder:7b/i, name: "Qwen2.5 Coder 7B", role: "Code", order: 5 },
   { match: /^qwen2\.5-coder:1\.5b/i, name: "Qwen2.5 Coder 1.5B", role: "Code · small", order: 6 },
@@ -269,12 +271,20 @@ async function readLines(body: ReadableStream<Uint8Array>, onLine: (line: string
   if (buf.trim()) onLine(buf.trim());
 }
 
+/** Ollama request options for special cases (Live mode: no thinking, a smaller context, kept loaded for the call). */
+export interface ChatExtra {
+  think?: boolean;
+  numCtx?: number;
+  keepAlive?: string;
+}
+
 export async function streamChat(
   model: ModelInfo,
   messages: ChatMessage[],
   h: StreamHandlers,
   signal: AbortSignal,
   tools?: any[],
+  extra: ChatExtra = {},
 ): Promise<StreamStats & { toolCalls: ToolCall[] }> {
   const toolCalls: ToolCall[] = [];
   const withTools = tools?.length ? { tools } : {};
@@ -294,7 +304,15 @@ export async function streamChat(
     const r = await http(`${OLLAMA}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: model.id, messages: messages.map(toOllama), stream: true, options: { num_ctx: NUM_CTX }, ...withTools }),
+      body: JSON.stringify({
+        model: model.id,
+        messages: messages.map(toOllama),
+        stream: true,
+        options: { num_ctx: extra.numCtx ?? NUM_CTX },
+        ...(extra.think !== undefined ? { think: extra.think } : {}),
+        ...(extra.keepAlive ? { keep_alive: extra.keepAlive } : {}),
+        ...withTools,
+      }),
       signal,
     });
     if (!r.ok || !r.body) throw new Error(`Ollama answered ${r.status}: ${(await r.text()).slice(0, 300)}`);

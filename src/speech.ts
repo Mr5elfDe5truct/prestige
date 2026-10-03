@@ -40,6 +40,12 @@ function rms(a: AnalyserNode | null) {
   return Math.sqrt(s / buf.length);
 }
 
+/** Where speech is played: the analyser that drives the avatar, then the speakers. */
+export function outputNode(): AudioNode {
+  audio();
+  return outAnalyser!;
+}
+
 /** 0..1 loudness of what Prestige is saying right now. */
 export const outputLevel = () => Math.min(1, rms(outAnalyser) * 4);
 /** 0..1 loudness of the microphone (when it's open). */
