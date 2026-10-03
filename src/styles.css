@@ -443,13 +443,16 @@ dialog.catalog[open] { display: flex; flex-direction: column; }
 @keyframes speak-wave { 50% { opacity: .25; } }
 #composer-speak.on { color: var(--gold); border-color: color-mix(in srgb, var(--gold) 45%, var(--line)); }
 .render-progress { display: flex; flex-direction: column; gap: 6px; max-width: 420px; }
-.chat-render { margin: 0; display: flex; flex-direction: column; gap: 6px; max-width: 512px; }
-.chat-render .pic { padding: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #060404; cursor: zoom-in; aspect-ratio: 1; }
+.chat-renders { display: grid; gap: 8px; max-width: 512px; }
+.chat-renders.multi { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 640px; }
+.chat-render { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.chat-render .pic { padding: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #060404; cursor: zoom-in; }
 .chat-render .pic:hover { border-color: var(--gold); }
-.chat-render img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.chat-render figcaption { font-size: 12px; color: var(--muted); }
-.chat-render.missing .pic { display: none; }
-.chat-render.missing figcaption::after { content: " · the file is no longer in ComfyUI's output folder"; }
+.chat-render img { width: 100%; height: auto; display: block; }
+.chat-render video { width: 100%; display: block; border: 1px solid var(--line); border-radius: 10px; background: #060404; }
+.render-caption { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+.chat-render.missing .pic, .chat-render.missing video { display: none; }
+.chat-render.missing::after { content: "This file is no longer in ComfyUI's output folder."; font-size: 12px; color: var(--muted); }
 .history-search { margin: 8px 8px 2px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font: 13px var(--body); padding: 7px 10px; }
 .history-search:focus { border-color: var(--gold); outline: none; }
 .history-item .s { margin-top: 3px; font-size: 11.5px; color: var(--muted); line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
@@ -464,3 +467,22 @@ dialog.catalog[open] { display: flex; flex-direction: column; }
 .ctx-menu button.danger:hover { background: rgba(214, 32, 43, .18); }
 .ctx-menu kbd { font: 11px var(--mono); color: var(--muted); }
 .ctx-menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 6px; }
+
+/* ---------- 0.11: generation settings ---------- */
+.opt.set.on { color: var(--gold); border-color: var(--gold); }
+.vram-warn { margin: 0; padding: 7px 10px; border: 1px solid var(--warn); border-radius: 8px; background: color-mix(in srgb, var(--warn) 9%, var(--panel)); color: var(--warn); font-size: 12.5px; }
+.vram-warn::before { content: "⚠ "; }
+.gen-settings { border-top: 1px solid var(--line); padding-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+.set-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px 12px; }
+.set-grid select, .seed-row input { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font: 13px var(--body); padding: 7px 9px; min-width: 0; width: 100%; text-transform: none; letter-spacing: 0; }
+.set-grid small { font-family: var(--mono); font-size: 10.5px; color: var(--muted); text-transform: none; letter-spacing: 0; }
+.seed-row { display: flex; gap: 6px; align-items: center; text-transform: none; letter-spacing: 0; }
+.set-grid .field.seed { grid-column: span 2; }
+.seed-row input { flex: 1 1 110px; min-width: 90px; font-family: var(--mono); }
+.btn.mini { padding: 5px 8px; font-size: 11.5px; white-space: nowrap; font-family: var(--body); }
+.set-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.gen-pop { width: min(560px, 94vw); max-height: 70vh; overflow-y: auto; }
+.gen-pop .set-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+.gen-tabs { display: flex; gap: 4px; }
+.gen-tabs button { border: 1px solid var(--line); background: none; border-radius: 999px; padding: 3px 12px; font-size: 12px; color: var(--muted); }
+.gen-tabs button.on { color: var(--fg); border-color: var(--gold); }

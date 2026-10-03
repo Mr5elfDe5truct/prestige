@@ -13,7 +13,8 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { initSystem, onGpu, showSystem, unloadAll, type Gpu } from "./system";
-import { allowRenders, cancelRender, imageModelLabel, initStudio, openRender, renderImage, renderMenu, showStudio } from "./studio";
+import { allowRenders, cancelRender, chatSettings, initStudio, modelLabel, openRender, renderMedia, renderMenu, showStudio, type MediaKind } from "./studio";
+import { onSettingsChange } from "./gensettings";
 import { initVoice, showVoice } from "./voice";
 import { initCamera, showCameraPane } from "./camera";
 import { onSpeakingChange, speak, speakDelta, speakEnd, stopSpeaking } from "./speech";
@@ -59,7 +60,8 @@ interface StoredMessage {
   error?: boolean;
   images?: string[]; // webcam frames sent with a user message (base64 JPEG)
   tools?: ToolStep[]; // tools the model used for this reply
-  render?: { path: string; prompt: string; seconds?: number }; // an image made from chat
+  // An image (or several, or a video) made from chat. "more" holds the other images of a batch.
+  render?: { path: string; prompt: string; seconds?: number; more?: string[]; kind?: MediaKind };
 }
 interface Chat {
   id: string;
@@ -308,20 +310,36 @@ function markSpeaking(b: HTMLElement | null) {
   b?.classList.add("speaking");
 }
 
-/** An image made from chat: the picture (click to open it in the lightbox) and where it was saved. */
+/** Images or a video made from chat: each picture (click to open it in the lightbox) and the prompt. */
 function renderFigure(bubble: HTMLElement, r: NonNullable<StoredMessage["render"]>) {
   const body = $(".msg-body", bubble);
-  body.innerHTML = `<figure class="chat-render"><button type="button" class="pic" title="Open it (right-click for more: copy, save, edit, delete…)"><img alt="" /></button><figcaption></figcaption></figure>`;
-  const img = $("img", body) as HTMLImageElement;
-  img.alt = r.prompt;
-  if (inTauri) allowRenders().then(() => (img.src = convertFileSrc(r.path)));
-  img.addEventListener("error", () => body.querySelector("figure")?.classList.add("missing"), { once: true });
-  img.addEventListener("load", () => scrollDown());
-  $("figcaption", body).textContent = `${r.prompt}${r.seconds ? ` · ${r.seconds} s` : ""}`;
-  $(".pic", body).addEventListener("click", () => openRender(r.path));
-  const fig = $("figure", body) as HTMLElement;
-  fig.dataset.path = r.path;
-  fig.addEventListener("contextmenu", (e) => renderMenu(e, r.path));
+  body.innerHTML = `<div class="chat-renders"></div><p class="render-caption"></p>`;
+  const paths = [r.path, ...(r.more ?? [])];
+  $(".chat-renders", body).classList.toggle("multi", paths.length > 1);
+  for (const path of paths) {
+    const fig = document.createElement("figure");
+    fig.className = "chat-render";
+    fig.dataset.path = path;
+    if (r.kind === "video") {
+      // Plays inline; right-click for the rest.
+      fig.innerHTML = `<video controls loop playsinline preload="metadata"></video>`;
+      const v = $("video", fig) as HTMLVideoElement;
+      if (inTauri) allowRenders().then(() => (v.src = convertFileSrc(path)));
+      v.addEventListener("error", () => fig.classList.add("missing"), { once: true });
+      v.addEventListener("loadedmetadata", () => scrollDown());
+    } else {
+      fig.innerHTML = `<button type="button" class="pic" title="Open it (right-click for more: copy, save, edit, delete…)"><img alt="" /></button>`;
+      const img = $("img", fig) as HTMLImageElement;
+      img.alt = r.prompt;
+      if (inTauri) allowRenders().then(() => (img.src = convertFileSrc(path)));
+      img.addEventListener("error", () => fig.classList.add("missing"), { once: true });
+      img.addEventListener("load", () => scrollDown());
+      $(".pic", fig).addEventListener("click", () => openRender(path));
+    }
+    fig.addEventListener("contextmenu", (e) => renderMenu(e, path));
+    $(".chat-renders", body).appendChild(fig);
+  }
+  $(".render-caption", body).textContent = `${r.prompt}${r.seconds ? ` · ${r.seconds} s` : ""}`;
 }
 
 function setThinking(bubble: HTMLElement, text: string, open: boolean) {
@@ -614,16 +632,21 @@ export interface ReplyHooks {
   onDone?: (ok: boolean) => void;
 }
 
-// ---------- images from chat ----------
+// ---------- images and videos from chat ----------
 // "/image a lighthouse at dusk" (or /imagine, /img), or a plain ask like "draw me…" / "make an image of…".
+// "/video waves on rocks at dawn" (or /clip), or "make a video of…".
 const IMAGE_CMD = /^\/(?:image|imagine|img)\b\s*/i;
+const VIDEO_CMD = /^\/(?:video|clip)\b\s*/i;
+const VIDEO_ASK =
+  /^(?:please\s+)?(?:(?:can|could|would)\s+you\s+)?(?:make|generate|create|render)\s+(?:me\s+)?(?:an?\s+)?(?:video|clip|animation)\s+(?:of|showing)\s+/i;
 const IMAGE_ASK =
   /^(?:please\s+)?(?:(?:can|could|would)\s+you\s+)?(?:(?:draw|paint|sketch)\s+me\s+|(?:draw|paint|sketch|make|generate|create|render)\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|photo|illustration|drawing|painting|wallpaper)\s+of\s+)/i;
 
-/** The image prompt in a message, "" for a bare /image, or null when it isn't an image request. */
-function imageRequest(text: string): string | null {
-  const m = text.match(IMAGE_CMD) ?? text.match(IMAGE_ASK);
-  return m ? text.slice(m[0].length).trim().replace(/[.?!]+$/, "") : null;
+/** The prompt in an image or video request ("" for a bare /image or /video), or null when it isn't one. */
+function mediaRequest(text: string): { kind: MediaKind; prompt: string } | null {
+  const v = text.match(VIDEO_CMD) ?? text.match(VIDEO_ASK);
+  const m = v ?? text.match(IMAGE_CMD) ?? text.match(IMAGE_ASK);
+  return m ? { kind: v ? "video" : "image", prompt: text.slice(m[0].length).trim().replace(/[.?!]+$/, "") } : null;
 }
 
 function setBusyUi(on: boolean) {
@@ -633,16 +656,17 @@ function setBusyUi(on: boolean) {
   ($("#send") as HTMLButtonElement).disabled = on;
 }
 
-/** Makes an image with the Studio's image model (Qwen-Image-2.1 or its turbo) and shows it in the chat. */
-async function makeImage(text: string, prompt: string, hooks?: ReplyHooks) {
+/** Makes images with the Studio's image model (Qwen-Image-2.1 or its turbo), or a video with LTX, and shows them in the chat. */
+async function makeMedia(text: string, kind: MediaKind, prompt: string, hooks?: ReplyHooks) {
+  const what = kind === "video" ? "video" : "image";
   if (!inTauri) {
-    toast("Images are made in the desktop app.");
+    toast(`${kind === "video" ? "Videos" : "Images"} are made in the desktop app.`);
     return hooks?.onDone?.(false);
   }
   if (chat.messages.length === 0) chat.title = text.replace(/\s+/g, " ").slice(0, 60);
   chat.messages.push({ role: "user", content: text });
   renderChat();
-  const label = await imageModelLabel();
+  const label = await modelLabel(kind);
   const reply: StoredMessage = { role: "assistant", content: "", model: label };
   const bubble = addAiBubble(label);
   const body = $(".msg-body", bubble);
@@ -653,20 +677,22 @@ async function makeImage(text: string, prompt: string, hooks?: ReplyHooks) {
   setBusyUi(true);
   const t0 = Date.now();
   try {
-    const a = await renderImage(prompt, (pct, label) => {
+    const got = await renderMedia(kind, prompt, (pct, label) => {
       ($(".progress", body) as HTMLElement | null)?.style.setProperty("--v", String(pct));
       const l = $(".status-line", body);
       if (l) l.textContent = label;
     });
-    reply.render = { path: a.path, prompt, seconds: Math.round((Date.now() - t0) / 1000) };
+    const [a, ...more] = got;
+    reply.render = { path: a.path, prompt, seconds: Math.round((Date.now() - t0) / 1000), kind, ...(more.length ? { more: more.map((x) => x.path) } : {}) };
     // What chat models see in later turns.
-    reply.content = `(I made an image with ${label} for: "${prompt}". It's saved as ${a.name}.)`;
+    const names = got.map((x) => x.name).join(", ");
+    reply.content = `(I made ${got.length > 1 ? `${got.length} images` : `a ${what}`} with ${label} for: "${prompt}". Saved as ${names}.)`;
     renderFigure(bubble, reply.render);
   } catch (e) {
     if (busy?.signal.aborted) reply.content = "*(stopped)*";
     else {
       reply.error = true;
-      reply.content = `Couldn't make the image: ${errMsg(e)}`;
+      reply.content = `Couldn't make the ${what}: ${errMsg(e)}`;
       bubble.classList.add("error");
     }
     body.innerHTML = md(reply.content);
@@ -678,7 +704,7 @@ async function makeImage(text: string, prompt: string, hooks?: ReplyHooks) {
     scrollDown();
     persist().catch((e) => toast(`Couldn't save this chat: ${e}`, "warn"));
     if (hooks) {
-      hooks.onDelta?.(reply.render ? "Here's your image." : "I couldn't make that image.");
+      hooks.onDelta?.(reply.render ? `Here's your ${what}.` : `I couldn't make that ${what}.`);
       hooks.onDone?.(!!reply.render);
     }
   }
@@ -691,13 +717,17 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     opts.hooks?.onDone?.(false);
     return;
   }
-  const imagePrompt = opts.images?.length || attachments.length ? null : imageRequest(text);
-  if (imagePrompt === "") {
-    toast("Describe the image after /image, e.g. /image a lighthouse at dusk in the rain");
+  const media = opts.images?.length || attachments.length ? null : mediaRequest(text);
+  if (media?.prompt === "") {
+    toast(
+      media.kind === "video"
+        ? "Describe the clip after /video, e.g. /video waves crashing on rocks at dawn, gulls calling"
+        : "Describe the image after /image, e.g. /image a lighthouse at dusk in the rain",
+    );
     opts.hooks?.onDone?.(false);
     return;
   }
-  if (imagePrompt) return makeImage(text, imagePrompt, opts.hooks);
+  if (media) return makeMedia(text, media.kind, media.prompt, opts.hooks);
   const images = opts.images ?? (attachments.length ? attachments : undefined);
   if (!opts.images) {
     attachments = [];
@@ -1000,7 +1030,32 @@ function wire() {
     else pop.hidden = true;
   });
   document.addEventListener("click", (e) => {
-    if (!(e.target as HTMLElement).closest("#tools-pop, #composer-tools")) $("#tools-pop").hidden = true;
+    const t = e.target as HTMLElement;
+    if (!t.closest("#tools-pop, #composer-tools")) $("#tools-pop").hidden = true;
+    // isConnected: the form re-renders on each change, so the clicked control may already be gone.
+    if (t.isConnected && !t.closest("#gen-pop, #composer-gen")) $("#gen-pop").hidden = true;
+  });
+  // Image and video settings (the same ones as Studio's), with an Image / Video switch.
+  let genTab: MediaKind = "image";
+  const genTabs = () => Array.from(document.querySelectorAll<HTMLElement>("#gen-pop [data-tab]"));
+  const renderGenPop = () => {
+    genTabs().forEach((b) => b.classList.toggle("on", b.dataset.tab === genTab));
+    chatSettings($("#gen-pop-body"), genTab);
+  };
+  $("#composer-gen").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const pop = $("#gen-pop");
+    pop.hidden = !pop.hidden;
+    if (!pop.hidden) renderGenPop();
+  });
+  genTabs().forEach((b) =>
+    b.addEventListener("click", () => {
+      genTab = b.dataset.tab as MediaKind;
+      renderGenPop();
+    }),
+  );
+  onSettingsChange(() => {
+    if (!$("#gen-pop").hidden) renderGenPop();
   });
   $("#stop").addEventListener("click", () => {
     busy?.abort();
@@ -1008,7 +1063,7 @@ function wire() {
   });
   // Image button: starts the message with /image, so whatever is typed next becomes the picture.
   $("#composer-image").addEventListener("click", () => {
-    const v = ta.value.replace(IMAGE_CMD, "");
+    const v = ta.value.replace(IMAGE_CMD, "").replace(VIDEO_CMD, "");
     ta.value = `/image ${v}`;
     autosize();
     ta.focus();

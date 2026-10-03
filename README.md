@@ -52,7 +52,7 @@ Everything below was made on the reference PC (RTX 3060 12 GB) from inside the a
 |---|---|---|
 | 💬 | **Chat with every local model** | Streaming from Ollama and the llama.cpp router, a model switcher with roles (Main · Fast · Vision · General · Code), tokens per second on every reply, history saved on your PC |
 | 🔧 | **Tools in chat** | Web search, page fetching, the Reddit / Hugging Face / GitHub scout, files, PowerShell and browser control from the workstation's tool server, switched per group. Anything that changes something asks first |
-| 🖌️ | **Images in chat** | Type `/image a lighthouse at dusk` (or *"draw me…"*, *"make an image of…"*, or click the picture button) and Qwen-Image-2.1 (or its 4-step turbo) paints it right in the conversation, with live progress. Click the picture to open it; right-click for the full menu |
+| 🖌️ | **Images in chat** | Type `/image a lighthouse at dusk` (or *"draw me…"*, *"make an image of…"*, or click the picture button) and Qwen-Image-2.1 (or its 4-step turbo) paints it right in the conversation, with live progress. Click the picture to open it; right-click for the full menu. `/video` (or *"make a video of…"*) makes an LTX-2.5 clip with sound the same way |
 | 🔊 | **Replies read aloud** | A speaker button on every reply, or switch on **Read replies aloud** in the message box and Kokoro reads each answer as it streams. The mic button talks to it |
 | 🔎 | **Search past chats** | Search box in **Past chats** (Ctrl+K) finds every conversation containing your words, shows the passage and jumps to it. Models can search them too (*"what did we decide about…"*), via the **Past chats** tool |
 | 🏷️ | **Know your models** | Every model shows what it can do (🔧 tools, 👁 vision, 🧠 thinking, 💻 code, 🔓 uncensored) and whether it fits in VRAM, detected automatically for anything you add |
@@ -62,7 +62,8 @@ Everything below was made on the reference PC (RTX 3060 12 GB) from inside the a
 | 🖼️ | **Studio** | A gallery of your real ComfyUI renders, with prompts read from the files, plus image generation (Qwen-Image-2.1, its turbo, or Z-Image-Turbo) and LTX-2.5 text-to-video with sound, with live progress |
 | ✏️ | **Edit** | Change any image by instruction with Qwen-Image-2.1 ("make it night", "swap the car for a horse") |
 | 🖱️ | **Right-click menu** | On any render in the gallery, the viewer or a chat: open, show info, open in folder, edit, animate, reuse or copy the prompt, copy the image, file or path, save a copy, and delete (to the Recycle Bin) |
-| 🎬 | **Animate** | Turn any image into a 5-second video with Wan 2.2 |
+| 🎬 | **Animate** | Turn any image into a video (5 seconds by default) with Wan 2.2 |
+| 🎛️ | **Generation settings** | Shape and size, quality (steps), how many images and seed for pictures; resolution, length, frame rate, quality and seed for video. Shared by Studio (**⚙ Settings**) and chat (the sliders button), with defaults that suit a 12 GB card, a time estimate, and a warning before a pick is likely to run out of VRAM. Right-click a render to reuse its seed |
 | 🎙️ | **Voice conversation** | Push-to-talk or hands-free, with Whisper listening and Kokoro speaking each sentence as the reply streams. Talk over it to interrupt |
 | 🎩 | **A living avatar** | The top-hat's red eye and gold rings pulse with its actual voice |
 | 👀 | **Webcam vision** | *Ask about this* sends the frame to Gemma 4, live captions, and a camera button in chat |

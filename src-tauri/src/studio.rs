@@ -31,6 +31,7 @@ pub struct Asset {
     model: Option<String>,
     width: Option<u32>,
     height: Option<u32>,
+    seed: Option<u64>,
 }
 
 /// Metadata is cached per file (path + mtime) so the gallery doesn't re-read every file each refresh.
@@ -62,13 +63,14 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>, depth: u32) {
     }
 }
 
-/// The positive prompt and main model from a ComfyUI API-format workflow.
-fn describe_workflow(json: &str) -> (Option<String>, Option<String>) {
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else { return (None, None) };
-    let Some(nodes) = v.as_object() else { return (None, None) };
+/// The positive prompt, main model and seed from a ComfyUI API-format workflow.
+fn describe_workflow(json: &str) -> (Option<String>, Option<String>, Option<u64>) {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else { return (None, None, None) };
+    let Some(nodes) = v.as_object() else { return (None, None, None) };
+    // Qwen-Image's encoder calls its text input "prompt".
     let text_of = |id: &str| -> Option<String> {
-        let n = nodes.get(id)?;
-        n["inputs"]["text"].as_str().map(String::from)
+        let i = &nodes.get(id)?["inputs"];
+        i["text"].as_str().or(i["prompt"].as_str()).map(String::from)
     };
     // Follow the sampler's (or guider's) "positive" link to its text encoder.
     let mut prompt = None;
@@ -94,7 +96,17 @@ fn describe_workflow(json: &str) -> (Option<String>, Option<String>) {
             Path::new(m).file_stem().and_then(|s| s.to_str()).unwrap_or(m).to_string()
         })
     });
-    (prompt, model)
+    // The first sampler's seed (lowest node id: LTX's second noise node is a refine pass).
+    let seed = nodes
+        .iter()
+        .filter_map(|(id, n)| {
+            let i = &n["inputs"];
+            let s = i["seed"].as_u64().or(i["noise_seed"].as_u64())?;
+            Some((id.parse::<u64>().unwrap_or(u64::MAX), s))
+        })
+        .min()
+        .map(|(_, s)| s);
+    (prompt, model, seed)
 }
 
 /// ComfyUI stores the workflow as a PNG tEXt chunk named "prompt". Also returns the image size.
@@ -154,7 +166,7 @@ fn build_asset(p: &Path, mtime: f64, size: u64) -> Asset {
         _ if kind == "video" => video_meta(p),
         _ => (None, None),
     };
-    let (prompt, model) = wf.as_deref().map(describe_workflow).unwrap_or((None, None));
+    let (prompt, model, seed) = wf.as_deref().map(describe_workflow).unwrap_or((None, None, None));
     Asset {
         path: p.to_string_lossy().into_owned(),
         name: p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string(),
@@ -165,6 +177,7 @@ fn build_asset(p: &Path, mtime: f64, size: u64) -> Asset {
         model,
         width: dims.map(|d| d.0),
         height: dims.map(|d| d.1),
+        seed,
     }
 }
 

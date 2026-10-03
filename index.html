@@ -77,8 +77,9 @@
           <form class="composer" id="composer">
             <button type="button" class="icon-btn" id="composer-tools" aria-label="Tools" title="Tools"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z" /></svg><span class="count" id="tools-count"></span></button>
             <button type="button" class="icon-btn" id="composer-cam" aria-label="Attach a webcam frame" title="Attach a webcam frame"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7h4l2-3h6l2 3h4v12H3z" /><circle cx="12" cy="13" r="4" /></svg></button>
-            <button type="button" class="icon-btn" id="composer-image" aria-label="Make an image" title="Make an image (Z-Image-Turbo). Or type /image followed by what to draw"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="M21 16l-5-5-9 9" /></svg></button>
-            <textarea id="prompt" rows="1" autocomplete="off" placeholder="Ask anything, or /image to make a picture…" aria-label="Message"></textarea>
+            <button type="button" class="icon-btn" id="composer-image" aria-label="Make an image" title="Make an image. Or type /image (or /video) followed by what to make"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="M21 16l-5-5-9 9" /></svg></button>
+            <button type="button" class="icon-btn" id="composer-gen" aria-label="Image and video settings" title="Image and video settings: size, quality, seed, length…"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0" /><circle cx="16" cy="6" r="2" /><circle cx="10" cy="12" r="2" /><circle cx="18" cy="18" r="2" /></svg></button>
+            <textarea id="prompt" rows="1" autocomplete="off" placeholder="Ask anything, or /image or /video to make one…" aria-label="Message"></textarea>
             <button type="button" class="icon-btn" id="stop" aria-label="Stop" title="Stop" hidden>
               <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1" /></svg>
             </button>
@@ -93,6 +94,11 @@
             <div id="tools-list"></div>
             <p class="credit" id="tools-note"></p>
             <p class="credit">Read-only lookups run straight away. Anything that changes files, runs commands, uses the camera or drives the browser asks you first.</p>
+          </div>
+          <div class="tools-pop gen-pop" id="gen-pop" hidden>
+            <div class="tools-head"><b>Generation settings</b><span class="gen-tabs"><button type="button" data-tab="image" class="on">Image</button><button type="button" data-tab="video">Video</button></span></div>
+            <div id="gen-pop-body"></div>
+            <p class="credit">Type <b>/image</b> or <b>/video</b> and a description to make one here.</p>
           </div>
           <div class="cam-pop" id="cam-pop" hidden>
             <video id="cam-pop-video" muted playsinline></video>
@@ -146,6 +152,8 @@
             <button class="btn primary" id="gen-btn" type="submit">Generate</button>
           </form>
           <div class="opts" id="gen-opts"></div>
+          <p class="vram-warn" id="gen-warn" hidden></p>
+          <div class="gen-settings" id="gen-settings" hidden></div>
           <div class="cam-pane" id="cam-pane" hidden>
             <div class="cam-view" id="cam-view"><video id="cam-video" muted playsinline></video><div class="scan"></div><span class="off-note">Camera is off</span></div>
             <div class="cam-side">
