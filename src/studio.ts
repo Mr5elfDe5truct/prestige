@@ -1,10 +1,35 @@
 // Studio screen: the real renders in ComfyUI's output folder, and a create bar that queues the
 // stack's own ComfyUI workflows (Qwen-Image-2.1 or its 4-step turbo for images, Z-Image-Turbo without
 // them, Qwen-Image-2.1 to edit an image, LTX-2.5 for video with sound, Wan 2.2 to animate an image).
-// The Webcam mode shows the camera pane from camera.ts. Chat uses renderImage() to make an image the same way and show it inline.
+// The Webcam mode shows the camera pane from camera.ts. Chat uses renderMedia() to make images or a video the same way
+// and show them inline. Size, quality, seed, count, length and fps come from gensettings.ts, shared with chat.
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { errMsg, http } from "./backends";
+import {
+  ASPECTS,
+  LTX_FPS,
+  LTX_RES,
+  LTX_SECONDS,
+  QUALITY_NAMES,
+  SIZES,
+  WAN_RES,
+  WAN_SECONDS,
+  aboutTime,
+  imageDims,
+  lastSeed,
+  ltxFrames,
+  onSettingsChange,
+  parseRes,
+  reset,
+  settings,
+  takeSeed,
+  update,
+  wanAuto,
+  wanFrames,
+  type Quality,
+  type SettingsKey,
+} from "./gensettings";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
 const $$ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => Array.from(r.querySelectorAll(s)) as T[];
@@ -21,80 +46,219 @@ interface Asset {
   model?: string | null;
   width?: number | null;
   height?: number | null;
+  seed?: number | null;
 }
 
 type GenMode = "image" | "fast" | "edit" | "video" | "animate";
 
+// How a workflow takes the generation settings: an image model with a latent size and batch, an edit
+// (size follows the picture), LTX with a 2× upscale pass ("ltx") or without ("ltx1"), or Wan's two samplers.
+type Family = "image" | "edit" | "ltx" | "ltx1" | "wan";
+
 interface Mode {
   file: string;
   label: string;
+  family: Family;
   promptNode: string;
   promptKey?: string; // the prompt input's name, "text" unless set
-  seed: [string, string]; // node id, input name
-  opts: string[];
+  seed: [string, string]; // node id, input name (for images also the sampler, which takes the steps)
+  latent?: string; // the empty latent's node (width, height, batch_size)
+  steps?: Partial<Record<Quality, number>>; // sampler steps per quality
+  secs: number; // render time at the default settings on the reference RTX 3060 12 GB
+  note?: string;
   imageNode?: string; // LoadImage node for image-to-video and edits
   fallback?: Mode; // used when this workflow file isn't there
 }
 
-// The prompt and seed nodes in the stack's exported API workflows (workflows\*.api.json).
+// The nodes in the stack's exported API workflows (workflows\*.api.json) that the settings go into.
+const QWEN_STEPS = { draft: 12, standard: 20, high: 30, max: 40 };
 const ZIMAGE: Mode = {
   file: "z-image-turbo.api.json",
   label: "Z-Image-Turbo",
+  family: "image",
   promptNode: "4",
   seed: ["7", "seed"],
-  opts: ["1024 × 1024", "8 steps", "about 30–45 s"],
+  latent: "6",
+  steps: { draft: 6, standard: 8, high: 12, max: 16 },
+  secs: 40,
 };
 const MODES: Record<GenMode, Mode> = {
   image: {
     file: "qwen-image-21.api.json",
     label: "Qwen-Image-2.1",
+    family: "image",
     promptNode: "4",
     promptKey: "prompt",
     seed: ["6", "seed"],
-    opts: ["1024 × 1024", "20 steps", "best with text and signs", "about 1.5 min"],
+    latent: "5",
+    steps: QWEN_STEPS,
+    secs: 90,
+    note: "best with text and signs",
     fallback: ZIMAGE,
   },
   fast: {
     file: "qwen-image-21-turbo.api.json",
     label: "Qwen-Image-2.1 Turbo",
+    family: "image",
     promptNode: "4",
     promptKey: "prompt",
     seed: ["6", "seed"],
-    opts: ["1024 × 1024", "4 steps", "about 25 s"],
+    latent: "5",
+    steps: { draft: 3, standard: 4, high: 6, max: 8 },
+    secs: 25,
     fallback: ZIMAGE,
   },
   edit: {
     file: "qwen-image-21-edit.api.json",
     label: "Qwen-Image-2.1 Edit",
+    family: "edit",
     promptNode: "4",
     promptKey: "prompt",
     seed: ["6", "seed"],
+    steps: QWEN_STEPS,
+    secs: 90,
+    note: "keeps the image's size",
     imageNode: "9",
-    opts: ["keeps the image's size", "about 1–2 min"],
   },
   video: {
     file: "ltx25-t2v-distilled.api.json",
     label: "LTX-2.5",
+    family: "ltx",
     promptNode: "5",
     seed: ["16", "noise_seed"],
-    opts: ["distilled", "768 × 512", "4 s with sound", "about 6 min"],
+    secs: 360,
     fallback: {
       file: "ltx23-t2v-distilled.api.json",
       label: "LTX-2.3",
+      family: "ltx1",
       promptNode: "5",
       seed: ["16", "noise_seed"],
-      opts: ["distilled", "768 × 512", "4 s with sound", "about 6 min"],
+      secs: 360,
     },
   },
   animate: {
     file: "wan22-i2v-4step.api.json",
     label: "Wan 2.2",
+    family: "wan",
     promptNode: "6",
     seed: ["11", "noise_seed"],
+    steps: { standard: 4, high: 6, max: 8 },
+    secs: 600,
     imageNode: "9",
-    opts: ["I2V 4-step", "832 × 480", "5 s, no sound", "about 10 min"],
   },
 };
+
+// ---------- generation settings → workflow inputs ----------
+interface Plan {
+  w: number; // output size; 0 when it follows the source picture (edits)
+  h: number;
+  steps?: number;
+  count: number;
+  seconds?: number;
+  frames?: number;
+  fps?: number;
+  draft?: boolean; // LTX without its upscale pass: half size, much quicker
+  load: number; // VRAM use relative to the defaults, which fit a 12 GB card
+  secs: number; // rough render time on the reference PC
+  warn: string; // "" when it should fit
+}
+
+const settingsKey = (gm: GenMode): SettingsKey => (gm === "video" ? "video" : gm === "animate" ? "animate" : "image");
+
+/** The quality levels a model offers, with their steps. */
+const levels = (m: Mode) => (Object.keys(QUALITY_NAMES) as Quality[]).filter((q) => m.steps?.[q] != null);
+const stepsOf = (m: Mode, q: Quality) => m.steps?.[q] ?? m.steps?.standard;
+
+const LTX_BASE = 768 * 512 * 97;
+const WAN_BASE = 832 * 480 * 81;
+const MP = 1024 * 1024;
+
+/** What a render with the current settings will be: sizes, steps, frames, and a VRAM and time estimate. */
+function plan(gm: GenMode, src: Asset | null = srcAsset): Plan {
+  const m = modeOf(gm);
+  let p: Omit<Plan, "warn">;
+  if (m.family === "image" || m.family === "edit") {
+    const s = settings().image;
+    const steps = stepsOf(m, s.quality)!;
+    const ratio = steps / m.steps!.standard!;
+    if (m.family === "edit") {
+      const px = src?.width && src.height ? (src.width * src.height) / MP : 1;
+      p = { w: 0, h: 0, steps, count: 1, load: px, secs: m.secs * px * ratio };
+    } else {
+      const [w, h] = imageDims(s.aspect, s.size);
+      const px = (w * h) / MP;
+      p = { w, h, steps, count: s.count, load: px * s.count, secs: m.secs * px * s.count * ratio };
+    }
+  } else if (m.family === "wan") {
+    const s = settings().animate;
+    const [w, h] = s.res === "auto" ? wanAuto(src?.width, src?.height) : parseRes(s.res);
+    const frames = wanFrames(s.seconds);
+    const steps = stepsOf(m, s.quality)!;
+    const load = (w * h * frames) / WAN_BASE;
+    p = { w, h, steps, count: 1, seconds: s.seconds, frames, fps: 16, load, secs: m.secs * load * (steps / 4) };
+  } else {
+    const s = settings().video;
+    const [w, h] = parseRes(s.res);
+    const frames = ltxFrames(s.seconds, s.fps);
+    const draft = m.family === "ltx" && s.quality === "draft";
+    const work = (w * h * frames) / LTX_BASE;
+    p = { w: draft ? w / 2 : w, h: draft ? h / 2 : h, count: 1, seconds: s.seconds, frames, fps: s.fps, draft, load: draft ? work / 4 : work, secs: m.secs * work * (draft ? 0.3 : 1) };
+  }
+  // Videos hold every frame in VRAM at once, so they reach the limit sooner than images.
+  const [soft, hard] = m.family === "image" || m.family === "edit" ? [2.2, 3.5] : [1.35, 2.2];
+  const warn =
+    p.load > hard
+      ? "Likely more than 12 GB of VRAM: it may fail with out of memory. Try a smaller size, a shorter length or fewer images."
+      : p.load > soft
+        ? "Heavy for a 12 GB card: ComfyUI may spill into system RAM and render much slower."
+        : "";
+  return { ...p, warn };
+}
+
+/** Sets a node's inputs if the workflow has that node. */
+function set(g: any, id: string, inputs: Record<string, unknown>) {
+  if (g[id]) Object.assign(g[id].inputs, inputs);
+}
+
+/** Writes the plan and seed into a copy of the workflow. */
+function apply(m: Mode, g: any, p: Plan, seed: number) {
+  set(g, m.seed[0], { [m.seed[1]]: seed });
+  switch (m.family) {
+    case "image":
+      set(g, m.latent!, { width: p.w, height: p.h, batch_size: p.count });
+      set(g, m.seed[0], { steps: p.steps });
+      break;
+    case "edit":
+      set(g, m.seed[0], { steps: p.steps });
+      break;
+    case "ltx":
+    case "ltx1": {
+      // LTX-2.5 makes the clip at half size, then upscales it 2× and refines (nodes 40–46).
+      const half = m.family === "ltx" ? 2 : 1;
+      const [w, h] = p.draft ? [p.w * 2, p.h * 2] : [p.w, p.h];
+      set(g, "14", { width: w / half, height: h / half, length: p.frames });
+      set(g, "13", { frames_number: p.frames, frame_rate: p.fps });
+      set(g, "23", { frame_rate: p.fps });
+      set(g, "36", { fps: p.fps });
+      set(g, "43", { noise_seed: seed + 1 });
+      if (p.draft) {
+        // Decode the first pass directly and drop the upscale.
+        set(g, "35", { samples: ["19", 1] });
+        set(g, "37", { samples: ["19", 0] });
+        for (const id of ["40", "41", "42", "43", "44", "45", "46"]) delete g[id];
+      }
+      break;
+    }
+    case "wan": {
+      // Two samplers split the steps: high-noise model first, low-noise model second.
+      const n = p.steps!;
+      set(g, "10", { width: p.w, height: p.h, length: p.frames });
+      set(g, "11", { steps: n, end_at_step: n / 2 });
+      set(g, "12", { steps: n, start_at_step: n / 2, end_at_step: n, noise_seed: seed });
+      break;
+    }
+  }
+}
 // The Image mode's model: Qwen-Image-2.1, or its 4-step turbo when "fast" is picked (remembered).
 let imageMode: "image" | "fast" = (() => {
   try {
@@ -122,12 +286,13 @@ let srcAsset: Asset | null = null;
 const workflows: Partial<Record<GenMode, any>> = {};
 const active: Partial<Record<GenMode, Mode>> = {}; // the Mode (or fallback) each workflow was loaded from
 const clientId = `prestige-${Math.random().toString(36).slice(2, 10)}`;
-let job: { id: string; mode: GenMode; started: number; prompt: string; nodes: Record<string, string>; outputs: string[] } | null = null;
+let job: { id: string; mode: GenMode; started: number; prompt: string; nodes: Record<string, string>; outputs: string[]; seed: number } | null = null;
 let starting = false; // freeing the GPU / uploading, before ComfyUI has the job
-let freshName = "";
+let fresh = new Set<string>(); // names of the files the last render made
 let workflowsLoaded: Promise<void> | null = null;
-// A render started from chat: it hears the progress and gets the finished file.
-let waiter: { progress: (pct: number, label: string) => void; resolve: (a: Asset) => void; reject: (e: Error) => void } | null = null;
+let settingsOpen = false;
+// A render started from chat: it hears the progress and gets the finished files.
+let waiter: { progress: (pct: number, label: string) => void; resolve: (a: Asset[]) => void; reject: (e: Error) => void } | null = null;
 
 const age = (ms: number) => {
   const s = (Date.now() - ms) / 1000;
@@ -158,13 +323,19 @@ export function initStudio(d: Deps) {
     renderCreate();
   });
   $("#gen-opts").addEventListener("click", (e) => {
-    if (!(e.target as HTMLElement).closest(".opt.pick")) return;
+    const t = e.target as HTMLElement;
+    if (t.closest(".opt.set")) {
+      settingsOpen = !settingsOpen;
+      return renderCreate();
+    }
+    if (!t.closest(".opt.model")) return;
     imageMode = imageMode === "fast" ? "image" : "fast";
     try {
       localStorage.setItem("studio.imageModel", imageMode);
     } catch {}
     renderCreate();
   });
+  onSettingsChange(() => renderCreate());
   $("#gen-form").addEventListener("submit", (e) => {
     e.preventDefault();
     generate();
@@ -228,7 +399,11 @@ function renderCreate() {
     ($("#animate-img") as HTMLImageElement).src = convertFileSrc(srcAsset.path);
     $("#animate-what").textContent = `${gm === "edit" ? "Editing" : "Animating"} this image with ${modeOf(gm).label}`;
   }
-  if (webcam) return;
+  if (webcam) {
+    $("#gen-warn").hidden = true;
+    $("#gen-settings").hidden = true;
+    return;
+  }
   const wf = workflows[gm];
   const m = modeOf(gm);
   $("#create").classList.toggle("disabled", !wf);
@@ -241,15 +416,105 @@ function renderCreate() {
         ? "Say what to change… e.g. make it night, swap the car for a horse, remove the sign"
         : gm === "animate"
           ? "Describe the motion… e.g. slow push-in, snow falling, warm light flickering"
-          : "Describe a 4-second scene, including any sound…";
+          : `Describe a ${settings().video.seconds}-second scene, including any sound…`;
   // In Image mode the model chip switches between Qwen-Image-2.1 and its faster turbo (or Z-Image-Turbo).
   const canPick = (gm === "image" || gm === "fast") && workflows.fast && workflows.image && active.image !== ZIMAGE;
   const chip = canPick
-    ? `<button type="button" class="opt pick" title="Switch image model"><b>${m.label}</b> ⇄</button>`
+    ? `<button type="button" class="opt pick model" title="Switch image model"><b>${m.label}</b> ⇄</button>`
     : `<span class="opt"><b>${m.label}</b></span>`;
+  const p = plan(gm);
+  const gear = `<button type="button" class="opt pick set${settingsOpen ? " on" : ""}" title="Size, quality, seed${gm === "video" || gm === "animate" ? ", length" : ", count"}…" aria-expanded="${settingsOpen}">⚙ Settings</button>`;
   $("#gen-opts").innerHTML = wf
-    ? chip + m.opts.map((o) => `<span class="opt"><b>${o}</b></span>`).join("")
+    ? chip + summary(gm, p).map((o) => `<span class="opt"><b>${o}</b></span>`).join("") + gear
     : `<span class="opt">workflows\\${m.file} not found, so this mode is off</span>`;
+  const warn = $("#gen-warn");
+  warn.hidden = !wf || !p.warn;
+  warn.textContent = p.warn;
+  const panel = $("#gen-settings");
+  panel.hidden = !wf || !settingsOpen;
+  if (!panel.hidden) settingsForm(panel, gm, false);
+}
+
+/** The settings as chips: size, steps, length, seed and a time estimate. */
+function summary(gm: GenMode, p: Plan): string[] {
+  const m = modeOf(gm);
+  const s = settings()[settingsKey(gm)];
+  const out: string[] = [];
+  if (p.w) out.push(`${p.w} × ${p.h}`);
+  if (p.seconds) out.push(`${p.seconds} s · ${p.fps} fps`);
+  if (p.steps) out.push(`${p.steps} steps`);
+  if (p.draft) out.push("draft, one pass");
+  if (m.family === "ltx" || m.family === "ltx1") out.push("with sound");
+  if (m.family === "wan") out.push("no sound");
+  if (p.count > 1) out.push(`${p.count} images`);
+  if (m.note) out.push(m.note);
+  out.push(s.seed != null ? `seed ${s.seed}` : "random seed");
+  out.push(aboutTime(p.secs));
+  return out;
+}
+
+const esc = (s: string) => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+const optionList = (pairs: [string | number, string][], cur: string | number) =>
+  pairs.map(([v, l]) => `<option value="${v}"${String(v) === String(cur) ? " selected" : ""}>${esc(l)}</option>`).join("");
+
+/** The settings form for a mode (Studio's panel and chat's popover). Changes are saved and shared. */
+function settingsForm(el: HTMLElement, gm: GenMode, withWarn: boolean) {
+  const m = modeOf(gm);
+  const key = settingsKey(gm);
+  const s = settings()[key];
+  const p = plan(gm);
+  const field = (label: string, k: string, opts: string, hint = "") =>
+    `<label class="field">${label}<select data-k="${k}">${opts}</select>${hint ? `<small>${hint}</small>` : ""}</label>`;
+  const f: string[] = [];
+  if (m.family === "image") {
+    const img = settings().image;
+    f.push(field("Shape", "aspect", optionList(ASPECTS, img.aspect)));
+    f.push(field("Size", "size", optionList(SIZES.map(([v, l]) => [v, `${l} · ${imageDims(img.aspect, v).join(" × ")}`]), img.size)));
+  }
+  if (m.family === "ltx" || m.family === "ltx1") {
+    const v = settings().video;
+    f.push(field("Resolution", "res", optionList(LTX_RES, v.res)));
+    f.push(field("Length", "seconds", optionList(LTX_SECONDS.map((n) => [n, `${n} seconds`]), v.seconds)));
+    f.push(field("Frame rate", "fps", optionList(LTX_FPS.map((n) => [n, `${n} fps`]), v.fps), `${ltxFrames(v.seconds, v.fps)} frames`));
+  }
+  if (m.family === "wan") {
+    const v = settings().animate;
+    const auto = wanAuto(srcAsset?.width, srcAsset?.height).join(" × ");
+    f.push(field("Resolution", "res", optionList(WAN_RES.map(([r, l]) => [r, r === "auto" ? `${l} (${auto})` : l]), v.res)));
+    f.push(field("Length", "seconds", optionList(WAN_SECONDS.map((n) => [n, `${n} seconds`]), v.seconds), `${wanFrames(v.seconds)} frames at 16 fps, Wan's own rate`));
+  }
+  if (m.family === "ltx")
+    f.push(field("Quality", "quality", optionList([["draft", "Draft · half size, one pass"], ["standard", "Standard · upscaled 2×"]], s.quality === "draft" ? "draft" : "standard")));
+  else if (m.steps) {
+    const q = m.steps[s.quality] != null ? s.quality : "standard";
+    f.push(field("Quality", "quality", optionList(levels(m).map((l) => [l, `${QUALITY_NAMES[l]} · ${m.steps![l]} steps`]), q)));
+  }
+  if (m.family === "image") f.push(field("How many", "count", optionList([1, 2, 3, 4].map((n) => [n, n === 1 ? "1 image" : `${n} images`]), settings().image.count)));
+  const last = lastSeed(key);
+  f.push(
+    `<label class="field seed">Seed<span class="seed-row"><input type="number" min="0" step="1" data-k="seed" placeholder="random" value="${s.seed ?? ""}" />` +
+      `<button type="button" class="btn mini" data-seed="random" title="A new random seed every time">Random</button>` +
+      (last != null ? `<button type="button" class="btn mini" data-seed="last" title="Keep the seed of the last render">Last · ${last}</button>` : "") +
+      `</span></label>`,
+  );
+  el.innerHTML =
+    `<div class="set-grid">${f.join("")}</div>` +
+    (withWarn && p.warn ? `<p class="vram-warn">${esc(p.warn)}</p>` : "") +
+    `<div class="set-foot"><span class="credit">${m.label} · ${aboutTime(p.secs)} on an RTX 3060 12 GB · shared by Studio and chat</span><button type="button" class="linkish" data-reset>Reset to defaults</button></div>`;
+  $$<HTMLSelectElement>("select", el).forEach((sel) =>
+    sel.addEventListener("change", () => {
+      const k = sel.dataset.k!;
+      const num = ["seconds", "fps", "count"].includes(k);
+      update(key, { [k]: num ? Number(sel.value) : sel.value } as any);
+    }),
+  );
+  const seedIn = $<HTMLInputElement>("input[data-k=seed]", el);
+  seedIn.addEventListener("change", () => {
+    const n = Math.floor(Number(seedIn.value));
+    update(key, { seed: seedIn.value.trim() === "" || !Number.isFinite(n) || n < 0 ? null : n });
+  });
+  $$("[data-seed]", el).forEach((b) => b.addEventListener("click", () => update(key, { seed: b.dataset.seed === "last" ? (lastSeed(key) ?? null) : null })));
+  $("[data-reset]", el).addEventListener("click", () => reset(key));
 }
 
 async function refresh() {
@@ -296,14 +561,15 @@ function render() {
   if (job) {
     const p = document.createElement("div");
     p.className = "thumb pending";
-    const vid = job.mode !== "image";
-    p.innerHTML = `<div class="pic"><span class="badge ${vid ? "vid" : ""}">${vid ? "VIDEO" : "IMAGE"}</span></div><figcaption><span class="p"></span><span class="m">rendering…</span></figcaption>`;
+    const vid = job.mode === "video" || job.mode === "animate";
+    const n = vid ? 1 : plan(job.mode).count;
+    p.innerHTML = `<div class="pic"><span class="badge ${vid ? "vid" : ""}">${vid ? "VIDEO" : n > 1 ? `${n} IMAGES` : "IMAGE"}</span></div><figcaption><span class="p"></span><span class="m">rendering…</span></figcaption>`;
     $(".p", p).textContent = job.prompt;
     g.appendChild(p);
   }
   for (const a of list) {
     const fig = document.createElement("button");
-    fig.className = "thumb pending" + (a.name === freshName ? " fresh" : "");
+    fig.className = "thumb pending" + (fresh.has(a.name) ? " fresh" : "");
     fig.dataset.path = a.path;
     fig.innerHTML = `<div class="pic"><span class="badge ${a.kind === "video" ? "vid" : ""}">${a.kind.toUpperCase()}</span></div><figcaption><span class="p"></span><span class="m"></span></figcaption>`;
     $(".p", fig).textContent = a.prompt || a.name;
@@ -368,6 +634,7 @@ function openLightbox(a: Asset) {
     ["Type", a.kind === "video" ? "Video" : "Image"],
     ["Model", a.model || "unknown"],
     ["Size", a.width ? `${a.width} × ${a.height}` : "–"],
+    ["Seed", a.seed != null ? String(a.seed) : "–"],
     ["File size", `${(a.size / 1048576).toFixed(1)} MB`],
     ["Made", `${new Date(a.mtime).toLocaleString()} (${age(a.mtime)})`],
   ];
@@ -420,6 +687,13 @@ function reusePrompt(a: Asset) {
   renderCreate();
   closeLightbox();
   $("#gen-prompt").focus();
+}
+
+/** Fixes the seed for the next render of this kind, to vary a render you liked. */
+function reuseSeed(a: Asset) {
+  const key: SettingsKey = a.kind === "image" ? "image" : /wan/i.test(a.model ?? a.name) ? "animate" : "video";
+  update(key, { seed: a.seed ?? null });
+  deps.toast(`The next ${key === "image" ? "image" : "video"} uses seed ${a.seed}. Pick Random in Settings to go back.`);
 }
 
 const revealFile = (a: Asset) => invoke("reveal", { path: a.path }).catch((e) => deps.toast(errMsg(e), "warn"));
@@ -489,6 +763,7 @@ function showMenu(e: MouseEvent, a: Asset) {
     ...(image && workflows.edit ? [{ label: "Edit with Qwen-Image…", run: () => startFrom(a, "image") }] : []),
     ...(image && workflows.animate ? [{ label: "Animate (image → video)…", run: () => startFrom(a, "video") }] : []),
     ...(a.prompt ? [{ label: "Reuse prompt", run: () => reusePrompt(a) }] : []),
+    ...(a.seed != null ? [{ label: "Reuse seed", run: () => reuseSeed(a), key: String(a.seed) }] : []),
     "-",
     ...(image ? [{ label: "Copy image", run: () => fileAction("copy_render", a, { asImage: true }, "Image copied.") }] : []),
     { label: "Copy file", run: () => fileAction("copy_render", a, { asImage: false }, "File copied. Paste it into a folder or a chat app."), key: "to paste elsewhere" },
@@ -585,7 +860,8 @@ async function queue(gm: GenMode, prompt: string, src: Asset | null) {
   const m = modeOf(gm);
   const graph = structuredClone(wf);
   graph[m.promptNode].inputs[m.promptKey ?? "text"] = prompt;
-  graph[m.seed[0]].inputs[m.seed[1]] = Math.floor(Math.random() * 2 ** 32);
+  const seed = takeSeed(settingsKey(gm));
+  apply(m, graph, plan(gm, src), seed);
   const nodes: Record<string, string> = {};
   for (const [id, n] of Object.entries<any>(graph)) nodes[id] = n.class_type;
 
@@ -611,7 +887,7 @@ async function queue(gm: GenMode, prompt: string, src: Asset | null) {
       const why = body.error?.message || body.node_errors ? JSON.stringify(body.node_errors ?? body.error).slice(0, 200) : `HTTP ${r.status}`;
       throw new Error(why);
     }
-    job = { id: body.prompt_id, mode: gm, started: Date.now(), prompt, nodes, outputs: [] };
+    job = { id: body.prompt_id, mode: gm, started: Date.now(), prompt, nodes, outputs: [], seed };
     setJob(2, "Queued. Loading models…");
     render();
   } catch (e) {
@@ -676,33 +952,50 @@ async function finish(ok: boolean, why = "") {
   renderCreate();
   const before = new Set(items.map((a) => a.path));
   await refresh();
-  const added = items.find((a) => done.outputs.includes(a.name)) ?? items.find((a) => !before.has(a.path));
-  if (ok && added) {
-    freshName = added.name;
+  const named = items.filter((a) => done.outputs.includes(a.name));
+  const added = named.length ? named : items.filter((a) => !before.has(a.path));
+  if (ok && added.length) {
+    fresh = new Set(added.map((a) => a.name));
     render();
     if (w) w.resolve(added);
-    else deps.toast(`Done in ${took} s: ${added.name}`);
+    else deps.toast(`Done in ${took} s (seed ${done.seed}): ${added[0].name}${added.length > 1 ? ` and ${added.length - 1} more` : ""}`);
   } else w?.reject(new Error(why || "ComfyUI finished, but no new file appeared in its output folder"));
 }
 
 // ---------- used from chat ----------
-/** The model chat images are made with: the Studio's Image mode pick. */
-export async function imageModelLabel() {
+export type MediaKind = "image" | "video";
+/** The workflow chat uses: the Studio's Image mode pick, or LTX text-to-video. */
+const chatMode = (kind: MediaKind): GenMode => (kind === "video" ? "video" : workflows[imageMode] ? imageMode : "fast");
+
+/** The model chat images (or videos) are made with. */
+export async function modelLabel(kind: MediaKind) {
   await ensureWorkflows();
-  return modeOf(workflows[imageMode] ? imageMode : "fast").label;
+  return modeOf(chatMode(kind)).label;
 }
 
-/** Makes one image with the Studio's image model and resolves with the saved file. */
-export async function renderImage(prompt: string, progress: (pct: number, label: string) => void): Promise<Asset> {
+/** Makes an image (or as many as the settings ask for) or a video and resolves with the saved files. */
+export async function renderMedia(kind: MediaKind, prompt: string, progress: (pct: number, label: string) => void): Promise<Asset[]> {
   await ensureWorkflows();
-  return new Promise<Asset>((resolve, reject) => {
+  const gm = chatMode(kind);
+  return new Promise<Asset[]>((resolve, reject) => {
     if (job || starting) return reject(new Error("Studio is already rendering something; wait for it to finish"));
     waiter = { progress, resolve, reject };
-    queue(workflows[imageMode] ? imageMode : "fast", prompt, null).catch((e) => {
+    queue(gm, prompt, null).catch((e) => {
       waiter = null;
       reject(e);
     });
   });
+}
+
+/** The generation settings form for chat's popover (the same settings as Studio's). */
+export async function chatSettings(el: HTMLElement, kind: MediaKind) {
+  await ensureWorkflows();
+  const gm = chatMode(kind);
+  if (!workflows[gm]) {
+    el.innerHTML = `<p class="credit">workflows\${esc(modeOf(gm).file)} wasn't found, so chat can't make ${kind === "video" ? "videos" : "images"} yet.</p>`;
+    return;
+  }
+  settingsForm(el, gm, true);
 }
 
 /** Stops the current render (ComfyUI's Cancel). */
