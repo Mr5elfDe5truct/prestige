@@ -13,7 +13,7 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { initSystem, onGpu, showSystem, unloadAll, type Gpu } from "./system";
-import { allowRenders, cancelRender, initStudio, openRender, renderImage, showStudio } from "./studio";
+import { allowRenders, cancelRender, imageModelLabel, initStudio, openRender, renderImage, showStudio } from "./studio";
 import { initVoice, showVoice } from "./voice";
 import { initCamera, showCameraPane } from "./camera";
 import { onSpeakingChange, speak, speakDelta, speakEnd, stopSpeaking } from "./speech";
@@ -630,7 +630,7 @@ function setBusyUi(on: boolean) {
   ($("#send") as HTMLButtonElement).disabled = on;
 }
 
-/** Makes an image with the Studio's Z-Image-Turbo workflow and shows it in the chat. */
+/** Makes an image with the Studio's image model (Qwen-Image-2.1 or its turbo) and shows it in the chat. */
 async function makeImage(text: string, prompt: string, hooks?: ReplyHooks) {
   if (!inTauri) {
     toast("Images are made in the desktop app.");
@@ -639,8 +639,9 @@ async function makeImage(text: string, prompt: string, hooks?: ReplyHooks) {
   if (chat.messages.length === 0) chat.title = text.replace(/\s+/g, " ").slice(0, 60);
   chat.messages.push({ role: "user", content: text });
   renderChat();
-  const reply: StoredMessage = { role: "assistant", content: "", model: "Z-Image-Turbo" };
-  const bubble = addAiBubble("Z-Image-Turbo");
+  const label = await imageModelLabel();
+  const reply: StoredMessage = { role: "assistant", content: "", model: label };
+  const bubble = addAiBubble(label);
   const body = $(".msg-body", bubble);
   body.innerHTML = `<div class="render-progress"><div class="progress"><i></i></div><span class="status-line">Starting…</span></div>`;
   scrollDown(true);
@@ -656,7 +657,7 @@ async function makeImage(text: string, prompt: string, hooks?: ReplyHooks) {
     });
     reply.render = { path: a.path, prompt, seconds: Math.round((Date.now() - t0) / 1000) };
     // What chat models see in later turns.
-    reply.content = `(I made an image with Z-Image-Turbo for: "${prompt}". It's saved as ${a.name}.)`;
+    reply.content = `(I made an image with ${label} for: "${prompt}". It's saved as ${a.name}.)`;
     renderFigure(bubble, reply.render);
   } catch (e) {
     if (busy?.signal.aborted) reply.content = "*(stopped)*";

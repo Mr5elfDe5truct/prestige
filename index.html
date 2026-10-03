@@ -140,7 +140,7 @@
             <button data-mode="webcam" role="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7h4l2-3h6l2 3h4v12H3z" /><circle cx="12" cy="13" r="4" /></svg>Webcam</button>
             <button data-go="voice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 12h2M7 8v8M11 5v14M15 8v8M19 11v2" /></svg>Voice</button>
           </div>
-          <div class="animate-src" id="animate-src" hidden><img id="animate-img" alt="" /><span>Animating this image with Wan 2.2 · <button class="linkish" type="button" id="animate-clear">cancel</button></span></div>
+          <div class="animate-src" id="animate-src" hidden><img id="animate-img" alt="" /><span><span id="animate-what">Animating this image with Wan 2.2</span> · <button class="linkish" type="button" id="animate-clear">cancel</button></span></div>
           <form class="prompt-row" id="gen-form">
             <input id="gen-prompt" autocomplete="off" aria-label="Prompt" placeholder="Describe what to make…" />
             <button class="btn primary" id="gen-btn" type="submit">Generate</button>
@@ -261,6 +261,7 @@
           <div class="acts">
             <button class="btn" id="lb-reveal">Open in folder</button>
             <button class="btn" id="lb-copy">Copy prompt</button>
+            <button class="btn" id="lb-edit">Edit (Qwen-Image)</button>
             <button class="btn" id="lb-animate">Animate (image → video)</button>
             <button class="btn primary" id="lb-reuse">Reuse prompt</button>
             <button class="btn" id="lb-close">Close</button>
