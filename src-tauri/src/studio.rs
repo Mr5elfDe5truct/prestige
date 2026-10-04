@@ -404,49 +404,68 @@ pub fn read_workflow(root: Option<String>, name: String) -> Result<serde_json::V
 }
 
 /// Uploads an image to ComfyUI's input folder (for image-to-video) and returns the name ComfyUI gave it.
-/// A plain multipart POST over a socket, with a local Origin so ComfyUI accepts it.
 #[tauri::command]
 pub async fn comfy_upload(path: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
-        use std::io::Write;
         let src = PathBuf::from(&path);
         let bytes = fs::read(&src).map_err(|e| e.to_string())?;
-        let name = src.file_name().and_then(|n| n.to_str()).unwrap_or("image.png").replace('"', "");
-        let boundary = format!("----prestige{}", fxhash(&path));
-        let mut body = Vec::new();
-        write!(body, "--{boundary}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"{name}\"\r\nContent-Type: application/octet-stream\r\n\r\n").unwrap();
-        body.extend_from_slice(&bytes);
-        write!(body, "\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"overwrite\"\r\n\r\ntrue\r\n--{boundary}--\r\n").unwrap();
-
-        let mut s = std::net::TcpStream::connect("127.0.0.1:8188").map_err(|_| "ComfyUI isn't running".to_string())?;
-        write!(
-            s,
-            "POST /upload/image HTTP/1.1\r\nHost: 127.0.0.1:8188\r\nOrigin: http://127.0.0.1\r\nContent-Type: multipart/form-data; boundary={boundary}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            body.len()
-        )
-        .map_err(|e| e.to_string())?;
-        s.write_all(&body).map_err(|e| e.to_string())?;
-        let mut resp = String::new();
-        s.read_to_string(&mut resp).map_err(|e| e.to_string())?;
-        let status = resp.split_whitespace().nth(1).unwrap_or("");
-        let json = resp.split("\r\n\r\n").nth(1).unwrap_or("");
-        // ComfyUI may answer with chunked encoding; the JSON object is the part between the braces.
-        let json = match (json.find('{'), json.rfind('}')) {
-            (Some(a), Some(b)) => &json[a..=b],
-            _ => json,
-        };
-        if status != "200" {
-            return Err(format!("ComfyUI answered {status}: {}", json.chars().take(200).collect::<String>()));
-        }
-        let v: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
-        let mut n = v["name"].as_str().ok_or("ComfyUI didn't return a name")?.to_string();
-        if let Some(sub) = v["subfolder"].as_str().filter(|s| !s.is_empty()) {
-            n = format!("{sub}/{n}");
-        }
-        Ok(n)
+        let name = src.file_name().and_then(|n| n.to_str()).unwrap_or("image.png").to_string();
+        upload_image(&name, &bytes)
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Uploads image bytes sent straight from the UI (a reference image that was picked, pasted or dropped).
+/// The body is the raw file; the "x-name" header is the name to give it in ComfyUI's input folder.
+#[tauri::command]
+pub async fn comfy_upload_bytes(request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("expected the image's bytes".into());
+    };
+    let name = request.headers().get("x-name").and_then(|v| v.to_str().ok()).unwrap_or("reference.jpg").to_string();
+    let bytes = bytes.clone();
+    tauri::async_runtime::spawn_blocking(move || upload_image(&name, &bytes))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// A plain multipart POST to ComfyUI's /upload/image over a socket, with a local Origin so ComfyUI accepts it.
+fn upload_image(name: &str, bytes: &[u8]) -> Result<String, String> {
+    use std::io::Write;
+    let name = name.replace(['"', '\\', '/', '\r', '\n'], "");
+    let boundary = format!("----prestige{}", fxhash(&format!("{name}{}", bytes.len())));
+    let mut body = Vec::new();
+    write!(body, "--{boundary}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"{name}\"\r\nContent-Type: application/octet-stream\r\n\r\n").unwrap();
+    body.extend_from_slice(bytes);
+    write!(body, "\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"overwrite\"\r\n\r\ntrue\r\n--{boundary}--\r\n").unwrap();
+
+    let mut s = std::net::TcpStream::connect("127.0.0.1:8188").map_err(|_| "ComfyUI isn't running".to_string())?;
+    write!(
+        s,
+        "POST /upload/image HTTP/1.1\r\nHost: 127.0.0.1:8188\r\nOrigin: http://127.0.0.1\r\nContent-Type: multipart/form-data; boundary={boundary}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    )
+    .map_err(|e| e.to_string())?;
+    s.write_all(&body).map_err(|e| e.to_string())?;
+    let mut resp = String::new();
+    s.read_to_string(&mut resp).map_err(|e| e.to_string())?;
+    let status = resp.split_whitespace().nth(1).unwrap_or("");
+    let json = resp.split("\r\n\r\n").nth(1).unwrap_or("");
+    // ComfyUI may answer with chunked encoding; the JSON object is the part between the braces.
+    let json = match (json.find('{'), json.rfind('}')) {
+        (Some(a), Some(b)) => &json[a..=b],
+        _ => json,
+    };
+    if status != "200" {
+        return Err(format!("ComfyUI answered {status}: {}", json.chars().take(200).collect::<String>()));
+    }
+    let v: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
+    let mut n = v["name"].as_str().ok_or("ComfyUI didn't return a name")?.to_string();
+    if let Some(sub) = v["subfolder"].as_str().filter(|s| !s.is_empty()) {
+        n = format!("{sub}/{n}");
+    }
+    Ok(n)
 }
 
 /// Forwards ComfyUI's websocket messages to the UI as "comfy" events. ComfyUI rejects the webview's

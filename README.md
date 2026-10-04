@@ -60,8 +60,9 @@ Everything below was made on the reference PC (RTX 3060 12 GB) from inside the a
 | 🧠 | **Shared long-term memory** | The same memory as Open WebUI, so every model in both apps knows you. Say *"remember that …"* |
 | 📊 | **System dashboard** | Live GPU load, VRAM, temperature and power, Load/Unload for every model, a what's-in-VRAM bar, RAM and service status, and a warning before a model won't fit |
 | 🖼️ | **Studio** | A gallery of your real ComfyUI renders, with prompts read from the files, plus image generation (Qwen-Image-2.1, its turbo, or Z-Image-Turbo) and LTX-2.5 text-to-video with sound, with live progress |
+| 🧍 | **Reference image** | Put a character or an item from your own picture into a new scene: pick, drop or paste it into Studio's **Reference image** slot (or attach it in chat with the paperclip, paste or drop, then `/image` or `/video`) and describe the scene. Qwen-Image-2.1 keeps the subject's look (about 2 min at 1024²); for a video it makes that first frame at the clip's shape and LTX-2.5 animates it with sound (about 6 min for 4 s at 768×512 with the models warm), or LTX animates your picture as it is. Mark it **Character** or **Item** for a closer match. Only use photos of real people with their permission |
 | ✏️ | **Edit** | Change any image by instruction with Qwen-Image-2.1 ("make it night", "swap the car for a horse") |
-| 🖱️ | **Right-click menu** | On any render in the gallery, the viewer or a chat: open, show info, open in folder, edit, animate, reuse or copy the prompt, copy the image, file or path, save a copy, and delete (to the Recycle Bin) |
+| 🖱️ | **Right-click menu** | On any render in the gallery, the viewer or a chat: open, show info, open in folder, edit, animate, use as reference image, reuse or copy the prompt, copy the image, file or path, save a copy, and delete (to the Recycle Bin) |
 | 🎬 | **Animate** | Turn any image into a video (5 seconds by default) with Wan 2.2 |
 | 🎛️ | **Generation settings** | Shape and size, quality (steps), how many images and seed for pictures; resolution, length, frame rate, quality and seed for video. Shared by Studio (**⚙ Settings**) and chat (the sliders button), with defaults that suit a 12 GB card, a time estimate, and a warning before a pick is likely to run out of VRAM. Right-click a render to reuse its seed |
 | 📞 | **Live calls** | A hands-free voice (and webcam) call: just talk. Whisper turbo hears you, Qwen3.5 answers (seeing the current camera frame when the camera is on) and the reply is spoken as it streams, about 2.5–3.5 s after you stop talking. Talk over it and it stops at once and listens. Mute, camera, voice picker (VoxCPM2 cloned voices included) and the whole call saved in **Past chats**. [How it fits a 12 GB card ↓](#-live-calls) |
@@ -158,7 +159,7 @@ Mic or camera blocked? Check **Windows Settings → Privacy & security → Micro
 
 | Part | What |
 |---|---|
-| `src/` (TypeScript + Vite) | `main.ts` chat (and images, read-aloud and search in it) · `system.ts` dashboard · `studio.ts` gallery and generation · `voice.ts` + `speech.ts` voice · `live.ts` + `livespeech.ts` + `mic-worklet.js` Live calls · `camera.ts` webcam · `tools.ts` chat tools · `memory.ts` shared memory · `backends.ts` Ollama / llama.cpp |
+| `src/` (TypeScript + Vite) | `main.ts` chat (and images, read-aloud and search in it) · `system.ts` dashboard · `studio.ts` gallery and generation · `reference.ts` reference images · `voice.ts` + `speech.ts` voice · `live.ts` + `livespeech.ts` + `mic-worklet.js` Live calls · `camera.ts` webcam · `tools.ts` chat tools · `memory.ts` shared memory · `backends.ts` Ollama / llama.cpp |
 | `src-tauri/` (Rust + Tauri 2) | GPU and RAM readouts, chat files, chat search and settings, start/stop scripts, gallery thumbnails, ComfyUI websocket and uploads, mic and camera permissions |
 | Look | Dragon red & gold · fonts Rye, Oxanium, IBM Plex Sans and JetBrains Mono, bundled from Fontsource (SIL OFL) |
 

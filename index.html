@@ -76,6 +76,8 @@
           <div class="attachments" id="attachments" hidden></div>
           <form class="composer" id="composer">
             <button type="button" class="icon-btn" id="composer-tools" aria-label="Tools" title="Tools"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z" /></svg><span class="count" id="tools-count"></span></button>
+            <button type="button" class="icon-btn" id="composer-attach" aria-label="Attach a picture" title="Attach a picture (or paste or drop one). With /image or /video it's a reference: its character or item goes into a new scene"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.4 3.4 0 0 1 4.8 4.8l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9" /></svg></button>
+            <input type="file" id="attach-file" accept="image/*" multiple hidden />
             <button type="button" class="icon-btn" id="composer-cam" aria-label="Attach a webcam frame" title="Attach a webcam frame"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7h4l2-3h6l2 3h4v12H3z" /><circle cx="12" cy="13" r="4" /></svg></button>
             <button type="button" class="icon-btn" id="composer-image" aria-label="Make an image" title="Make an image. Or type /image (or /video) followed by what to make"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="M21 16l-5-5-9 9" /></svg></button>
             <button type="button" class="icon-btn" id="composer-gen" aria-label="Image and video settings" title="Image and video settings: size, quality, seed, length…"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0" /><circle cx="16" cy="6" r="2" /><circle cx="10" cy="12" r="2" /><circle cx="18" cy="18" r="2" /></svg></button>
@@ -98,7 +100,7 @@
           <div class="tools-pop gen-pop" id="gen-pop" hidden>
             <div class="tools-head"><b>Generation settings</b><span class="gen-tabs"><button type="button" data-tab="image" class="on">Image</button><button type="button" data-tab="video">Video</button></span></div>
             <div id="gen-pop-body"></div>
-            <p class="credit">Type <b>/image</b> or <b>/video</b> and a description to make one here.</p>
+            <p class="credit">Type <b>/image</b> or <b>/video</b> and a description to make one here. Attach a picture first (paperclip, paste or drop) to put its character or item in the scene.</p>
           </div>
           <div class="cam-pop" id="cam-pop" hidden>
             <video id="cam-pop-video" muted playsinline></video>
@@ -147,6 +149,19 @@
             <button data-go="voice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 12h2M7 8v8M11 5v14M15 8v8M19 11v2" /></svg>Voice</button>
           </div>
           <div class="animate-src" id="animate-src" hidden><img id="animate-img" alt="" /><span><span id="animate-what">Animating this image with Wan 2.2</span> · <button class="linkish" type="button" id="animate-clear">cancel</button></span></div>
+          <div class="ref-slot" id="ref-slot" hidden>
+            <button type="button" class="ref-add" id="ref-add" title="Pick a picture, or drop or paste one here"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="M21 16l-5-5-9 9" /></svg><span><b>Reference image</b><small>Pick, drop or paste a picture of a character or item to put in a new scene</small></span></button>
+            <div class="ref-set" id="ref-set" hidden>
+              <img id="ref-img" alt="Reference image" />
+              <div class="ref-info">
+                <span id="ref-what"></span>
+                <span class="ref-picks" id="ref-picks"></span>
+                <small class="ref-consent" id="ref-consent"></small>
+              </div>
+              <span class="ref-acts"><button type="button" class="linkish" id="ref-change">change</button><button type="button" class="linkish" id="ref-clear">remove</button></span>
+            </div>
+            <input type="file" id="ref-file" accept="image/*" hidden />
+          </div>
           <form class="prompt-row" id="gen-form">
             <input id="gen-prompt" autocomplete="off" aria-label="Prompt" placeholder="Describe what to make…" />
             <button class="btn primary" id="gen-btn" type="submit">Generate</button>

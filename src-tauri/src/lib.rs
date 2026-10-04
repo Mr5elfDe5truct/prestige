@@ -411,6 +411,7 @@ pub fn run() {
             studio::read_workflow,
             studio::comfy_listen,
             studio::comfy_upload,
+            studio::comfy_upload_bytes,
             models::gguf_info,
             models::disk_free,
             models::download_file,
