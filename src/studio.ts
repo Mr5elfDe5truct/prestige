@@ -1,6 +1,7 @@
 // Studio screen: the real renders in ComfyUI's output folder, and a create bar that queues the
 // stack's own ComfyUI workflows (Qwen-Image-2.1 or its 4-step turbo for images, Z-Image-Turbo without
-// them, Qwen-Image-2.1 to edit an image, LTX-2.5 for video with sound, Wan 2.2 to animate an image).
+// them, Qwen-Image-2.1 to edit an image, LTX-2.5 for video with sound, Wan 2.2 to animate an image, or Wan 2.2 SVI
+// to make a longer video from it in up to four chained shots).
 // A reference image (a character or an item, from reference.ts) puts that subject into a new scene with Qwen-Image-2.1;
 // in Video mode that picture (or the reference itself) becomes LTX-2.5's first frame.
 // The Webcam mode shows the camera pane from camera.ts. Chat uses renderMedia() to make images or a video the same way
@@ -15,6 +16,10 @@ import {
   LTX_SECONDS,
   QUALITY_NAMES,
   SIZES,
+  SVI_FPS,
+  SVI_FRAMES,
+  SVI_SHOTS,
+  SVI_SIZES,
   WAN_RES,
   WAN_SECONDS,
   aboutTime,
@@ -25,6 +30,7 @@ import {
   parseRes,
   reset,
   settings,
+  sviSeconds,
   takeSeed,
   update,
   wanAuto,
@@ -52,11 +58,12 @@ interface Asset {
   seed?: number | null;
 }
 
-type GenMode = "image" | "fast" | "edit" | "video" | "animate" | "ref" | "reffast" | "refvideo";
+type GenMode = "image" | "fast" | "edit" | "video" | "animate" | "long" | "ref" | "reffast" | "refvideo";
 
 // How a workflow takes the generation settings: an image model with a latent size and batch, an edit
-// (size follows the picture), LTX with a 2× upscale pass ("ltx") or without ("ltx1"), or Wan's two samplers.
-type Family = "image" | "edit" | "ltx" | "ltx1" | "wan";
+// (size follows the picture), LTX with a 2× upscale pass ("ltx") or without ("ltx1"), Wan's two samplers,
+// or Wan 2.2 SVI's chained shots ("svi").
+type Family = "image" | "edit" | "ltx" | "ltx1" | "wan" | "svi";
 
 interface Mode {
   file: string;
@@ -195,7 +202,44 @@ const MODES: Record<GenMode, Mode> = {
     secs: 600,
     imageNode: "9",
   },
+  // Wan 2.2 with the Stable Video Infinity LoRAs: each shot continues the last, then FILM doubles the frame rate.
+  long: {
+    file: "wan22-svi-long.api.json",
+    label: "Wan 2.2 SVI",
+    family: "svi",
+    promptNode: "7",
+    seed: ["28", "noise_seed"],
+    steps: { standard: 4, high: 6, max: 8 },
+    secs: 410,
+    imageNode: "6",
+  },
 };
+
+// The SVI workflow's nodes: each shot's prompt and noise, the merge after each shot, and the settings.
+const SVI = {
+  high: "1",
+  low: "2",
+  fp16: ["24", "10"], // each model's fp16-accumulation patch (high, low)
+  frames: "13",
+  size: "14",
+  split: "20",
+  steps: "21",
+  shots: [
+    { prompt: "7", noise: "28", merged: ["33", 0] },
+    { prompt: "34", noise: "42", merged: ["48", 2] },
+    { prompt: "36", noise: "53", merged: ["59", 2] },
+    { prompt: "62", noise: "66", merged: ["72", 2] },
+  ],
+  finish: "73", // takes the joined frames on to FILM, the 2× upscale and the save
+};
+// Where the SVI render time was measured: 4 shots of 49 frames at 480 × 480.
+const SVI_BASE = 480 * 480 * 49 * 4;
+
+/** A long video's prompt: one per shot, separated by "|". A shorter list repeats its last prompt. */
+function shotPrompts(prompt: string, shots: number): string[] {
+  const parts = prompt.split("|").map((s) => s.trim()).filter(Boolean);
+  return Array.from({ length: shots }, (_, i) => parts[Math.min(i, parts.length - 1)] ?? prompt);
+}
 
 // ---------- generation settings → workflow inputs ----------
 interface Plan {
@@ -206,14 +250,16 @@ interface Plan {
   seconds?: number;
   frames?: number;
   fps?: number;
+  shots?: number; // a long video's shots, each `frames` long
   draft?: boolean; // LTX without its upscale pass: half size, much quicker
   load: number; // VRAM use relative to the defaults, which fit a 12 GB card
   secs: number; // rough render time on the reference PC
   warn: string; // "" when it should fit
 }
 
-const settingsKey = (gm: GenMode): SettingsKey => (gm === "video" || gm === "refvideo" ? "video" : gm === "animate" ? "animate" : "image");
-const isVideo = (gm: GenMode) => gm === "video" || gm === "animate" || gm === "refvideo";
+const settingsKey = (gm: GenMode): SettingsKey =>
+  gm === "video" || gm === "refvideo" ? "video" : gm === "animate" ? "animate" : gm === "long" ? "long" : "image";
+const isVideo = (gm: GenMode) => gm === "video" || gm === "animate" || gm === "long" || gm === "refvideo";
 
 /** A picture a render starts from: a render in the gallery (edit, animate) or a reference image. */
 type Source = Asset | Reference;
@@ -227,6 +273,13 @@ const stepsOf = (m: Mode, q: Quality) => m.steps?.[q] ?? m.steps?.standard;
 const LTX_BASE = 768 * 512 * 97;
 const WAN_BASE = 832 * 480 * 81;
 const MP = 1024 * 1024;
+
+/** The SVI render size: the picture's shape with its longest side at `size`, in multiples of 32. */
+function sviDims(size: number, srcW?: number | null, srcH?: number | null): [number, number] {
+  const r = srcW && srcH ? srcW / srcH : 1;
+  const r32 = (x: number) => Math.max(32, Math.round(x / 32) * 32);
+  return r >= 1 ? [r32(size), r32(size / r)] : [r32(size * r), r32(size)];
+}
 
 /** What a render with the current settings will be: sizes, steps, frames, and a VRAM and time estimate. */
 function plan(gm: GenMode, src: Source | null = srcAsset, o?: Override): Plan {
@@ -252,6 +305,24 @@ function plan(gm: GenMode, src: Source | null = srcAsset, o?: Override): Plan {
     const steps = stepsOf(m, s.quality)!;
     const load = (w * h * frames) / WAN_BASE;
     p = { w, h, steps, count: 1, seconds: s.seconds, frames, fps: 16, load, secs: m.secs * load * (steps / 4) };
+  } else if (m.family === "svi") {
+    // The picture keeps its shape, scaled so its longest side is the size (multiples of 32), and the result is upscaled 2×.
+    const s = settings().long;
+    const [w, h] = sviDims(s.size, src?.width, src?.height);
+    const steps = stepsOf(m, s.quality)!;
+    const work = w * h * s.frames;
+    p = {
+      w: w * 2,
+      h: h * 2,
+      steps,
+      count: 1,
+      seconds: sviSeconds(s.frames, s.shots),
+      frames: s.frames,
+      fps: SVI_FPS * 2,
+      shots: s.shots,
+      load: work / WAN_BASE, // one shot is in VRAM at a time
+      secs: m.secs * ((work * s.shots) / SVI_BASE) * (steps / 4),
+    };
   } else {
     const s = settings().video;
     const [w, h] = parseRes(s.res);
@@ -313,6 +384,27 @@ function apply(m: Mode, g: any, p: Plan, seed: number) {
       set(g, "12", { steps: n, start_at_step: n / 2, end_at_step: n, noise_seed: seed });
       break;
     }
+    case "svi": {
+      const s = settings().long;
+      set(g, SVI.size, { value: s.size });
+      set(g, SVI.frames, { value: p.frames });
+      set(g, SVI.steps, { value: p.steps });
+      set(g, SVI.split, { value: p.steps! / 2 });
+      SVI.shots.forEach((shot, i) => set(g, shot.noise, { noise_seed: seed + i }));
+      // Fewer shots: the finishing nodes take the frames joined so far, and ComfyUI skips the rest.
+      set(g, SVI.finish, { anything: SVI.shots[p.shots! - 1].merged });
+      // The models picked in Settings (kept on this PC only), with the loader each file type needs. fp16
+      // accumulation speeds up safetensors models but breaks GGUF ones, so it's on only for safetensors.
+      for (const [id, patch, name] of [[SVI.high, SVI.fp16[0], s.high], [SVI.low, SVI.fp16[1], s.low]] as const) {
+        if (!name || !g[id]) continue;
+        const gguf = /\.gguf$/i.test(name);
+        g[id] = gguf
+          ? { class_type: "UnetLoaderGGUF", inputs: { unet_name: name } }
+          : { class_type: "UNETLoader", inputs: { unet_name: name, weight_dtype: "default" } };
+        set(g, patch, { enable_fp16_accumulation: !gguf });
+      }
+      break;
+    }
   }
 }
 // The Image mode's model: Qwen-Image-2.1, or its 4-step turbo when "fast" is picked (remembered).
@@ -321,6 +413,14 @@ let imageMode: "image" | "fast" = (() => {
     return localStorage.getItem("studio.imageModel") === "fast" ? "fast" : "image";
   } catch {
     return "image";
+  }
+})();
+// Animating a picture: one Wan 2.2 clip, or a long video in chained shots with Wan 2.2 SVI (remembered).
+let animateMode: "animate" | "long" = (() => {
+  try {
+    return localStorage.getItem("studio.animateModel") === "long" ? "long" : "animate";
+  } catch {
+    return "animate";
   }
 })();
 
@@ -391,6 +491,13 @@ export function initStudio(d: Deps) {
       return renderCreate();
     }
     if (!t.closest(".opt.model")) return;
+    if (mode === "video") {
+      animateMode = animateMode === "long" ? "animate" : "long";
+      try {
+        localStorage.setItem("studio.animateModel", animateMode);
+      } catch {}
+      return renderCreate();
+    }
     imageMode = imageMode === "fast" ? "image" : "fast";
     try {
       localStorage.setItem("studio.imageModel", imageMode);
@@ -441,11 +548,14 @@ async function loadWorkflows() {
 
 /** The workflow the create bar runs now. */
 function currentMode(): GenMode {
-  if (mode === "video") return srcAsset ? "animate" : ref ? "refvideo" : "video";
+  if (mode === "video") return srcAsset ? animatePick() : ref ? "refvideo" : "video";
   if (srcAsset) return "edit";
   if (ref) return refImageMode();
   return workflows[imageMode] ? imageMode : "fast";
 }
+
+/** The workflow that animates a picture: the remembered pick, or whichever of the two is there. */
+const animatePick = (): GenMode => (animateMode === "long" ? (workflows.long ? "long" : "animate") : workflows.animate ? "animate" : workflows.long ? "long" : "animate");
 
 /** The reference-image workflow for the Image mode's model pick (Qwen-Image-2.1 or its turbo). */
 const refImageMode = (): GenMode => (imageMode === "fast" ? (workflows.reffast ? "reffast" : "ref") : workflows.ref ? "ref" : "reffast");
@@ -490,7 +600,7 @@ function renderCreate() {
   const m = modeOf(gm);
   $("#create").classList.toggle("disabled", !wf);
   ($("#gen-btn") as HTMLButtonElement).disabled = !wf || !!job || starting;
-  ($("#gen-btn") as HTMLButtonElement).textContent = gm === "animate" ? "Animate" : gm === "edit" ? "Edit" : "Generate";
+  ($("#gen-btn") as HTMLButtonElement).textContent = gm === "animate" || gm === "long" ? "Animate" : gm === "edit" ? "Edit" : "Generate";
   ($("#gen-prompt") as HTMLInputElement).placeholder =
     gm === "image" || gm === "fast"
       ? "Describe an image… e.g. a red and gold dragon coiled around a glowing GPU"
@@ -500,16 +610,23 @@ function renderCreate() {
           ? "Say what to change… e.g. make it night, swap the car for a horse, remove the sign"
           : gm === "animate"
             ? "Describe the motion… e.g. slow push-in, snow falling, warm light flickering"
+            : gm === "long"
+              ? settings().long.shots > 1
+                ? "One prompt per shot, split with | … e.g. slow push-in | pans right along the porch | tilts up to the peaks"
+                : "Describe the motion… e.g. slow push-in, snow falling, warm light flickering"
             : gm === "refvideo" && !chain
               ? "Describe the motion and sound… e.g. turns to the camera and waves, birds singing"
               : `Describe a ${settings().video.seconds}-second scene${gm === "refvideo" ? " with your reference in it" : ""}, including any sound…`;
-  // In Image mode the model chip switches between Qwen-Image-2.1 and its faster turbo (or Z-Image-Turbo).
+  // In Image mode the model chip switches between Qwen-Image-2.1 and its faster turbo (or Z-Image-Turbo);
+  // when animating a picture, between one Wan 2.2 clip and a long Wan 2.2 SVI video.
+  const animating = gm === "animate" || gm === "long";
   const canPick =
     ((gm === "image" || gm === "fast") && workflows.fast && workflows.image && active.image !== ZIMAGE) ||
-    ((gm === "ref" || gm === "reffast") && workflows.ref && workflows.reffast);
+    ((gm === "ref" || gm === "reffast") && workflows.ref && workflows.reffast) ||
+    (animating && workflows.animate && workflows.long);
   const label = chain ? `${modeOf(first).label} → ${m.label}` : m.label;
   const chip = canPick
-    ? `<button type="button" class="opt pick model" title="Switch image model"><b>${label}</b> ⇄</button>`
+    ? `<button type="button" class="opt pick model" title="${animating ? "Switch between one clip and a long video" : "Switch image model"}"><b>${label}</b> ⇄</button>`
     : `<span class="opt"><b>${label}</b></span>`;
   const p = plan(gm);
   // A chained video's time includes making its first frame.
@@ -619,7 +736,8 @@ function summary(gm: GenMode, p: Plan): string[] {
   if (p.steps) out.push(`${p.steps} steps`);
   if (p.draft) out.push("draft, one pass");
   if (m.family === "ltx" || m.family === "ltx1") out.push("with sound");
-  if (m.family === "wan") out.push("no sound");
+  if (p.shots) out.push(p.shots === 1 ? "1 shot" : `${p.shots} shots`);
+  if (m.family === "wan" || m.family === "svi") out.push("no sound");
   if (p.count > 1) out.push(`${p.count} images`);
   if (m.note) out.push(m.note);
   if (gm === "refvideo") out.push(chained(gm) ? "your reference in a new first frame" : "your reference as the first frame");
@@ -631,6 +749,28 @@ function summary(gm: GenMode, p: Plan): string[] {
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
 const optionList = (pairs: [string | number, string][], cur: string | number) =>
   pairs.map(([v, l]) => `<option value="${v}"${String(v) === String(cur) ? " selected" : ""}>${esc(l)}</option>`).join("");
+
+// The diffusion models ComfyUI can load (safetensors and GGUF), for the long video's model picks.
+let sviModels: string[] | null = null;
+let sviModelsLoading: Promise<void> | null = null;
+function loadSviModels() {
+  return (sviModelsLoading ??= (async () => {
+    const names = new Set<string>();
+    for (const [node, input] of [["UNETLoader", "unet_name"], ["UnetLoaderGGUF", "unet_name"]]) {
+      try {
+        const r = await http(`${COMFY}/object_info/${node}`);
+        const list = (await r.json())?.[node]?.input?.required?.[input]?.[0];
+        if (Array.isArray(list)) list.forEach((n: string) => names.add(n));
+      } catch {}
+    }
+    sviModels = [...names].sort((a, b) => a.localeCompare(b));
+    // Let a later open try again if ComfyUI wasn't running.
+    if (!sviModels.length) {
+      sviModels = null;
+      sviModelsLoading = null;
+    }
+  })());
+}
 
 /** The settings form for a mode (Studio's panel and chat's popover). Changes are saved and shared. */
 function settingsForm(el: HTMLElement, gm: GenMode, withWarn: boolean) {
@@ -658,6 +798,25 @@ function settingsForm(el: HTMLElement, gm: GenMode, withWarn: boolean) {
     f.push(field("Resolution", "res", optionList(WAN_RES.map(([r, l]) => [r, r === "auto" ? `${l} (${auto})` : l]), v.res)));
     f.push(field("Length", "seconds", optionList(WAN_SECONDS.map((n) => [n, `${n} seconds`]), v.seconds), `${wanFrames(v.seconds)} frames at 16 fps, Wan's own rate`));
   }
+  if (m.family === "svi") {
+    const v = settings().long;
+    const dims = (n: number) => sviDims(n, srcAsset?.width, srcAsset?.height).join(" × ");
+    f.push(field("Size", "size", optionList(SVI_SIZES.map((n) => [n, `${dims(n)} · saved at 2×`]), v.size)));
+    f.push(field("Shots", "shots", optionList(SVI_SHOTS.map((n) => [n, n === 1 ? "1 shot" : `${n} shots`]), v.shots), "Each continues the last; split the prompt with | to give each its own"));
+    f.push(field("Shot length", "frames", optionList(SVI_FRAMES.map((n) => [n, `${n} frames · ${sviSeconds(n, 1)} s`]), v.frames), `${sviSeconds(v.frames, v.shots)} s in all, at ${SVI_FPS * 2} fps after FILM`));
+    const models = sviModels ?? [];
+    const pick = (label: string, k: "high" | "low", which: string) =>
+      field(
+        label,
+        k,
+        `<option value="">Stock Wan 2.2 4-step (${which})</option>` + optionList(models.map((n) => [n, n]), v[k] ?? "") +
+          (v[k] && !models.includes(v[k]!) ? `<option value="${esc(v[k]!)}" selected>${esc(v[k]!)} (not found)</option>` : ""),
+        k === "high" ? "From ComfyUI's model folders; kept on this PC only" : "",
+      );
+    f.push(pick("High-noise model", "high", "high noise"));
+    f.push(pick("Low-noise model", "low", "low noise"));
+    if (!sviModels && !sviModelsLoading) loadSviModels().then(() => sviModels && el.isConnected && settingsForm(el, gm, withWarn));
+  }
   if (m.family === "ltx")
     f.push(field("Quality", "quality", optionList([["draft", "Draft · half size, one pass"], ["standard", "Standard · upscaled 2×"]], s.quality === "draft" ? "draft" : "standard")));
   else if (m.steps) {
@@ -679,8 +838,9 @@ function settingsForm(el: HTMLElement, gm: GenMode, withWarn: boolean) {
   $$<HTMLSelectElement>("select", el).forEach((sel) =>
     sel.addEventListener("change", () => {
       const k = sel.dataset.k!;
-      const num = ["seconds", "fps", "count"].includes(k);
-      update(key, { [k]: num ? Number(sel.value) : sel.value } as any);
+      const num = ["seconds", "fps", "count", "size", "frames", "shots"].includes(k);
+      const model = k === "high" || k === "low";
+      update(key, { [k]: num ? Number(sel.value) : model ? sel.value || null : sel.value } as any);
     }),
   );
   const seedIn = $<HTMLInputElement>("input[data-k=seed]", el);
@@ -822,7 +982,7 @@ function openLightbox(a: Asset) {
     dl.append(dt, dd);
   }
   ($("#lb-copy") as HTMLButtonElement).disabled = !a.prompt;
-  ($("#lb-animate") as HTMLButtonElement).hidden = a.kind !== "image" || !workflows.animate;
+  ($("#lb-animate") as HTMLButtonElement).hidden = a.kind !== "image" || !(workflows.animate || workflows.long);
   ($("#lb-edit") as HTMLButtonElement).hidden = a.kind !== "image" || !workflows.edit;
   $("#lb-edit").onclick = () => startFrom(a, "image");
   $("#lb-animate").onclick = () => startFrom(a, "video");
@@ -867,7 +1027,7 @@ function reusePrompt(a: Asset) {
 
 /** Fixes the seed for the next render of this kind, to vary a render you liked. */
 function reuseSeed(a: Asset) {
-  const key: SettingsKey = a.kind === "image" ? "image" : /wan/i.test(a.model ?? a.name) ? "animate" : "video";
+  const key: SettingsKey = a.kind === "image" ? "image" : /svi-long/i.test(a.name) ? "long" : /wan/i.test(a.model ?? a.name) ? "animate" : "video";
   update(key, { seed: a.seed ?? null });
   deps.toast(`The next ${key === "image" ? "image" : "video"} uses seed ${a.seed}. Pick Random in Settings to go back.`);
 }
@@ -937,7 +1097,7 @@ function showMenu(e: MouseEvent, a: Asset) {
     { label: "Open in folder", run: () => revealFile(a) },
     "-",
     ...(image && workflows.edit ? [{ label: "Edit with Qwen-Image…", run: () => startFrom(a, "image") }] : []),
-    ...(image && workflows.animate ? [{ label: "Animate (image → video)…", run: () => startFrom(a, "video") }] : []),
+    ...(image && (workflows.animate || workflows.long) ? [{ label: "Animate (image → video)…", run: () => startFrom(a, "video") }] : []),
     ...(image && (workflows.ref || workflows.reffast) ? [{ label: "Use as reference image", run: () => useAsReference(a) }] : []),
     ...(a.prompt ? [{ label: "Reuse prompt", run: () => reusePrompt(a) }] : []),
     ...(a.seed != null ? [{ label: "Reuse seed", run: () => reuseSeed(a), key: String(a.seed) }] : []),
@@ -1033,7 +1193,7 @@ async function generate() {
     }
     return;
   }
-  const src = gm === "animate" || gm === "edit" ? srcAsset : gm === "ref" || gm === "reffast" || gm === "refvideo" ? ref : null;
+  const src = gm === "animate" || gm === "long" || gm === "edit" ? srcAsset : gm === "ref" || gm === "reffast" || gm === "refvideo" ? ref : null;
   try {
     await queue(gm, prompt, src, { kind: refPrefs().kind });
   } catch (e) {
@@ -1081,6 +1241,7 @@ async function queue(gm: GenMode, prompt: string, src: Source | null, opts: Queu
   graph[m.promptNode].inputs[m.promptKey ?? "text"] = gm === "ref" || gm === "reffast" ? refPrompt(opts.kind ?? "auto", prompt) : prompt;
   const seed = takeSeed(settingsKey(gm));
   const p = plan(gm, src, opts.override);
+  if (m.family === "svi") shotPrompts(prompt, p.shots!).forEach((t, i) => (graph[SVI.shots[i].prompt].inputs.text = t));
   apply(m, graph, p, seed);
   const nodes: Record<string, string> = {};
   for (const [id, n] of Object.entries<any>(graph)) nodes[id] = n.class_type;

@@ -1,5 +1,5 @@
 // Generation settings for images and video, shared by Studio and chat: shape and size, quality (steps),
-// how many, seed, and for video the resolution, length and frame rate. The defaults are what the reference
+// how many, seed, for video the resolution, length and frame rate, and for a long video its shots and models. The defaults are what the reference
 // RTX 3060 12 GB renders comfortably; studio.ts turns them into workflow inputs and warns when a pick is
 // likely to run past 12 GB of VRAM.
 
@@ -21,10 +21,20 @@ export interface VideoSettings {
   quality: Quality;
   seed: number | null;
 }
+export interface LongSettings {
+  size: number; // the longest side while rendering; the saved video is upscaled 2×
+  frames: number; // per shot, 4n + 1
+  shots: number; // 1–4, chained by SVI so each continues the last
+  quality: Quality;
+  seed: number | null;
+  high: string | null; // the high- and low-noise models (null = the workflow's own), from ComfyUI's model folders
+  low: string | null;
+}
 export interface GenSettings {
   image: ImageSettings; // Qwen-Image-2.1 and its turbo, Z-Image-Turbo; edits use its quality and seed
   video: VideoSettings; // LTX text-to-video
   animate: VideoSettings; // Wan 2.2 image-to-video
+  long: LongSettings; // Wan 2.2 SVI long video: several shots from one picture
 }
 export type SettingsKey = keyof GenSettings;
 
@@ -32,6 +42,7 @@ export const DEFAULTS: GenSettings = {
   image: { aspect: "1:1", size: "standard", quality: "standard", count: 1, seed: null },
   video: { res: "768x512", seconds: 4, fps: 24, quality: "standard", seed: null },
   animate: { res: "auto", seconds: 5, fps: 16, quality: "standard", seed: null },
+  long: { size: 640, frames: 49, shots: 4, quality: "standard", seed: null, high: null, low: null },
 };
 
 export const ASPECTS: [Aspect, string][] = [
@@ -69,6 +80,14 @@ export const WAN_RES: [string, string][] = [
   ["640x640", "640 × 640 · square"],
   ["1280x720", "1280 × 720 · 720p"],
 ];
+// Wan 2.2 SVI: the longest side while rendering, frames per shot and the number of shots.
+export const SVI_SIZES = [480, 640, 832];
+export const SVI_FRAMES = [33, 49, 65, 81];
+export const SVI_SHOTS = [1, 2, 3, 4];
+/** The SVI workflow plays its frames at 24 fps, then doubles them to 48 with FILM; shots overlap by 5 frames. */
+export const SVI_FPS = 24;
+export const SVI_OVERLAP = 5;
+export const sviSeconds = (frames: number, shots: number) => Math.round(((frames * shots - SVI_OVERLAP * (shots - 1)) / SVI_FPS) * 10) / 10;
 export const LTX_SECONDS = [2, 3, 4, 5, 6, 8, 10];
 export const WAN_SECONDS = [2, 3, 4, 5, 6, 8];
 export const LTX_FPS = [24, 25, 30];
@@ -119,6 +138,7 @@ function load(): GenSettings {
     image: { ...DEFAULTS.image, ...s.image },
     video: { ...DEFAULTS.video, ...s.video },
     animate: { ...DEFAULTS.animate, ...s.animate },
+    long: { ...DEFAULTS.long, ...s.long },
   };
 }
 
@@ -138,7 +158,9 @@ export function update<K extends SettingsKey>(k: K, patch: Partial<GenSettings[K
 }
 
 export function reset(k: SettingsKey) {
-  current = { ...current, [k]: { ...DEFAULTS[k] } };
+  // The long video's model picks aren't sizes or quality: they stay.
+  const keep = k === "long" ? { high: current.long.high, low: current.long.low } : {};
+  current = { ...current, [k]: { ...DEFAULTS[k], ...keep } };
   save();
 }
 
