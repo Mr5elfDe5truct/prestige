@@ -21,6 +21,7 @@ interface Row {
   loaded: boolean;
   vramGB?: number; // measured (Ollama) or estimated (llama.cpp)
   loading?: boolean;
+  sleeping?: boolean; // llama.cpp: idle past --sleep-idle-seconds, woken by the next request
   args?: string[]; // llama.cpp router command line (for capability detection)
   cards?: Map<number, number>; // GB on each card it's loaded on (nvidia-smi index)
 }
@@ -257,6 +258,7 @@ async function refreshModels() {
         needGB: (!gpuPlan()?.llamaFit && known) || Math.min(disk + 1.5, vramGB("llama") - 1),
         loaded: m.status?.value === "loaded",
         loading: m.status?.value === "loading",
+        sleeping: m.status?.value === "sleeping",
         args: m.status?.args ?? [],
       });
     });
@@ -293,7 +295,7 @@ function renderRows() {
   for (const r of rows) {
     const el = document.createElement("div");
     el.className = "mrow" + (r.loaded ? " loaded" : "") + (r.loading ? " busy" : "");
-    const state = r.loading ? "Loading…" : r.loaded ? "In VRAM" : "On disk";
+    const state = r.loading ? "Loading…" : r.loaded ? "In VRAM" : r.sleeping ? "Asleep" : "On disk";
     const size =
       r.loaded && r.vramGB
         ? `${r.backend === "llama" ? "~" : ""}${r.vramGB.toFixed(1)} GB in VRAM`
@@ -405,7 +407,17 @@ async function load(r: Row) {
   try {
     if (r.backend === "ollama") await ollamaKeepAlive(r.id, "5m");
     else {
-      await llamaCall("load", r.id);
+      // A sleeping model is still the router's current one, so /models/load refuses it ("already running"); any
+      // request wakes it instead.
+      if (r.sleeping) {
+        const w = await http(`${LLAMA}/chat/completions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model: r.id, messages: [{ role: "user", content: "hi" }], max_tokens: 1 }),
+        });
+        if (!w.ok) throw new Error(`llama.cpp answered ${w.status}`);
+        await w.text();
+      } else await llamaCall("load", r.id);
       // The router returns at once; wait for the model to report "loaded".
       for (let i = 0; i < 90; i++) {
         await new Promise((res) => setTimeout(res, 2000));

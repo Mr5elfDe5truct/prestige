@@ -13,7 +13,7 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { initSystem, onGpus, showSystem, unloadAll } from "./system";
-import { readGpus, refreshPlan, shortName, type Gpu } from "./gpus";
+import { ollamaCtx, onPlanChange, readGpus, refreshPlan, shortName, type Gpu } from "./gpus";
 import { allowRenders, cancelRender, chatSettings, initStudio, modelLabel, openRender, renderMedia, renderMenu, showStudio, type MediaKind } from "./studio";
 import { onSettingsChange } from "./gensettings";
 import { CONSENT, bindRefChoices, hasFiles, imageIn, imageToBase64, onRefPrefsChange, refChoicesHtml, referenceFromBase64 } from "./reference";
@@ -150,6 +150,7 @@ function escapeHtml(s: string) {
 let hudCards = "";
 function renderHud(list: Gpu[]) {
   const box = $("#hud-gpus");
+  box.closest(".hud")?.classList.toggle("multi-gpu", list.length > 1);
   const key = list.map((g) => g.index).join();
   if (key !== hudCards) {
     hudCards = key;
@@ -242,6 +243,7 @@ function selectModel(m: ModelInfo | null) {
     saveSettings();
   }
   renderModelMenu();
+  refreshMemoryStatus();
 }
 
 async function refreshModels() {
@@ -259,6 +261,14 @@ async function refreshModels() {
 // ---------- memory status ----------
 const facts = (n: number | null) => `${n ?? 0} ${n === 1 ? "fact" : "facts"}`;
 
+/** The selected model's context: Ollama's from the GPU plan (sized to its card), a llama.cpp model's from its preset. */
+function ctxLabel() {
+  const a = current?.backend === "llama" ? (current.args ?? []) : null;
+  const n = a ? Number(a[a.indexOf("--ctx-size") + 1]) || 32768 : ollamaCtx();
+  return `${Math.round(n / 1024)}k context`;
+}
+onPlanChange(() => refreshMemoryStatus());
+
 async function refreshMemoryStatus() {
   const el = $("#memory-status");
   const cfg = memCfg();
@@ -268,7 +278,7 @@ async function refreshMemoryStatus() {
   }
   try {
     memoryTotal = (await listMemories(cfg)).length;
-    el.textContent = `Shared memory on · ${facts(memoryTotal)} · 32k context`;
+    el.textContent = `Shared memory on · ${facts(memoryTotal)} · ${ctxLabel()}`;
   } catch (e) {
     el.textContent = `Shared memory unavailable · ${errMsg(e)}`;
   }
