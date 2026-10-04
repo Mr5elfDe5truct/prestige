@@ -103,3 +103,62 @@ export const REF_KINDS: [RefKind, string][] = [
   ["character", "Character"],
   ["item", "Item"],
 ];
+
+// ---------- how a reference is used, shared by Studio and chat ----------
+/** For a video: put the reference in a new first frame first ("scene"), or animate the picture itself ("itself"). */
+export type RefFrame = "scene" | "itself";
+export interface RefPrefs {
+  kind: RefKind;
+  frame: RefFrame;
+}
+
+const stored = (k: string, ok: string[], def: string) => {
+  try {
+    const v = localStorage.getItem(k);
+    return v && ok.includes(v) ? v : def;
+  } catch {
+    return def;
+  }
+};
+let prefs: RefPrefs = {
+  kind: stored("studio.refKind", ["auto", "character", "item"], "auto") as RefKind,
+  frame: stored("studio.refFrame", ["scene", "itself"], "scene") as RefFrame,
+};
+const listeners = new Set<() => void>();
+
+export const refPrefs = () => prefs;
+
+export function setRefPrefs(patch: Partial<RefPrefs>) {
+  prefs = { ...prefs, ...patch };
+  try {
+    localStorage.setItem("studio.refKind", prefs.kind);
+    localStorage.setItem("studio.refFrame", prefs.frame);
+  } catch {}
+  listeners.forEach((f) => f());
+}
+
+/** Runs whenever a choice changes, so Studio and chat show the same picks. */
+export const onRefPrefsChange = (f: () => void) => listeners.add(f);
+
+const escHtml = (s: string) => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+const seg = (attr: string, cur: string, opts: [string, string][], title: string) =>
+  `<span class="seg" role="group" aria-label="${title}">` +
+  opts.map(([v, l]) => `<button type="button" data-${attr}="${v}" class="${v === cur ? "on" : ""}" aria-pressed="${v === cur}">${escHtml(l)}</button>`).join("") +
+  `</span>`;
+
+/** The choice buttons for a reference: what it shows (when Qwen-Image makes a picture with it) and, for a video, the first frame. */
+export function refChoicesHtml(video: boolean) {
+  const kinds = !video || prefs.frame === "scene" ? seg("kind", prefs.kind, REF_KINDS, "What the reference shows") : "";
+  const frames = video ? seg("frame", prefs.frame, [["scene", "New scene first"], ["itself", "Animate this picture"]], "First frame") : "";
+  return kinds + frames;
+}
+
+/** Makes the buttons from refChoicesHtml inside `el` work (once per element; it can be re-rendered freely). */
+export function bindRefChoices(el: HTMLElement) {
+  el.addEventListener("click", (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>("[data-kind], [data-frame]");
+    if (!b || !el.contains(b)) return;
+    if (b.dataset.kind) setRefPrefs({ kind: b.dataset.kind as RefKind });
+    if (b.dataset.frame) setRefPrefs({ frame: b.dataset.frame as RefFrame });
+  });
+}

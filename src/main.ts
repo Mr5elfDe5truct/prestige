@@ -15,7 +15,7 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { initSystem, onGpu, showSystem, unloadAll, type Gpu } from "./system";
 import { allowRenders, cancelRender, chatSettings, initStudio, modelLabel, openRender, renderMedia, renderMenu, showStudio, type MediaKind } from "./studio";
 import { onSettingsChange } from "./gensettings";
-import { CONSENT, hasFiles, imageIn, imageToBase64, referenceFromBase64 } from "./reference";
+import { CONSENT, bindRefChoices, hasFiles, imageIn, imageToBase64, onRefPrefsChange, refChoicesHtml, referenceFromBase64 } from "./reference";
 import { initVoice, showVoice } from "./voice";
 import { initCamera, showCameraPane } from "./camera";
 import { initLive, startLive, LIVE_CTX, LIVE_MODELS } from "./live";
@@ -639,15 +639,19 @@ function renderAttachments() {
   updateRefNote();
 }
 
-/** Under the attachments: what /image or /video will do with them, and the consent note when it's a reference. */
+/** Under the attachments: what /image or /video will do with them and, when it's a reference, the same choices as
+ *  Studio's reference slot (Auto / Character / Item, and a video's first frame) and the consent note. */
 function updateRefNote() {
   const note = document.getElementById("ref-note");
   if (!note) return;
-  const asRef = !!mediaRequest(($("#prompt") as HTMLTextAreaElement).value.trim());
-  note.classList.toggle("on", asRef);
-  note.textContent = asRef
-    ? `${attachments.length > 1 ? "The first picture" : "This picture"} is the reference: its character or item goes into the scene you describe. ${CONSENT}`
-    : "Ask about it, or type /image or /video and a scene to put its character or item in a new picture or clip.";
+  const media = mediaRequest(($("#prompt") as HTMLTextAreaElement).value.trim());
+  note.classList.toggle("on", !!media);
+  if (!media) {
+    note.textContent = "Ask about it, or type /image or /video and a scene to put its character or item in a new picture or clip.";
+    return;
+  }
+  note.innerHTML = `<span class="ref-picks">${refChoicesHtml(media.kind === "video")}</span><span class="ref-note-text"></span>`;
+  $(".ref-note-text", note).textContent = `${attachments.length > 1 ? "The first picture" : "This picture"} is the reference. ${CONSENT}`;
 }
 
 /** Adds a picked, pasted or dropped picture to the next message. */
@@ -1175,6 +1179,9 @@ function wire() {
     attachImage(f);
   });
   ta.addEventListener("input", updateRefNote);
+  // The choice buttons in the note under the attachments (shared with Studio).
+  bindRefChoices($("#attachments"));
+  onRefPrefsChange(updateRefNote);
   const chatScreen = $('[data-screen="chat"]');
   chatScreen.addEventListener("dragover", (e) => {
     if (!hasFiles(e)) return;

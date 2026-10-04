@@ -566,3 +566,5 @@ body[data-live="error"] .live-status { color: var(--warn); }
 @media (max-width: 760px) {
   .ref-set { flex-wrap: wrap; }
 }
+.attachments .ref-note.on { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.attachments .ref-note .ref-picks { display: inline-flex; gap: 8px; flex-wrap: wrap; }
