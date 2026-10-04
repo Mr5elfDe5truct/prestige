@@ -6,6 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { errMsg, http, setFriendlyNames, OLLAMA, LLAMA } from "./backends";
 import { chipsHtml, fitFor, nameHints, resetCaps, type Caps } from "./caps";
+import { gpuPlan, vramGB } from "./gpus";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
 const $$ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => Array.from(r.querySelectorAll(s)) as T[];
@@ -192,15 +193,24 @@ function expectedCaps(e: Entry): Caps {
     computerUse: false,
     embedding: false,
     sizeGB: e.sizeGB,
-    fit: e.gguf?.onGpu ? "gpu" : fitFor(e.sizeGB, !!e.gguf?.nCpuMoe),
+    fit: entryFit(e),
+    on: e.gguf ? "llama" : "ollama",
   };
+}
+
+/** How an entry would sit on this PC's card(s). The tuned presets (`onGpu`, `nCpuMoe`) are for one 12 GB card; on
+ *  other cards the workstation drops them and llama.cpp's --fit sizes the model, so it's judged by size. */
+function entryFit(e: Entry): Caps["fit"] {
+  if (!e.gguf) return fitFor(e.sizeGB);
+  if (gpuPlan()?.llamaFit) return fitFor(e.sizeGB, false, "llama");
+  return e.gguf.onGpu && vramGB("llama") >= 11.5 ? "gpu" : fitFor(e.sizeGB, !!e.gguf.nCpuMoe, "llama");
 }
 
 function render() {
   const grid = $("#cat-grid");
   grid.innerHTML = "";
   const list = CATALOG.filter((e) => {
-    if (filter === "fits" && !e.gguf?.onGpu && fitFor(e.sizeGB, !!e.gguf) !== "gpu") return false;
+    if (filter === "fits" && entryFit(e) !== "gpu") return false;
     if (filter !== "all" && filter !== "fits" && !e.caps.includes(filter)) return false;
     if (query && !`${e.name} ${e.maker} ${e.about} ${e.caps.join(" ")}`.toLowerCase().includes(query)) return false;
     return true;

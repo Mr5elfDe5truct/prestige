@@ -9,6 +9,7 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { errMsg, http } from "./backends";
+import { cardsText, vramGB } from "./gpus";
 import {
   ASPECTS,
   LTX_FPS,
@@ -252,7 +253,7 @@ interface Plan {
   fps?: number;
   shots?: number; // a long video's shots, each `frames` long
   draft?: boolean; // LTX without its upscale pass: half size, much quicker
-  load: number; // VRAM use relative to the defaults, which fit a 12 GB card
+  load: number; // VRAM use relative to the defaults, which fit a 12 GB card (the limits scale with ComfyUI's card)
   secs: number; // rough render time on the reference PC
   warn: string; // "" when it should fit
 }
@@ -331,13 +332,16 @@ function plan(gm: GenMode, src: Source | null = srcAsset, o?: Override): Plan {
     const work = (w * h * frames) / LTX_BASE;
     p = { w: draft ? w / 2 : w, h: draft ? h / 2 : h, count: 1, seconds: s.seconds, frames, fps: s.fps, draft, load: draft ? work / 4 : work, secs: m.secs * work * (draft ? 0.3 : 1) };
   }
-  // Videos hold every frame in VRAM at once, so they reach the limit sooner than images.
-  const [soft, hard] = m.family === "image" || m.family === "edit" ? [2.2, 3.5] : [1.35, 2.2];
+  // Videos hold every frame in VRAM at once, so they reach the limit sooner than images. The limits were measured on
+  // a 12 GB card; they scale with the card ComfyUI runs on.
+  const scale = vramGB("comfyui") / 12;
+  const [soft, hard] = (m.family === "image" || m.family === "edit" ? [2.2, 3.5] : [1.35, 2.2]).map((x) => x * scale);
+  const card = cardsText("comfyui");
   const warn =
     p.load > hard
-      ? "Likely more than 12 GB of VRAM: it may fail with out of memory. Try a smaller size, a shorter length or fewer images."
+      ? `Likely more than ${card} of VRAM: it may fail with out of memory. Try a smaller size, a shorter length or fewer images.`
       : p.load > soft
-        ? "Heavy for a 12 GB card: ComfyUI may spill into system RAM and render much slower."
+        ? `Heavy for ${card}: ComfyUI may spill into system RAM and render much slower.`
         : "";
   return { ...p, warn };
 }

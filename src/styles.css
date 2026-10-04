@@ -212,6 +212,13 @@ body.busy .hud .eye-glow, .splash .eye-glow { animation: eye 1s ease-in-out infi
 .card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .credit { font-size: 11.5px; color: var(--muted); }
 .grid4 { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.hud-gpus { display: contents; }
+.gpu-cards { display: flex; flex-direction: column; gap: 16px; }
+.gpu-sec { display: flex; flex-direction: column; gap: 8px; }
+.gpu-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.vram-cards { display: flex; flex-direction: column; gap: 12px; }
+.vram-card { display: flex; flex-direction: column; gap: 6px; }
+.vram-card .eyebrow { font-size: 10px; }
 .two { display: grid; gap: 16px; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); align-items: start; }
 .big { font-family: var(--display); font-size: 30px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.1; }
 .card.hot .big { color: var(--warn); }

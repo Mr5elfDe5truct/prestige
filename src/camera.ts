@@ -1,7 +1,8 @@
 // Webcam vision: a live preview with a device picker, "Ask about this" (sends the current frame with a
 // question to the chat, answered by Gemma 4), an optional live caption every few seconds, and the
 // composer's camera button that attaches a frame to the next message.
-import { errMsg, freeLlamaVram, http, OLLAMA, NUM_CTX } from "./backends";
+import { errMsg, freeLlamaVram, http, OLLAMA } from "./backends";
+import { ollamaCtx } from "./gpus";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
 
@@ -177,7 +178,7 @@ function setLive(on: boolean) {
           images: [b64],
           stream: false,
           think: false,
-          options: { num_ctx: NUM_CTX, num_predict: 60 },
+          options: { num_ctx: ollamaCtx(), num_predict: 60 },
         }),
       });
       const j = await r.json();

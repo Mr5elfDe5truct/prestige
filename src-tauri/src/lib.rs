@@ -1,4 +1,4 @@
-// Prestige by R.G. Studios. Native side: GPU and RAM readouts, local chat history and settings,
+// Prestige by R.G. Studios. Native side: GPU (every card) and RAM readouts, the workstation's GPU plan, local chat history and settings,
 // launching the workstation's start-all.ps1, and the Studio gallery (studio.rs). All chat traffic goes from the UI to
 // Ollama / llama.cpp / Open WebUI on 127.0.0.1 through the HTTP plugin.
 
@@ -57,6 +57,8 @@ fn run_script(root: &PathBuf, name: &str, args: &[&str]) -> Result<(), String> {
 
 #[derive(Serialize)]
 struct GpuStats {
+    index: u32,
+    uuid: String,
     name: String,
     util: f64,
     mem_used: f64,
@@ -69,54 +71,81 @@ struct GpuStats {
     target_temp: Option<f64>,
 }
 
-/// The GPU's throttle points don't change, so read them from `nvidia-smi -q` once.
-fn throttle_temps() -> (Option<f64>, Option<f64>) {
-    static CACHE: std::sync::OnceLock<(Option<f64>, Option<f64>)> = std::sync::OnceLock::new();
-    *CACHE.get_or_init(|| {
+/// Each GPU's throttle points (in nvidia-smi's order) don't change, so read them from `nvidia-smi -q` once.
+fn throttle_temps() -> &'static Vec<(Option<f64>, Option<f64>)> {
+    static CACHE: std::sync::OnceLock<Vec<(Option<f64>, Option<f64>)>> = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| {
         let Ok(out) = hidden(&mut Command::new("nvidia-smi")).args(["-q", "-d", "TEMPERATURE"]).output() else {
-            return (None, None);
+            return Vec::new();
         };
         let text = String::from_utf8_lossy(&out.stdout);
-        let find = |label: &str| {
-            text.lines()
-                .find(|l| l.trim_start().starts_with(label))
-                .and_then(|l| l.split(':').nth(1))
-                .and_then(|v| v.trim().trim_end_matches('C').trim().parse::<f64>().ok())
-        };
-        (find("GPU Slowdown Temp"), find("GPU Target Temperature"))
+        let value = |l: &str| l.split(':').nth(1).and_then(|v| v.trim().trim_end_matches('C').trim().parse::<f64>().ok());
+        // One "GPU 00000000:2B:00.0" section per card.
+        let mut cards = Vec::new();
+        for l in text.lines() {
+            let t = l.trim_start();
+            if t.starts_with("GPU 0") {
+                cards.push((None, None));
+            } else if let Some(c) = cards.last_mut() {
+                if t.starts_with("GPU Slowdown Temp") {
+                    c.0 = value(t);
+                } else if t.starts_with("GPU Target Temperature") {
+                    c.1 = value(t);
+                }
+            }
+        }
+        cards
     })
 }
 
+/// Every NVIDIA card, in nvidia-smi's order (the index the workstation's GPU plan uses).
 #[tauri::command]
-fn gpu_stats() -> Result<GpuStats, String> {
+fn gpu_stats() -> Result<Vec<GpuStats>, String> {
     let out = hidden(&mut Command::new("nvidia-smi"))
         .args([
-            "--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu,fan.speed,power.draw,power.limit",
+            "--query-gpu=index,uuid,name,utilization.gpu,memory.used,memory.total,temperature.gpu,fan.speed,power.draw,power.limit",
             "--format=csv,noheader,nounits",
         ])
         .output()
         .map_err(|e| format!("nvidia-smi: {e}"))?;
     let text = String::from_utf8_lossy(&out.stdout);
-    let line = text.lines().next().ok_or("nvidia-smi returned nothing")?;
-    let f: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
-    if f.len() < 5 {
-        return Err(format!("unexpected nvidia-smi output: {line}"));
+    let throttle = throttle_temps();
+    let mut gpus = Vec::new();
+    for (i, line) in text.lines().filter(|l| !l.trim().is_empty()).enumerate() {
+        let f: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
+        if f.len() < 7 {
+            return Err(format!("unexpected nvidia-smi output: {line}"));
+        }
+        let num = |s: &str| s.parse::<f64>().unwrap_or(0.0);
+        let opt = |i: usize| f.get(i).and_then(|s| s.parse::<f64>().ok());
+        let (slowdown_temp, target_temp) = throttle.get(i).copied().unwrap_or((None, None));
+        gpus.push(GpuStats {
+            index: f[0].parse().unwrap_or(i as u32),
+            uuid: f[1].to_string(),
+            name: f[2].to_string(),
+            util: num(f[3]),
+            mem_used: num(f[4]),
+            mem_total: num(f[5]),
+            temp: num(f[6]),
+            fan: opt(7),
+            power: opt(8),
+            power_limit: opt(9),
+            slowdown_temp,
+            target_temp,
+        });
     }
-    let num = |s: &str| s.parse::<f64>().unwrap_or(0.0);
-    let opt = |i: usize| f.get(i).and_then(|s| s.parse::<f64>().ok());
-    let (slowdown_temp, target_temp) = throttle_temps();
-    Ok(GpuStats {
-        name: f[0].to_string(),
-        util: num(f[1]),
-        mem_used: num(f[2]),
-        mem_total: num(f[3]),
-        temp: num(f[4]),
-        fan: opt(5),
-        power: opt(6),
-        power_limit: opt(7),
-        slowdown_temp,
-        target_temp,
-    })
+    if gpus.is_empty() {
+        return Err("nvidia-smi returned nothing".into());
+    }
+    Ok(gpus)
+}
+
+/// Which card each workstation service runs on: data\runtime\gpu.json, written by start-all.ps1 on every start.
+/// Null with an older workstation, or before it has started once.
+#[tauri::command]
+fn gpu_plan(root: Option<String>) -> Option<serde_json::Value> {
+    let text = fs::read_to_string(stack_root(root).join("data").join("runtime").join("gpu.json")).ok()?;
+    serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()
 }
 
 /// Total and available system RAM in MiB.
@@ -388,6 +417,7 @@ pub fn run() {
         .manage(studio::ComfyListener::default())
         .invoke_handler(tauri::generate_handler![
             gpu_stats,
+            gpu_plan,
             stack_info,
             start_services,
             set_updating,

@@ -12,7 +12,8 @@ import markSvg from "./assets/rg-mark.svg?raw";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import { initSystem, onGpu, showSystem, unloadAll, type Gpu } from "./system";
+import { initSystem, onGpus, showSystem, unloadAll } from "./system";
+import { readGpus, refreshPlan, shortName, type Gpu } from "./gpus";
 import { allowRenders, cancelRender, chatSettings, initStudio, modelLabel, openRender, renderMedia, renderMenu, showStudio, type MediaKind } from "./studio";
 import { onSettingsChange } from "./gensettings";
 import { CONSENT, bindRefChoices, hasFiles, imageIn, imageToBase64, onRefPrefsChange, refChoicesHtml, referenceFromBase64 } from "./reference";
@@ -145,24 +146,51 @@ function escapeHtml(s: string) {
 }
 
 // ---------- GPU readouts ----------
+// A GPU and a VRAM meter per card (named by model number when there are several), then the hottest card's temperature.
+let hudCards = "";
+function renderHud(list: Gpu[]) {
+  const box = $("#hud-gpus");
+  const key = list.map((g) => g.index).join();
+  if (key !== hudCards) {
+    hudCards = key;
+    const tag = (g: Gpu) => (list.length > 1 ? ` ${escapeHtml(shortName(g).replace(/^(RTX|GTX|Quadro|Tesla)\s+/i, ""))}` : "");
+    box.innerHTML =
+      list
+        .map(
+          (g) =>
+            `<div class="cell meter" data-m="gpu" data-i="${g.index}"><b>GPU${tag(g)}</b><div class="bar"><i></i></div><span class="val">–</span></div>` +
+            `<div class="cell meter" data-m="vram" data-i="${g.index}"><b>VRAM</b><div class="bar"><i></i></div><span class="val">–</span></div>`,
+        )
+        .join("") + `<div class="cell meter" data-m="temp"><b>TEMP</b><span class="val">–</span></div>`;
+  }
+  const set = (el: HTMLElement, pct: number, text: string, hot: boolean, tip: string) => {
+    el.style.setProperty("--v", String(Math.max(0, Math.min(100, pct))));
+    $(".val", el).textContent = text;
+    el.classList.toggle("hot", hot);
+    el.title = tip;
+  };
+  for (const g of list) {
+    const name = shortName(g);
+    set($(`[data-m="gpu"][data-i="${g.index}"]`, box), g.util, `${Math.round(g.util)}%`, g.util > 95, `${name}: load`);
+    const vp = g.mem_total ? (g.mem_used / g.mem_total) * 100 : 0;
+    set($(`[data-m="vram"][data-i="${g.index}"]`, box), vp, `${(g.mem_used / 1024).toFixed(1)}/${(g.mem_total / 1024).toFixed(0)} GB`, vp > 92, `${name}: VRAM`);
+  }
+  const hot = list.reduce((a, b) => (b.temp > a.temp ? b : a));
+  set($(`[data-m="temp"]`, box), hot.temp, `${Math.round(hot.temp)}°C`, hot.temp >= 80, list.map((g) => `${shortName(g)} ${Math.round(g.temp)}°C`).join(" · "));
+}
+
+let gpuTicks = 0;
 async function pollGpu() {
   if (!inTauri) return;
+  // Which card each service is on: re-read every 10 s, so a restart of the services (or a new mode) shows up.
+  if (gpuTicks++ % 10 === 0) await refreshPlan(settings.stackRoot ?? null);
   try {
-    const g = await invoke<Gpu>("gpu_stats");
-    onGpu(g);
-    if (g.name && !pcInfo.gpu) pcInfo.gpu = `${g.name.replace(/^NVIDIA\s+/i, "")} ${Math.round(g.mem_total / 1024)} GB`;
-    const set = (id: string, pct: number, text: string, hot: boolean) => {
-      const el = $(`#${id}`);
-      el.style.setProperty("--v", String(Math.max(0, Math.min(100, pct))));
-      $(".val", el).textContent = text;
-      el.classList.toggle("hot", hot);
-    };
-    set("m-gpu", g.util, `${Math.round(g.util)}%`, g.util > 95);
-    const vp = g.mem_total ? (g.mem_used / g.mem_total) * 100 : 0;
-    set("m-vram", vp, `${(g.mem_used / 1024).toFixed(1)}/${(g.mem_total / 1024).toFixed(0)} GB`, vp > 92);
-    set("m-temp", g.temp, `${Math.round(g.temp)}°C`, g.temp >= 80);
+    const list = await readGpus();
+    onGpus(list);
+    if (!pcInfo.gpu) pcInfo.gpu = list.map((g) => `${shortName(g)} ${Math.round(g.mem_total / 1024)} GB`).join(" + ");
+    renderHud(list);
   } catch {
-    $$("#m-gpu .val, #m-vram .val, #m-temp .val").forEach((e) => (e.textContent = "n/a"));
+    $$("#hud-gpus .val").forEach((e) => (e.textContent = "n/a"));
   }
 }
 
@@ -905,7 +933,7 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
 
     body.innerHTML = `<span class="status-line">${model.backend === "llama" ? "Loading the model if it's asleep (up to a minute)…" : "Waiting for the first token…"}</span>`;
     // A VoxCPM2 voice gives the GPU back to the chat model (in a call the Live model and the voice share it).
-    if (!live) await releaseSpeechGpu();
+    if (!live) await releaseSpeechGpu(model.backend);
     let thinking = "";
     let pending = false;
     const paint = () => {
@@ -1393,7 +1421,7 @@ async function main() {
   initStudio({
     toast,
     root: () => settings.stackRoot ?? null,
-    freeGpu: () => unloadAll(),
+    freeGpu: () => unloadAll(undefined, "comfyui"),
     cameraPane: (on: boolean) => showCameraPane(on),
     show: () => go("studio"),
   });

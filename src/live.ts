@@ -7,6 +7,7 @@
 import workletUrl from "./mic-worklet.js?url&no-inline";
 import markSvg from "./assets/rg-mark.svg?raw";
 import { errMsg, freeLlamaVram, http, OLLAMA, type ModelInfo } from "./backends";
+import { freeGB, readGpus, sharesCard } from "./gpus";
 import { audio, isVox, listVoices, outputLevel, transcribe, DEFAULT_VOICE, VOICE_SERVER } from "./speech";
 import { LiveSpeaker } from "./livespeech";
 import { snapshot } from "./camera";
@@ -247,13 +248,17 @@ export async function startLive() {
  *  answer is quick. */
 async function prepareGpu() {
   setStatus("Making room on the GPU…");
-  const comfy = http("http://127.0.0.1:8188/free", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ unload_models: true, free_memory: true }),
-  }).catch(() => {});
+  // With several GPUs only the cards the call uses (Ollama's and the voice server's) need room.
+  const comfy =
+    sharesCard("comfyui", "ollama") || sharesCard("comfyui", "voice")
+      ? http("http://127.0.0.1:8188/free", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ unload_models: true, free_memory: true }),
+        }).catch(() => {})
+      : null;
   // (VoxCPM2 too, when a Kokoro voice is speaking: then the better Live model fits.)
-  await Promise.all([freeLlamaVram(), unloadOllama(() => true), comfy, isVox(speaker.voice) ? null : unloadVox()]);
+  await Promise.all([freeLlamaVram(["ollama", "voice"]), unloadOllama(() => true), comfy, isVox(speaker.voice) ? null : unloadVox()]);
   // The voice first: VoxCPM2 needs ~6 GB in one piece, and the Live model is picked to fit what's left.
   setStatus(isVox(speaker.voice) ? "Loading Whisper and VoxCPM2…" : "Loading Whisper…");
   let free: number | null = null;
@@ -264,6 +269,12 @@ async function prepareGpu() {
     // Without the voice pack, speech-to-text falls back to Open WebUI's Whisper.
   }
   if (state === "off") return;
+  // The voice server reports its own card. When Ollama is on another one, it's that card's room that counts.
+  if (!sharesCard("voice", "ollama")) {
+    await readGpus().catch(() => []);
+    const gib = freeGB("ollama");
+    free = gib == null ? null : gib * 1.073741824; // GiB to the 10^9-byte GB the Live model sizes use
+  }
   await loadModel(pickModel(free));
 }
 

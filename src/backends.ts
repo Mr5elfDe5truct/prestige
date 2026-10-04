@@ -1,10 +1,9 @@
 // Talking to the local model servers: model lists and streaming chat for Ollama and llama.cpp.
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
+import { ollamaCtx, sharesCard, type Service } from "./gpus";
 
 export const OLLAMA = "http://127.0.0.1:11434";
 export const LLAMA = "http://127.0.0.1:8081/v1";
-// Same context start-all.ps1 gives Ollama (OLLAMA_CONTEXT_LENGTH).
-export const NUM_CTX = 32768;
 
 const inTauri = "__TAURI_INTERNALS__" in window;
 // Inside the app, requests go through Rust so CORS doesn't apply. The installed app's origin is
@@ -208,8 +207,10 @@ export async function listModels(): Promise<{ models: ModelInfo[]; ollama: boole
   return { models, ollama, llama };
 }
 
-/** The 12 GB card can't hold an Ollama model and Qwen3.6 35B together, so unload Ollama's first. */
+/** A 12 GB card can't hold an Ollama model and Qwen3.6 35B together, so unload Ollama's first (unless the two run on
+ *  different cards). */
 async function freeOllamaVram() {
+  if (!sharesCard("llama", "ollama")) return;
   try {
     const ps = await getJson(`${OLLAMA}/api/ps`);
     await Promise.all(
@@ -226,8 +227,10 @@ async function freeOllamaVram() {
   }
 }
 
-/** And the other way round: Qwen3.6 35B fills the card, so unload it before an Ollama model runs. */
-export async function freeLlamaVram() {
+/** And the other way round: Qwen3.6 35B fills the card, so unload it before an Ollama model runs, or whatever else
+ *  in `forServices` is about to need its card. */
+export async function freeLlamaVram(forServices: Service[] = ["ollama"]) {
+  if (!forServices.some((s) => sharesCard("llama", s))) return;
   try {
     const list = (await getJson(`${LLAMA}/models`)).data ?? [];
     await Promise.all(
@@ -308,7 +311,7 @@ export async function streamChat(
         model: model.id,
         messages: messages.map(toOllama),
         stream: true,
-        options: { num_ctx: extra.numCtx ?? NUM_CTX },
+        options: { num_ctx: extra.numCtx ?? ollamaCtx() },
         ...(extra.think !== undefined ? { think: extra.think } : {}),
         ...(extra.keepAlive ? { keep_alive: extra.keepAlive } : {}),
         ...withTools,
