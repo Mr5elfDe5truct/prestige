@@ -2,9 +2,11 @@
 // - Ollama models: /api/show reports capabilities (tools, vision, thinking, audio), context and size
 // - llama.cpp models: the GGUF file's own metadata (chat template, context) plus the router's
 //   preset (a vision projector means images work)
-// Coding and uncensored are read from the model's name, and VRAM fit from its size.
+// Coding and uncensored are read from the model's name, and VRAM fit from its size against the card(s) its runner
+// is on (gpus.ts: with several GPUs, Ollama and llama.cpp may be on different cards).
 import { invoke } from "@tauri-apps/api/core";
 import { http, OLLAMA, type ModelInfo } from "./backends";
+import { cardsText, gpuPlan, ollamaCtx, onPlanChange, vramGB } from "./gpus";
 
 export interface Caps {
   tools: boolean;
@@ -21,9 +23,10 @@ export interface Caps {
   quant?: string;
   sizeGB?: number;
   fit: "gpu" | "split" | "big" | "unknown";
+  /** Which runner's card(s) the fit is measured against. */
+  on?: "ollama" | "llama";
 }
 
-export const VRAM_GB = 12;
 const inTauri = "__TAURI_INTERNALS__" in window;
 
 /** Name hints that metadata can't tell us. */
@@ -36,12 +39,15 @@ export function nameHints(id: string) {
   };
 }
 
-/** How a model of this size sits on the 12 GB card (Ollama adds ~1.2 GB for the 32k context). */
-export function fitFor(sizeGB: number | undefined, moeOffload = false): Caps["fit"] {
+/** How a model of this size sits on its runner's card(s): Ollama adds ~1.2 GB for a 32k context (less for the smaller
+ *  context of a small card), and ~0.8 GB stays with the desktop. */
+export function fitFor(sizeGB: number | undefined, moeOffload = false, on: "ollama" | "llama" = "ollama"): Caps["fit"] {
   if (!sizeGB) return "unknown";
   if (moeOffload) return "split";
-  if (sizeGB + 1.2 <= VRAM_GB - 0.8) return "gpu";
-  if (sizeGB <= 26) return "split";
+  const vram = vramGB(on);
+  const cache = on === "ollama" ? (1.2 * ollamaCtx()) / 32768 : 1.2;
+  if (sizeGB + cache <= vram - 0.8) return "gpu";
+  if (sizeGB <= vram + 14) return "split";
   return "big";
 }
 
@@ -60,6 +66,8 @@ export function capsFor(m: ModelInfo): Promise<Caps> {
 export function resetCaps() {
   cache.clear();
 }
+// Fit is judged against the cards in the GPU plan, so a new plan means fresh chips.
+onPlanChange(resetCaps);
 
 function emptyCaps(id: string): Caps {
   return { tools: false, vision: false, thinking: false, audio: false, ...nameHints(id), fit: "unknown" };
@@ -83,12 +91,13 @@ async function ollamaCaps(m: ModelInfo): Promise<Caps> {
     audio: caps.includes("audio"),
     ...nameHints(m.id),
     embedding: caps.includes("embedding") || nameHints(m.id).embedding,
-    context: Math.min(32768, maxCtx ?? 32768),
+    context: Math.min(ollamaCtx(), maxCtx ?? ollamaCtx()),
     maxContext: maxCtx,
     params: j.details?.parameter_size,
     quant: j.details?.quantization_level,
     sizeGB: m.sizeBytes ? m.sizeBytes / 1e9 : undefined,
     fit: fitFor(m.sizeBytes ? m.sizeBytes / 1e9 : undefined),
+    on: "ollama",
   };
 }
 
@@ -125,10 +134,11 @@ async function llamaCaps(m: ModelInfo): Promise<Caps> {
     maxContext: g.context,
     params,
     sizeGB: size,
-    // The router puts every layer on the GPU, so a llama.cpp model without experts in RAM that loads at all fits
-    // (Qwen3.8 27B Q2_K_P is 10.7 GB plus a small context).
-    fit: !arg("--n-cpu-moe") && !arg("--cpu-moe") && size && size <= VRAM_GB - 1 ? "gpu"
-      : fitFor(size, !!arg("--n-cpu-moe") || !!arg("--cpu-moe")),
+    // With the 12 GB preset the router puts every layer on the GPU, so a model without experts in RAM that loads at all
+    // fits (Qwen3.8 27B Q2_K_P is 10.7 GB plus a small context). Elsewhere --fit sizes it, so judge by size.
+    fit: !gpuPlan()?.llamaFit && !arg("--n-cpu-moe") && !arg("--cpu-moe") && size && size <= vramGB("llama") - 1 ? "gpu"
+      : fitFor(size, !!arg("--n-cpu-moe") || !!arg("--cpu-moe"), "llama"),
+    on: "llama",
   };
 }
 
@@ -155,7 +165,7 @@ export function chips(c: Caps): Chip[] {
 
 export function fitText(c: Caps) {
   return {
-    gpu: { icon: "✅", label: "Fits in VRAM", tip: "Runs fully on the 12 GB card: fastest" },
+    gpu: { icon: "✅", label: "Fits in VRAM", tip: `Runs fully on ${cardsText(c.on ?? "ollama")}: fastest` },
     split: { icon: "⚖", label: "Partly in RAM", tip: "Part of it runs from system RAM: works, but slower" },
     big: { icon: "⚠", label: "Too big", tip: "Larger than this PC can run comfortably" },
     unknown: { icon: "", label: "", tip: "" },

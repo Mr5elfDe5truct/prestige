@@ -31,9 +31,12 @@
           <div class="model-menu" id="model-menu" hidden role="menu"></div>
         </div>
         <span class="grow"></span>
-        <div class="cell meter" id="m-gpu"><b>GPU</b><div class="bar"><i></i></div><span class="val">–</span></div>
-        <div class="cell meter" id="m-vram"><b>VRAM</b><div class="bar"><i></i></div><span class="val">–</span></div>
-        <div class="cell meter" id="m-temp"><b>TEMP</b><span class="val">–</span></div>
+        <!-- GPU, VRAM and temperature meters, one GPU/VRAM pair per card (main.ts) -->
+        <div class="hud-gpus" id="hud-gpus">
+          <div class="cell meter"><b>GPU</b><div class="bar"><i></i></div><span class="val">–</span></div>
+          <div class="cell meter"><b>VRAM</b><div class="bar"><i></i></div><span class="val">–</span></div>
+          <div class="cell meter"><b>TEMP</b><span class="val">–</span></div>
+        </div>
         <button class="icon-btn ghost" id="settings-btn" aria-label="Settings" title="Settings">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg>
         </button>
@@ -115,12 +118,8 @@
       </section>
 
       <section class="screen wide" data-screen="system" hidden>
-        <div class="grid4">
-          <div class="card" id="c-gpu"><span class="eyebrow">GPU load</span><span class="big val">–</span><canvas class="spark"></canvas><span class="credit sub">–</span></div>
-          <div class="card" id="c-vram"><span class="eyebrow">VRAM</span><span class="big val">–</span><canvas class="spark" data-color="--gold"></canvas><span class="credit sub">–</span></div>
-          <div class="card" id="c-temp"><span class="eyebrow">Temperature</span><span class="big val">–</span><div class="bar wide"><i></i></div><span class="credit sub">–</span></div>
-          <div class="card" id="c-power"><span class="eyebrow">Board power</span><span class="big val">–</span><div class="bar wide"><i></i></div><span class="credit sub">–</span></div>
-        </div>
+        <!-- load, VRAM, temperature and power cards for every GPU (system.ts) -->
+        <div class="gpu-cards" id="gpu-cards"></div>
         <div class="two">
           <div class="card">
             <div class="card-head"><h3>Models</h3><span class="credit" id="models-note"></span><button class="btn" id="sys-catalog">＋ Get more models</button></div>
@@ -128,8 +127,7 @@
           </div>
           <div class="card">
             <h3>What's in VRAM</h3>
-            <div class="vram-stack" id="vram-stack"></div>
-            <div class="legend" id="vram-legend"></div>
+            <div class="vram-cards" id="vram-cards"></div>
             <div class="ram">
               <div class="legend spread"><span>System RAM</span><span class="mono" id="ram-val">–</span></div>
               <div class="bar wide" id="ram-bar"><i></i></div>

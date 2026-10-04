@@ -1,23 +1,14 @@
-// System screen: GPU meters with sparklines, every chat model with load/unload, what's in VRAM,
-// system RAM and the services. Meters update every second; model state every 3 seconds while visible.
+// System screen: GPU meters with sparklines for every card, every chat model with load/unload, what's in each card's
+// VRAM, system RAM and the services. Meters update every second; model state every 3 seconds while visible.
 import { invoke } from "@tauri-apps/api/core";
 import { errMsg, http, lastModels, ping, OLLAMA, LLAMA } from "./backends";
 import { bestFor, capsFor, chipsHtml } from "./caps";
+import {
+  cardsFor, cardsText, freeGB, gpuPlan, ollamaCtx, onPlanChange, servicesOn, sharesCard, shortName, vramGB,
+  SERVICE_NAMES, type Gpu, type Service,
+} from "./gpus";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
-
-export interface Gpu {
-  name?: string;
-  util: number;
-  mem_used: number; // MiB
-  mem_total: number;
-  temp: number;
-  fan?: number | null;
-  power?: number | null;
-  power_limit?: number | null;
-  slowdown_temp?: number | null;
-  target_temp?: number | null;
-}
 
 interface Row {
   key: string;
@@ -30,8 +21,12 @@ interface Row {
   loaded: boolean;
   vramGB?: number; // measured (Ollama) or estimated (llama.cpp)
   loading?: boolean;
+  sleeping?: boolean; // llama.cpp: idle past --sleep-idle-seconds, woken by the next request
   args?: string[]; // llama.cpp router command line (for capability detection)
+  cards?: Map<number, number>; // GB on each card it's loaded on (nvidia-smi index)
 }
+
+const serviceOf = (r: Row): Service => (r.backend === "llama" ? "llama" : "ollama");
 
 interface Deps {
   toast: (msg: string, kind?: string) => void;
@@ -40,22 +35,29 @@ interface Deps {
 }
 
 const GB = 1024; // MiB per GiB
-// Measured on this PC: Qwen3.6 35B with 25 expert layers in RAM uses about 10.8 GB of VRAM.
+// Measured on a 12 GB card: Qwen3.6 35B with 25 expert layers in RAM (the 12 GB preset) uses about 10.8 GB of VRAM.
 const KNOWN_VRAM: [RegExp, number][] = [[/qwen3\.6-35b/i, 10.8]];
-// Ollama runs every model with a 32k q8 KV cache (start-all.ps1), roughly 1.2 GB on top of the weights.
-const OLLAMA_OVERHEAD = 1.2;
+// Ollama's q8 KV cache: roughly 1.2 GB on top of the weights at 32k, less with the smaller context of a small card.
+const ollamaOverhead = () => (1.2 * ollamaCtx()) / 32768;
 
 let deps: Deps;
 let visible = false;
 let rows: Row[] = [];
-let lastGpu: Gpu | null = null;
-let baselineMiB = 900; // desktop + driver use when no model is loaded; refined as we see it
-const hist = { gpu: [] as number[], vram: [] as number[] };
+let lastGpus: Gpu[] = [];
+const baselineMiB = new Map<number, number>(); // per card: desktop + driver use with no model loaded, refined as we see it
+const baseline = (g: Gpu) => baselineMiB.get(g.index) ?? Math.min(900, g.mem_used);
+const hist = new Map<number, { gpu: number[]; vram: number[] }>();
+let builtFor = ""; // the cards (and plan) the GPU cards were built for
 let modelTimer = 0;
 
 export function initSystem(d: Deps) {
   deps = d;
   document.querySelector("#sys-catalog")?.addEventListener("click", () => deps.openCatalog());
+  // start-all.ps1 moved services between cards: new headings and VRAM bars.
+  onPlanChange(() => {
+    builtFor = "";
+    if (lastGpus.length) onGpus(lastGpus);
+  });
 }
 
 export function showSystem(on: boolean) {
@@ -70,7 +72,7 @@ export function showSystem(on: boolean) {
       refreshServices();
       refreshRam();
     }, 3000);
-    if (lastGpu) onGpu(lastGpu);
+    if (lastGpus.length) onGpus(lastGpus);
   }
 }
 
@@ -109,52 +111,91 @@ function spark(canvas: HTMLCanvasElement, data: number[], max: number, colorVar 
   }
 }
 
-/** Called every second with fresh nvidia-smi numbers, whether or not the screen is visible. */
-export function onGpu(g: Gpu) {
-  lastGpu = g;
-  hist.gpu.push(g.util);
-  hist.vram.push(g.mem_used / GB);
-  if (hist.gpu.length > 60) hist.gpu.shift();
-  if (hist.vram.length > 60) hist.vram.shift();
-  // The desktop's own share, measured only while no model is in (or on its way into) VRAM.
-  // A model mid-load isn't marked loaded yet, so ignore readings far above an idle desktop.
-  if (!rows.some((r) => r.loaded || r.loading) && g.mem_used < 3 * GB) baselineMiB = g.mem_used;
+/** The load / VRAM / temperature / power cards, one row per GPU, headed by the services on it when there are several. */
+function buildCards(list: Gpu[]) {
+  const box = $("#gpu-cards");
+  box.innerHTML = "";
+  for (const g of list) {
+    const sec = document.createElement("section");
+    sec.className = "gpu-sec";
+    sec.dataset.i = String(g.index);
+    sec.innerHTML =
+      (list.length > 1 ? `<div class="gpu-head"><h3></h3><span class="credit"></span></div>` : "") +
+      `<div class="grid4">
+        <div class="card c-gpu"><span class="eyebrow">GPU load</span><span class="big val">–</span><canvas class="spark"></canvas><span class="credit sub">–</span></div>
+        <div class="card c-vram"><span class="eyebrow">VRAM</span><span class="big val">–</span><canvas class="spark"></canvas><span class="credit sub">–</span></div>
+        <div class="card c-temp"><span class="eyebrow">Temperature</span><span class="big val">–</span><div class="bar wide"><i></i></div><span class="credit sub">–</span></div>
+        <div class="card c-power"><span class="eyebrow">Board power</span><span class="big val">–</span><div class="bar wide"><i></i></div><span class="credit sub">–</span></div>
+      </div>`;
+    if (list.length > 1) {
+      $("h3", sec).textContent = `${shortName(g)} · ${Math.round(g.mem_total / GB)} GB`;
+      const on = servicesOn(g.index).filter((x) => x !== "openwebui");
+      $(".credit", sec).textContent = on.length ? on.map((x) => SERVICE_NAMES[x]).join(", ") : "not used by the Workstation";
+    }
+    box.appendChild(sec);
+  }
+}
+
+/** Called every second with fresh nvidia-smi numbers for every card, whether or not the screen is visible. */
+export function onGpus(list: Gpu[]) {
+  lastGpus = list;
+  for (const g of list) {
+    const h = hist.get(g.index) ?? { gpu: [], vram: [] };
+    hist.set(g.index, h);
+    h.gpu.push(g.util);
+    h.vram.push(g.mem_used / GB);
+    if (h.gpu.length > 60) h.gpu.shift();
+    if (h.vram.length > 60) h.vram.shift();
+    // The desktop's own share, measured only while no model is in (or on its way into) VRAM.
+    // A model mid-load isn't marked loaded yet, so ignore readings far above an idle desktop.
+    if (!rows.some((r) => r.loaded || r.loading) && g.mem_used < 3 * GB) baselineMiB.set(g.index, g.mem_used);
+  }
   if (!visible) return;
 
-  const total = g.mem_total / GB;
-  const c = (id: string) => $(`#${id}`);
-  $(".val", c("c-gpu")).textContent = `${Math.round(g.util)}%`;
-  $(".sub", c("c-gpu")).textContent = `last 60 s · peak ${Math.round(Math.max(...hist.gpu))}%`;
-  spark($("canvas", c("c-gpu")) as HTMLCanvasElement, hist.gpu, 100);
-
-  $(".val", c("c-vram")).textContent = `${(g.mem_used / GB).toFixed(1)} / ${total.toFixed(0)} GB`;
-  $(".sub", c("c-vram")).textContent = `${((g.mem_total - g.mem_used) / GB).toFixed(1)} GB free`;
-  spark($("canvas", c("c-vram")) as HTMLCanvasElement, hist.vram, total, "--gold");
-  c("c-vram").classList.toggle("hot", g.mem_used / g.mem_total > 0.92);
-
-  const limit = g.slowdown_temp ?? 95;
-  $(".val", c("c-temp")).textContent = `${Math.round(g.temp)}°C`;
-  c("c-temp").style.setProperty("--v", String((g.temp / limit) * 100));
-  c("c-temp").classList.toggle("hot", g.temp >= (g.target_temp ?? 83));
-  $(".sub", c("c-temp")).textContent = [
-    g.fan != null ? `Fans ${Math.round(g.fan)}%` : null,
-    g.target_temp ? `target ${g.target_temp}°C` : null,
-    g.slowdown_temp ? `throttles at ${g.slowdown_temp}°C` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-
-  if (g.power != null) {
-    $(".val", c("c-power")).textContent = `${Math.round(g.power)} W`;
-    c("c-power").style.setProperty("--v", String(g.power_limit ? (g.power / g.power_limit) * 100 : 0));
-    $(".sub", c("c-power")).textContent = g.power_limit ? `limit ${Math.round(g.power_limit)} W` : "";
-  } else {
-    $(".val", c("c-power")).textContent = "n/a";
+  const key = list.map((g) => `${g.index}:${g.mem_total}`).join() + JSON.stringify(gpuPlan()?.services ?? null);
+  if (key !== builtFor) {
+    builtFor = key;
+    buildCards(list);
   }
-  // The bars inside the temperature and power cards read --v from their card.
-  for (const id of ["c-temp", "c-power"]) {
-    const bar = $(".bar > i", c(id));
-    bar.style.width = `${Math.max(0, Math.min(100, parseFloat(c(id).style.getPropertyValue("--v") || "0")))}%`;
+  for (const g of list) {
+    const sec = document.querySelector<HTMLElement>(`.gpu-sec[data-i="${g.index}"]`);
+    if (!sec) continue;
+    const h = hist.get(g.index)!;
+    const c = (cls: string) => $(`.${cls}`, sec);
+    const total = g.mem_total / GB;
+    $(".val", c("c-gpu")).textContent = `${Math.round(g.util)}%`;
+    $(".sub", c("c-gpu")).textContent = `last 60 s · peak ${Math.round(Math.max(...h.gpu))}%`;
+    spark($("canvas", c("c-gpu")) as HTMLCanvasElement, h.gpu, 100);
+
+    $(".val", c("c-vram")).textContent = `${(g.mem_used / GB).toFixed(1)} / ${total.toFixed(0)} GB`;
+    $(".sub", c("c-vram")).textContent = `${((g.mem_total - g.mem_used) / GB).toFixed(1)} GB free`;
+    spark($("canvas", c("c-vram")) as HTMLCanvasElement, h.vram, total, "--gold");
+    c("c-vram").classList.toggle("hot", g.mem_used / g.mem_total > 0.92);
+
+    const limit = g.slowdown_temp ?? 95;
+    $(".val", c("c-temp")).textContent = `${Math.round(g.temp)}°C`;
+    c("c-temp").style.setProperty("--v", String((g.temp / limit) * 100));
+    c("c-temp").classList.toggle("hot", g.temp >= (g.target_temp ?? 83));
+    $(".sub", c("c-temp")).textContent = [
+      g.fan != null ? `Fans ${Math.round(g.fan)}%` : null,
+      g.target_temp ? `target ${g.target_temp}°C` : null,
+      g.slowdown_temp ? `throttles at ${g.slowdown_temp}°C` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
+    if (g.power != null) {
+      $(".val", c("c-power")).textContent = `${Math.round(g.power)} W`;
+      c("c-power").style.setProperty("--v", String(g.power_limit ? (g.power / g.power_limit) * 100 : 0));
+      $(".sub", c("c-power")).textContent = g.power_limit ? `limit ${Math.round(g.power_limit)} W` : "";
+    } else {
+      $(".val", c("c-power")).textContent = "n/a";
+    }
+    // The bars inside the temperature and power cards read --v from their card.
+    for (const cls of ["c-temp", "c-power"]) {
+      const bar = $(".bar > i", c(cls));
+      bar.style.width = `${Math.max(0, Math.min(100, parseFloat(c(cls).style.getPropertyValue("--v") || "0")))}%`;
+    }
   }
   renderStack();
 }
@@ -188,7 +229,7 @@ async function refreshModels() {
         name: info.name,
         role: info.role,
         diskGB: disk,
-        needGB: disk + OLLAMA_OVERHEAD,
+        needGB: disk + ollamaOverhead(),
         loaded: running.has(m.name),
         vramGB: running.get(m.name),
       });
@@ -213,20 +254,31 @@ async function refreshModels() {
         name: info.hide ? `${info.name} (computer use)` : info.name,
         role: info.role,
         diskGB: disk,
-        needGB: known ?? Math.min(disk + 1.5, 11.5),
+        // The 10.8 GB measurement is for the 12 GB preset; elsewhere llama.cpp's --fit fills the card(s) to ~1 GB short.
+        needGB: (!gpuPlan()?.llamaFit && known) || Math.min(disk + 1.5, vramGB("llama") - 1),
         loaded: m.status?.value === "loaded",
         loading: m.status?.value === "loading",
+        sleeping: m.status?.value === "sleeping",
         args: m.status?.args ?? [],
       });
     });
   } else notes.push("llama.cpp isn't answering");
 
-  // llama.cpp can't report per-model VRAM on Windows, so attribute what's left after Ollama's share.
-  if (lastGpu) {
+  // Ollama's models sit on its (first) card. llama.cpp can't report per-model VRAM on Windows, so on each of its cards
+  // attribute what's in use beyond the desktop and Ollama's share there.
+  const ollamaCard = cardsFor("ollama")[0]?.index;
+  for (const r of next) if (r.backend === "ollama" && r.vramGB && ollamaCard != null) r.cards = new Map([[ollamaCard, r.vramGB]]);
+  const llamaLoaded = next.filter((r) => r.backend === "llama" && r.loaded);
+  if (llamaLoaded.length) {
     const ollamaGB = next.filter((r) => r.backend === "ollama" && r.loaded).reduce((s, r) => s + (r.vramGB ?? 0), 0);
-    const llamaLoaded = next.filter((r) => r.backend === "llama" && r.loaded);
-    const rest = Math.max(0, (lastGpu.mem_used - baselineMiB) / GB - ollamaGB);
-    for (const r of llamaLoaded) r.vramGB = rest / llamaLoaded.length;
+    const per = new Map<number, number>();
+    for (const g of cardsFor("llama")) {
+      per.set(g.index, Math.max(0, (g.mem_used - baseline(g)) / GB - (g.index === ollamaCard ? ollamaGB : 0)) / llamaLoaded.length);
+    }
+    for (const r of llamaLoaded) {
+      r.cards = per;
+      r.vramGB = [...per.values()].reduce((s, v) => s + v, 0);
+    }
   }
   // Keep "Loading…" on rows we're working on.
   for (const r of next) if (rows.find((o) => o.key === r.key)?.loading && !r.loaded) r.loading = true;
@@ -243,7 +295,7 @@ function renderRows() {
   for (const r of rows) {
     const el = document.createElement("div");
     el.className = "mrow" + (r.loaded ? " loaded" : "") + (r.loading ? " busy" : "");
-    const state = r.loading ? "Loading…" : r.loaded ? "In VRAM" : "On disk";
+    const state = r.loading ? "Loading…" : r.loaded ? "In VRAM" : r.sleeping ? "Asleep" : "On disk";
     const size =
       r.loaded && r.vramGB
         ? `${r.backend === "llama" ? "~" : ""}${r.vramGB.toFixed(1)} GB in VRAM`
@@ -275,7 +327,7 @@ async function ollamaKeepAlive(id: string, keep: string | number) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     // No prompt: Ollama just loads (or unloads) the model. 5m matches OLLAMA_KEEP_ALIVE in start-all.ps1.
-    body: JSON.stringify({ model: id, keep_alive: keep, options: { num_ctx: 32768 } }),
+    body: JSON.stringify({ model: id, keep_alive: keep, options: { num_ctx: ollamaCtx() } }),
   });
   if (!r.ok) throw new Error(`Ollama answered ${r.status}`);
   await r.text();
@@ -295,16 +347,21 @@ async function unloadRow(r: Row) {
   else await llamaCall("unload", r.id);
 }
 
-/** Frees the GPU for something else (ComfyUI, or another model). */
-export async function unloadAll(except?: string) {
+/** Frees the GPU for something else (ComfyUI, or another model). With `forService`, only the card(s) that service
+ *  runs on: with several GPUs, a model on another card can stay. */
+export async function unloadAll(except?: string, forService?: Service) {
   await refreshModels();
+  const shares = (s: Service) => !forService || sharesCard(forService, s);
   // The voice server's Whisper and VoxCPM2 too (they reload on their next use).
-  const voice = http("http://127.0.0.1:8890/v1/audio/unload", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: "{}",
-  }).catch(() => {});
-  await Promise.all([voice, ...rows.filter((r) => r.loaded && r.key !== except).map((r) => unloadRow(r).catch(() => {}))]);
+  const voice = shares("voice")
+    ? http("http://127.0.0.1:8890/v1/audio/unload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      }).catch(() => {})
+    : null;
+  const doomed = rows.filter((r) => r.loaded && r.key !== except && shares(serviceOf(r)));
+  await Promise.all([voice, ...doomed.map((r) => unloadRow(r).catch(() => {}))]);
 }
 
 async function unload(r: Row) {
@@ -321,14 +378,17 @@ async function unload(r: Row) {
 }
 
 async function load(r: Row) {
-  if (lastGpu) {
+  const svc = serviceOf(r);
+  const free = freeGB(svc);
+  if (free != null) {
     // llama.cpp's router holds one model at a time, so loading one of its models swaps out the other.
     const swapped = r.backend === "llama" ? rows.filter((o) => o.backend === "llama" && o.loaded).reduce((s, o) => s + (o.vramGB ?? 0), 0) : 0;
-    const freeGB = (lastGpu.mem_total - lastGpu.mem_used) / GB + swapped;
-    if (r.needGB > freeGB) {
-      const others = rows.filter((o) => o.loaded && o.key !== r.key);
+    const room = free + swapped;
+    if (r.needGB > room) {
+      // Only what shares this model's card(s) is in the way.
+      const others = rows.filter((o) => o.loaded && o.key !== r.key && sharesCard(svc, serviceOf(o)));
       $("#fit-text").textContent =
-        `${r.name} needs about ${r.needGB.toFixed(1)} GB of VRAM and only ${freeGB.toFixed(1)} GB of the 12 GB is free.` +
+        `${r.name} needs about ${r.needGB.toFixed(1)} GB of VRAM and only ${room.toFixed(1)} GB of ${cardsText(svc)} is free.` +
         (others.length ? ` Loaded now: ${others.map((o) => o.name).join(", ")}.` : "") +
         " Loading it anyway may spill into system RAM and run slowly, or fail.";
       const dlg = $("#fit") as HTMLDialogElement;
@@ -347,7 +407,17 @@ async function load(r: Row) {
   try {
     if (r.backend === "ollama") await ollamaKeepAlive(r.id, "5m");
     else {
-      await llamaCall("load", r.id);
+      // A sleeping model is still the router's current one, so /models/load refuses it ("already running"); any
+      // request wakes it instead.
+      if (r.sleeping) {
+        const w = await http(`${LLAMA}/chat/completions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model: r.id, messages: [{ role: "user", content: "hi" }], max_tokens: 1 }),
+        });
+        if (!w.ok) throw new Error(`llama.cpp answered ${w.status}`);
+        await w.text();
+      } else await llamaCall("load", r.id);
       // The router returns at once; wait for the model to report "loaded".
       for (let i = 0; i < 90; i++) {
         await new Promise((res) => setTimeout(res, 2000));
@@ -365,33 +435,49 @@ async function load(r: Row) {
 }
 
 // ---------- VRAM stack, RAM, services ----------
+/** One bar per card: the desktop, each loaded model on that card, and what's free. */
 function renderStack() {
-  if (!visible || !lastGpu) return;
-  const total = lastGpu.mem_total;
-  const stack = $("#vram-stack");
-  const legend = $("#vram-legend");
-  stack.innerHTML = "";
-  legend.innerHTML = "";
-  const loaded = rows.filter((r) => r.loaded && r.vramGB);
-  const modelMiB = loaded.reduce((s, r) => s + r.vramGB! * GB, 0);
-  const other = Math.max(0, lastGpu.mem_used - modelMiB);
-  const seg = (cls: string, mib: number, label: string) => {
-    if (mib <= 0) return;
-    const s = document.createElement("div");
-    s.className = `seg ${cls}`;
-    s.style.width = `${(mib / total) * 100}%`;
-    s.title = `${label} · ${(mib / GB).toFixed(1)} GB`;
-    stack.appendChild(s);
-    const l = document.createElement("span");
-    l.innerHTML = `<i class="seg ${cls}"></i>`;
-    l.append(`${label} ${(mib / GB).toFixed(1)} GB`);
-    legend.appendChild(l);
-  };
-  seg("sys", other, "Desktop & other apps");
-  loaded.forEach((r, i) => seg(`s${i % 5}`, r.vramGB! * GB, r.name + (r.backend === "llama" ? " (est.)" : "")));
-  const free = document.createElement("span");
-  free.textContent = `Free ${((total - lastGpu.mem_used) / GB).toFixed(1)} of ${(total / GB).toFixed(0)} GB`;
-  legend.appendChild(free);
+  if (!visible || !lastGpus.length) return;
+  const box = $("#vram-cards");
+  box.innerHTML = "";
+  for (const g of lastGpus) {
+    const total = g.mem_total;
+    const wrap = document.createElement("div");
+    wrap.className = "vram-card";
+    if (lastGpus.length > 1) {
+      const t = document.createElement("span");
+      t.className = "eyebrow";
+      t.textContent = shortName(g);
+      wrap.appendChild(t);
+    }
+    const stack = document.createElement("div");
+    stack.className = "vram-stack";
+    const legend = document.createElement("div");
+    legend.className = "legend";
+    wrap.append(stack, legend);
+    box.appendChild(wrap);
+
+    const here = rows.filter((r) => r.loaded && (r.cards?.get(g.index) ?? 0) > 0);
+    const modelMiB = here.reduce((s, r) => s + r.cards!.get(g.index)! * GB, 0);
+    const other = Math.max(0, g.mem_used - modelMiB);
+    const seg = (cls: string, mib: number, label: string) => {
+      if (mib <= 0) return;
+      const s = document.createElement("div");
+      s.className = `seg ${cls}`;
+      s.style.width = `${(mib / total) * 100}%`;
+      s.title = `${label} · ${(mib / GB).toFixed(1)} GB`;
+      stack.appendChild(s);
+      const l = document.createElement("span");
+      l.innerHTML = `<i class="seg ${cls}"></i>`;
+      l.append(`${label} ${(mib / GB).toFixed(1)} GB`);
+      legend.appendChild(l);
+    };
+    seg("sys", other, "Desktop & other apps");
+    here.forEach((r) => seg(`s${rows.indexOf(r) % 5}`, r.cards!.get(g.index)! * GB, r.name + (r.backend === "llama" ? " (est.)" : "")));
+    const free = document.createElement("span");
+    free.textContent = `Free ${((total - g.mem_used) / GB).toFixed(1)} of ${(total / GB).toFixed(0)} GB`;
+    legend.appendChild(free);
+  }
 }
 
 async function refreshRam() {

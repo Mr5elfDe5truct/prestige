@@ -7,6 +7,7 @@
 // avatar. VoxCPM2 needs ~6 GB of GPU memory, so it waits for the reply to finish (the voice server unloads the
 // chat model to make room) and is unloaded again before the next message.
 import { errMsg, http } from "./backends";
+import { sharesCard } from "./gpus";
 import type { MemoryConfig } from "./memory";
 
 export const KOKORO = "http://127.0.0.1:8880";
@@ -293,9 +294,10 @@ export async function cloneVoice(name: string, file: File): Promise<string> {
   return String(j.voice);
 }
 
-/** Before a chat reply: take VoxCPM2 off the GPU so the chat model has room (it reloads when it speaks). */
-export async function releaseSpeechGpu() {
-  if (!isVox(voice)) return;
+/** Before a chat reply: take VoxCPM2 off the GPU so the chat model has room (it reloads when it speaks). Not needed
+ *  when the chat model's runner is on another card. */
+export async function releaseSpeechGpu(on?: "ollama" | "llama") {
+  if (!isVox(voice) || (on && !sharesCard("voice", on))) return;
   try {
     await http(`${VOICE_SERVER}/v1/audio/unload`, {
       method: "POST",

@@ -1,7 +1,7 @@
 // Generation settings for images and video, shared by Studio and chat: shape and size, quality (steps),
 // how many, seed, for video the resolution, length and frame rate, and for a long video its shots and models. The defaults are what the reference
 // RTX 3060 12 GB renders comfortably; studio.ts turns them into workflow inputs and warns when a pick is
-// likely to run past 12 GB of VRAM.
+// likely to run past the VRAM of ComfyUI's card.
 
 export type Quality = "draft" | "standard" | "high" | "max";
 export type Aspect = "1:1" | "4:3" | "3:4" | "3:2" | "2:3" | "16:9" | "9:16";
