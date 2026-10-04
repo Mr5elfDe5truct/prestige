@@ -1,6 +1,8 @@
 // Studio screen: the real renders in ComfyUI's output folder, and a create bar that queues the
 // stack's own ComfyUI workflows (Qwen-Image-2.1 or its 4-step turbo for images, Z-Image-Turbo without
 // them, Qwen-Image-2.1 to edit an image, LTX-2.5 for video with sound, Wan 2.2 to animate an image).
+// A reference image (a character or an item, from reference.ts) puts that subject into a new scene with Qwen-Image-2.1;
+// in Video mode that picture (or the reference itself) becomes LTX-2.5's first frame.
 // The Webcam mode shows the camera pane from camera.ts. Chat uses renderMedia() to make images or a video the same way
 // and show them inline. Size, quality, seed, count, length and fps come from gensettings.ts, shared with chat.
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
@@ -30,6 +32,7 @@ import {
   type Quality,
   type SettingsKey,
 } from "./gensettings";
+import { CONSENT, REF_KINDS, hasFiles, imageIn, loadReference, refPrompt, sceneOf, uploadReference, type RefKind, type Reference } from "./reference";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
 const $$ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => Array.from(r.querySelectorAll(s)) as T[];
@@ -49,7 +52,7 @@ interface Asset {
   seed?: number | null;
 }
 
-type GenMode = "image" | "fast" | "edit" | "video" | "animate";
+type GenMode = "image" | "fast" | "edit" | "video" | "animate" | "ref" | "reffast" | "refvideo";
 
 // How a workflow takes the generation settings: an image model with a latent size and batch, an edit
 // (size follows the picture), LTX with a 2× upscale pass ("ltx") or without ("ltx1"), or Wan's two samplers.
@@ -66,7 +69,7 @@ interface Mode {
   steps?: Partial<Record<Quality, number>>; // sampler steps per quality
   secs: number; // render time at the default settings on the reference RTX 3060 12 GB
   note?: string;
-  imageNode?: string; // LoadImage node for image-to-video and edits
+  imageNode?: string; // LoadImage node for image-to-video, edits and reference images
   fallback?: Mode; // used when this workflow file isn't there
 }
 
@@ -136,6 +139,52 @@ const MODES: Record<GenMode, Mode> = {
       secs: 360,
     },
   },
+  // A reference image placed in a new scene: the text-to-image graph with the picture fed to the text encoder.
+  ref: {
+    file: "qwen-image-21-reference.api.json",
+    label: "Qwen-Image-2.1",
+    family: "image",
+    promptNode: "4",
+    promptKey: "prompt",
+    seed: ["6", "seed"],
+    latent: "5",
+    steps: QWEN_STEPS,
+    secs: 130,
+    note: "with your reference",
+    imageNode: "9",
+  },
+  reffast: {
+    file: "qwen-image-21-turbo-reference.api.json",
+    label: "Qwen-Image-2.1 Turbo",
+    family: "image",
+    promptNode: "4",
+    promptKey: "prompt",
+    seed: ["6", "seed"],
+    latent: "5",
+    steps: { draft: 3, standard: 4, high: 6, max: 8 },
+    secs: 40,
+    note: "with your reference",
+    imageNode: "9",
+  },
+  // LTX image-to-video: the picture is the first frame of a clip with sound.
+  refvideo: {
+    file: "ltx25-i2v-distilled.api.json",
+    label: "LTX-2.5",
+    family: "ltx",
+    promptNode: "5",
+    seed: ["16", "noise_seed"],
+    secs: 360,
+    imageNode: "50",
+    fallback: {
+      file: "ltx23-i2v-distilled.api.json",
+      label: "LTX-2.3",
+      family: "ltx1",
+      promptNode: "5",
+      seed: ["16", "noise_seed"],
+      secs: 360,
+      imageNode: "50",
+    },
+  },
   animate: {
     file: "wan22-i2v-4step.api.json",
     label: "Wan 2.2",
@@ -163,7 +212,13 @@ interface Plan {
   warn: string; // "" when it should fit
 }
 
-const settingsKey = (gm: GenMode): SettingsKey => (gm === "video" ? "video" : gm === "animate" ? "animate" : "image");
+const settingsKey = (gm: GenMode): SettingsKey => (gm === "video" || gm === "refvideo" ? "video" : gm === "animate" ? "animate" : "image");
+const isVideo = (gm: GenMode) => gm === "video" || gm === "animate" || gm === "refvideo";
+
+/** A picture a render starts from: a render in the gallery (edit, animate) or a reference image. */
+type Source = Asset | Reference;
+/** Changes to a plan for one step of a chain: the first frame for a video is one picture at the video's shape. */
+type Override = { w: number; h: number; count: 1 };
 
 /** The quality levels a model offers, with their steps. */
 const levels = (m: Mode) => (Object.keys(QUALITY_NAMES) as Quality[]).filter((q) => m.steps?.[q] != null);
@@ -174,7 +229,7 @@ const WAN_BASE = 832 * 480 * 81;
 const MP = 1024 * 1024;
 
 /** What a render with the current settings will be: sizes, steps, frames, and a VRAM and time estimate. */
-function plan(gm: GenMode, src: Asset | null = srcAsset): Plan {
+function plan(gm: GenMode, src: Source | null = srcAsset, o?: Override): Plan {
   const m = modeOf(gm);
   let p: Omit<Plan, "warn">;
   if (m.family === "image" || m.family === "edit") {
@@ -185,9 +240,10 @@ function plan(gm: GenMode, src: Asset | null = srcAsset): Plan {
       const px = src?.width && src.height ? (src.width * src.height) / MP : 1;
       p = { w: 0, h: 0, steps, count: 1, load: px, secs: m.secs * px * ratio };
     } else {
-      const [w, h] = imageDims(s.aspect, s.size);
+      const [w, h] = o ? [o.w, o.h] : imageDims(s.aspect, s.size);
+      const count = o ? o.count : s.count;
       const px = (w * h) / MP;
-      p = { w, h, steps, count: s.count, load: px * s.count, secs: m.secs * px * s.count * ratio };
+      p = { w, h, steps, count, load: px * count, secs: m.secs * px * count * ratio };
     }
   } else if (m.family === "wan") {
     const s = settings().animate;
@@ -245,7 +301,7 @@ function apply(m: Mode, g: any, p: Plan, seed: number) {
         // Decode the first pass directly and drop the upscale.
         set(g, "35", { samples: ["19", 1] });
         set(g, "37", { samples: ["19", 0] });
-        for (const id of ["40", "41", "42", "43", "44", "45", "46"]) delete g[id];
+        for (const id of ["40", "41", "42", "43", "44", "45", "46", "53"]) delete g[id];
       }
       break;
     }
@@ -283,10 +339,25 @@ let filter: "all" | "image" | "video" = "all";
 let mode: "image" | "video" | "webcam" = "image";
 // The image being animated (Video mode) or edited (Image mode), picked from the lightbox.
 let srcAsset: Asset | null = null;
+// The reference image (a character or item to put in a new scene), and how it's used. Kept across Image and Video.
+let ref: Reference | null = null;
+const stored = (k: string, ok: string[], def: string) => {
+  try {
+    const v = localStorage.getItem(k);
+    return v && ok.includes(v) ? v : def;
+  } catch {
+    return def;
+  }
+};
+let refKind = stored("studio.refKind", ["auto", "character", "item"], "auto") as RefKind;
+// In Video mode: put the reference in a new scene first ("scene"), or animate the reference picture itself ("itself").
+let refFrame = stored("studio.refFrame", ["scene", "itself"], "scene") as "scene" | "itself";
+// Shown before the progress label during a two-step render ("Step 1 of 2 · first frame · ").
+let stepNote = "";
 const workflows: Partial<Record<GenMode, any>> = {};
 const active: Partial<Record<GenMode, Mode>> = {}; // the Mode (or fallback) each workflow was loaded from
 const clientId = `prestige-${Math.random().toString(36).slice(2, 10)}`;
-let job: { id: string; mode: GenMode; started: number; prompt: string; nodes: Record<string, string>; outputs: string[]; seed: number } | null = null;
+let job: { id: string; mode: GenMode; started: number; prompt: string; nodes: Record<string, string>; outputs: string[]; seed: number; count: number } | null = null;
 let starting = false; // freeing the GPU / uploading, before ComfyUI has the job
 let fresh = new Set<string>(); // names of the files the last render made
 let workflowsLoaded: Promise<void> | null = null;
@@ -322,6 +393,7 @@ export function initStudio(d: Deps) {
     srcAsset = null;
     renderCreate();
   });
+  initRefSlot();
   $("#gen-opts").addEventListener("click", (e) => {
     const t = e.target as HTMLElement;
     if (t.closest(".opt.set")) {
@@ -379,9 +451,24 @@ async function loadWorkflows() {
 
 /** The workflow the create bar runs now. */
 function currentMode(): GenMode {
-  if (mode === "video") return srcAsset ? "animate" : "video";
+  if (mode === "video") return srcAsset ? "animate" : ref ? "refvideo" : "video";
   if (srcAsset) return "edit";
+  if (ref) return refImageMode();
   return workflows[imageMode] ? imageMode : "fast";
+}
+
+/** The reference-image workflow for the Image mode's model pick (Qwen-Image-2.1 or its turbo). */
+const refImageMode = (): GenMode => (imageMode === "fast" ? (workflows.reffast ? "reffast" : "ref") : workflows.ref ? "ref" : "reffast");
+
+/** A video from a reference: Qwen-Image makes the first frame first, unless the reference itself is the first frame. */
+const chained = (gm: GenMode, frame = refFrame) => gm === "refvideo" && frame === "scene";
+
+/** The first frame's size for a video: the video's shape at about a megapixel (LTX scales it to the clip). */
+function frameSize(): Override {
+  const [w, h] = parseRes(settings().video.res);
+  const k = Math.sqrt(MP / (w * h));
+  const r16 = (x: number) => Math.round((x * k) / 16) * 16;
+  return { w: r16(w), h: r16(h), count: 1 };
 }
 
 const modeOf = (gm: GenMode) => active[gm] ?? MODES[gm];
@@ -399,12 +486,17 @@ function renderCreate() {
     ($("#animate-img") as HTMLImageElement).src = convertFileSrc(srcAsset.path);
     $("#animate-what").textContent = `${gm === "edit" ? "Editing" : "Animating"} this image with ${modeOf(gm).label}`;
   }
+  renderRefSlot(gm, webcam);
   if (webcam) {
     $("#gen-warn").hidden = true;
     $("#gen-settings").hidden = true;
     return;
   }
-  const wf = workflows[gm];
+  const chain = chained(gm);
+  const first = refImageMode();
+  // A chained video also needs the reference-image workflow for its first frame.
+  const missing = !workflows[gm] ? modeOf(gm).file : chain && !workflows[first] ? modeOf(first).file : "";
+  const wf = workflows[gm] && !missing;
   const m = modeOf(gm);
   $("#create").classList.toggle("disabled", !wf);
   ($("#gen-btn") as HTMLButtonElement).disabled = !wf || !!job || starting;
@@ -412,27 +504,135 @@ function renderCreate() {
   ($("#gen-prompt") as HTMLInputElement).placeholder =
     gm === "image" || gm === "fast"
       ? "Describe an image… e.g. a red and gold dragon coiled around a glowing GPU"
-      : gm === "edit"
-        ? "Say what to change… e.g. make it night, swap the car for a horse, remove the sign"
-        : gm === "animate"
-          ? "Describe the motion… e.g. slow push-in, snow falling, warm light flickering"
-          : `Describe a ${settings().video.seconds}-second scene, including any sound…`;
+      : gm === "ref" || gm === "reffast"
+        ? "Describe the new scene… e.g. sitting at a café in Paris at golden hour, laughing"
+        : gm === "edit"
+          ? "Say what to change… e.g. make it night, swap the car for a horse, remove the sign"
+          : gm === "animate"
+            ? "Describe the motion… e.g. slow push-in, snow falling, warm light flickering"
+            : gm === "refvideo" && !chain
+              ? "Describe the motion and sound… e.g. turns to the camera and waves, birds singing"
+              : `Describe a ${settings().video.seconds}-second scene${gm === "refvideo" ? " with your reference in it" : ""}, including any sound…`;
   // In Image mode the model chip switches between Qwen-Image-2.1 and its faster turbo (or Z-Image-Turbo).
-  const canPick = (gm === "image" || gm === "fast") && workflows.fast && workflows.image && active.image !== ZIMAGE;
+  const canPick =
+    ((gm === "image" || gm === "fast") && workflows.fast && workflows.image && active.image !== ZIMAGE) ||
+    ((gm === "ref" || gm === "reffast") && workflows.ref && workflows.reffast);
+  const label = chain ? `${modeOf(first).label} → ${m.label}` : m.label;
   const chip = canPick
-    ? `<button type="button" class="opt pick model" title="Switch image model"><b>${m.label}</b> ⇄</button>`
-    : `<span class="opt"><b>${m.label}</b></span>`;
+    ? `<button type="button" class="opt pick model" title="Switch image model"><b>${label}</b> ⇄</button>`
+    : `<span class="opt"><b>${label}</b></span>`;
   const p = plan(gm);
-  const gear = `<button type="button" class="opt pick set${settingsOpen ? " on" : ""}" title="Size, quality, seed${gm === "video" || gm === "animate" ? ", length" : ", count"}…" aria-expanded="${settingsOpen}">⚙ Settings</button>`;
+  // A chained video's time includes making its first frame.
+  const shown = chain ? { ...p, secs: p.secs + plan(first, ref, frameSize()).secs } : p;
+  const gear = `<button type="button" class="opt pick set${settingsOpen ? " on" : ""}" title="Size, quality, seed${isVideo(gm) ? ", length" : ", count"}…" aria-expanded="${settingsOpen}">⚙ Settings</button>`;
   $("#gen-opts").innerHTML = wf
-    ? chip + summary(gm, p).map((o) => `<span class="opt"><b>${o}</b></span>`).join("") + gear
-    : `<span class="opt">workflows\\${m.file} not found, so this mode is off</span>`;
+    ? chip + summary(gm, shown).map((o) => `<span class="opt"><b>${o}</b></span>`).join("") + gear
+    : `<span class="opt">workflows\\${esc(missing)} not found, so this mode is off</span>`;
   const warn = $("#gen-warn");
   warn.hidden = !wf || !p.warn;
   warn.textContent = p.warn;
   const panel = $("#gen-settings");
   panel.hidden = !wf || !settingsOpen;
   if (!panel.hidden) settingsForm(panel, gm, false);
+}
+
+// ---------- reference image slot ----------
+const studioShown = () => !$('[data-screen="studio"]').hidden;
+
+function initRefSlot() {
+  const file = $<HTMLInputElement>("#ref-file");
+  $("#ref-add").addEventListener("click", () => file.click());
+  $("#ref-change").addEventListener("click", () => file.click());
+  file.addEventListener("change", () => {
+    const f = file.files?.[0];
+    file.value = "";
+    if (f) setRef(f);
+  });
+  $("#ref-clear").addEventListener("click", () => setRef(null));
+  $("#ref-set").addEventListener("click", (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>("[data-kind], [data-frame]");
+    if (!b) return;
+    if (b.dataset.kind) refKind = b.dataset.kind as RefKind;
+    if (b.dataset.frame) refFrame = b.dataset.frame as typeof refFrame;
+    try {
+      localStorage.setItem("studio.refKind", refKind);
+      localStorage.setItem("studio.refFrame", refFrame);
+    } catch {}
+    renderCreate();
+  });
+  // Drop a picture anywhere on the create bar, or paste one while Studio is open.
+  const create = $("#create");
+  create.addEventListener("dragover", (e) => {
+    if (!hasFiles(e) || mode === "webcam") return;
+    e.preventDefault();
+    create.classList.add("drop");
+  });
+  create.addEventListener("dragleave", (e) => {
+    if (!create.contains(e.relatedTarget as Node)) create.classList.remove("drop");
+  });
+  create.addEventListener("drop", (e) => {
+    create.classList.remove("drop");
+    const f = imageIn(e.dataTransfer);
+    if (!f || mode === "webcam") return;
+    e.preventDefault();
+    setRef(f);
+  });
+  document.addEventListener("paste", (e) => {
+    if (!studioShown() || mode === "webcam" || (e.target as HTMLElement)?.closest?.("dialog")) return;
+    const f = imageIn(e.clipboardData);
+    if (!f) return;
+    e.preventDefault();
+    setRef(f);
+  });
+}
+
+/** Sets (or with null clears) the reference image. */
+async function setRef(src: Blob | null) {
+  try {
+    const r = src ? await loadReference(src) : null;
+    if (ref) URL.revokeObjectURL(ref.url);
+    ref = r;
+    if (r) srcAsset = null; // a reference replaces a picked edit or animate source
+  } catch (e) {
+    deps.toast(errMsg(e), "warn");
+  }
+  renderCreate();
+  if (ref) $("#gen-prompt").focus();
+}
+
+/** "Use as reference image" on a render: Studio's create bar takes it as the reference. */
+async function useAsReference(a: Asset) {
+  deps.show();
+  closeLightbox();
+  try {
+    await setRef(await (await fetch(convertFileSrc(a.path))).blob());
+  } catch (e) {
+    deps.toast(`Couldn't read ${a.name}: ${errMsg(e)}`, "warn");
+  }
+}
+
+function renderRefSlot(gm: GenMode, webcam: boolean) {
+  const usable = !!(workflows.ref || workflows.reffast);
+  $("#ref-slot").hidden = webcam || !!srcAsset || !usable;
+  $("#ref-add").hidden = !!ref;
+  $("#ref-set").hidden = !ref;
+  if (!ref) return;
+  ($("#ref-img") as HTMLImageElement).src = ref.url;
+  $("#ref-what").textContent =
+    gm === "refvideo"
+      ? chained(gm)
+        ? `Reference: ${modeOf(refImageMode()).label} puts it in the first frame, then ${modeOf(gm).label} animates it`
+        : `Reference: ${modeOf(gm).label} animates this picture as it is`
+      : `Reference: ${modeOf(gm).label} puts it in the scene you describe`;
+  const seg = (attr: string, cur: string, opts: [string, string][], title: string) =>
+    `<span class="seg" role="group" aria-label="${title}">` +
+    opts.map(([v, l]) => `<button type="button" data-${attr}="${v}" class="${v === cur ? "on" : ""}" aria-pressed="${v === cur}">${esc(l)}</button>`).join("") +
+    `</span>`;
+  // How the subject is described only matters when Qwen-Image makes a picture with it.
+  const kinds = gm !== "refvideo" || chained(gm) ? seg("kind", refKind, REF_KINDS, "What the reference shows") : "";
+  const frames = gm === "refvideo" ? seg("frame", refFrame, [["scene", "New scene first"], ["itself", "Animate this picture"]], "First frame") : "";
+  $("#ref-picks").innerHTML = kinds + frames;
+  $("#ref-consent").textContent = CONSENT;
 }
 
 /** The settings as chips: size, steps, length, seed and a time estimate. */
@@ -448,6 +648,7 @@ function summary(gm: GenMode, p: Plan): string[] {
   if (m.family === "wan") out.push("no sound");
   if (p.count > 1) out.push(`${p.count} images`);
   if (m.note) out.push(m.note);
+  if (gm === "refvideo") out.push(chained(gm) ? "your reference in a new first frame" : "your reference as the first frame");
   out.push(s.seed != null ? `seed ${s.seed}` : "random seed");
   out.push(aboutTime(p.secs));
   return out;
@@ -520,7 +721,8 @@ function settingsForm(el: HTMLElement, gm: GenMode, withWarn: boolean) {
 async function refresh() {
   try {
     const res = await invoke<{ dir: string; exists: boolean; items: Asset[] }>("gallery_list", { root: deps.root() });
-    items = res.items;
+    // A reference render's prompt starts with the wording that keeps the subject; show just the scene.
+    items = res.items.map((a) => (a.prompt ? { ...a, prompt: sceneOf(a.prompt) } : a));
     $("#gallery-note").textContent = res.exists
       ? `${items.length} renders in ${res.dir}`
       : `ComfyUI's output folder (${res.dir}) doesn't exist yet. Renders will appear here.`;
@@ -561,8 +763,8 @@ function render() {
   if (job) {
     const p = document.createElement("div");
     p.className = "thumb pending";
-    const vid = job.mode === "video" || job.mode === "animate";
-    const n = vid ? 1 : plan(job.mode).count;
+    const vid = isVideo(job.mode);
+    const n = job.count;
     p.innerHTML = `<div class="pic"><span class="badge ${vid ? "vid" : ""}">${vid ? "VIDEO" : n > 1 ? `${n} IMAGES` : "IMAGE"}</span></div><figcaption><span class="p"></span><span class="m">rendering…</span></figcaption>`;
     $(".p", p).textContent = job.prompt;
     g.appendChild(p);
@@ -762,6 +964,7 @@ function showMenu(e: MouseEvent, a: Asset) {
     "-",
     ...(image && workflows.edit ? [{ label: "Edit with Qwen-Image…", run: () => startFrom(a, "image") }] : []),
     ...(image && workflows.animate ? [{ label: "Animate (image → video)…", run: () => startFrom(a, "video") }] : []),
+    ...(image && (workflows.ref || workflows.reffast) ? [{ label: "Use as reference image", run: () => useAsReference(a) }] : []),
     ...(a.prompt ? [{ label: "Reuse prompt", run: () => reusePrompt(a) }] : []),
     ...(a.seed != null ? [{ label: "Reuse seed", run: () => reuseSeed(a), key: String(a.seed) }] : []),
     "-",
@@ -845,23 +1048,66 @@ async function generate() {
   if (mode === "webcam") return;
   const gm = currentMode();
   if (!prompt || !workflows[gm] || job || starting) return;
+  if (chained(gm)) {
+    // Two renders: the reference in a new first frame, then the video from it. Errors arrive as a rejection.
+    const t0 = Date.now();
+    try {
+      const got = await refVideo(prompt, ref!, refKind);
+      deps.toast(`Done in ${Math.round((Date.now() - t0) / 1000)} s: ${got[0].name}`);
+    } catch (e) {
+      if (errMsg(e) !== "stopped") deps.toast(`The render failed: ${errMsg(e)}`, "warn");
+    }
+    return;
+  }
+  const src = gm === "animate" || gm === "edit" ? srcAsset : gm === "ref" || gm === "reffast" || gm === "refvideo" ? ref : null;
   try {
-    await queue(gm, prompt, gm === "animate" || gm === "edit" ? srcAsset : null);
+    await queue(gm, prompt, src, { kind: refKind });
   } catch (e) {
     deps.toast(`Couldn't start the render: ${errMsg(e)}`, "warn");
   }
 }
 
+/** Queues a render and resolves with its files when it's done (rejects if it fails or is stopped). */
+function run(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpts, progress?: (pct: number, label: string) => void) {
+  return new Promise<Asset[]>((resolve, reject) => {
+    if (job || starting) return reject(new Error("Studio is already rendering something; wait for it to finish"));
+    waiter = { progress: progress ?? (() => {}), resolve, reject };
+    queue(gm, prompt, src, opts).catch((e) => {
+      waiter = null;
+      reject(e);
+    });
+  });
+}
+
+/** A video featuring the reference: Qwen-Image puts it in a first frame at the video's shape, then LTX animates it. */
+async function refVideo(prompt: string, r: Reference, kind: RefKind, progress?: (pct: number, label: string) => void) {
+  const first = refImageMode();
+  try {
+    stepNote = "Step 1 of 2 · first frame · ";
+    const [frame] = await run(first, prompt, r, { kind, override: frameSize() }, progress);
+    stepNote = "Step 2 of 2 · video · ";
+    return await run("refvideo", prompt, frame, {}, progress);
+  } finally {
+    stepNote = "";
+  }
+}
+
+interface QueueOpts {
+  kind?: RefKind; // how a reference image is described to Qwen-Image
+  override?: Override; // size and count for a chain's first frame
+}
+
 /** Sends one of the workflows to ComfyUI. Throws if it couldn't be queued; progress then arrives by websocket. */
-async function queue(gm: GenMode, prompt: string, src: Asset | null) {
+async function queue(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpts = {}) {
   const wf = workflows[gm];
   if (!wf) throw new Error(`workflows\\${MODES[gm].file} wasn't found`);
   if (job || starting) throw new Error("Studio is already rendering something; wait for it to finish");
   const m = modeOf(gm);
   const graph = structuredClone(wf);
-  graph[m.promptNode].inputs[m.promptKey ?? "text"] = prompt;
+  graph[m.promptNode].inputs[m.promptKey ?? "text"] = gm === "ref" || gm === "reffast" ? refPrompt(opts.kind ?? "auto", prompt) : prompt;
   const seed = takeSeed(settingsKey(gm));
-  apply(m, graph, plan(gm, src), seed);
+  const p = plan(gm, src, opts.override);
+  apply(m, graph, p, seed);
   const nodes: Record<string, string> = {};
   for (const [id, n] of Object.entries<any>(graph)) nodes[id] = n.class_type;
 
@@ -875,7 +1121,7 @@ async function queue(gm: GenMode, prompt: string, src: Asset | null) {
     await invoke("comfy_listen", { clientId });
     if (src && m.imageNode) {
       setJob(1, "Uploading the image to ComfyUI…");
-      graph[m.imageNode].inputs.image = await invoke<string>("comfy_upload", { path: src.path });
+      graph[m.imageNode].inputs.image = "path" in src ? await invoke<string>("comfy_upload", { path: src.path }) : await uploadReference(src);
     }
     const r = await http(`${COMFY}/prompt`, {
       method: "POST",
@@ -887,7 +1133,7 @@ async function queue(gm: GenMode, prompt: string, src: Asset | null) {
       const why = body.error?.message || body.node_errors ? JSON.stringify(body.node_errors ?? body.error).slice(0, 200) : `HTTP ${r.status}`;
       throw new Error(why);
     }
-    job = { id: body.prompt_id, mode: gm, started: Date.now(), prompt, nodes, outputs: [], seed };
+    job = { id: body.prompt_id, mode: gm, started: Date.now(), prompt, nodes, outputs: [], seed, count: p.count };
     setJob(2, "Queued. Loading models…");
     render();
   } catch (e) {
@@ -904,6 +1150,7 @@ async function queue(gm: GenMode, prompt: string, src: Asset | null) {
 let jobPct = 0;
 function setJob(pct: number, label: string) {
   jobPct = pct;
+  label = stepNote + label;
   ($("#job .progress") as HTMLElement).style.setProperty("--v", String(pct));
   $("#job-label").textContent = label;
   waiter?.progress(pct, label);
@@ -967,24 +1214,23 @@ export type MediaKind = "image" | "video";
 /** The workflow chat uses: the Studio's Image mode pick, or LTX text-to-video. */
 const chatMode = (kind: MediaKind): GenMode => (kind === "video" ? "video" : workflows[imageMode] ? imageMode : "fast");
 
-/** The model chat images (or videos) are made with. */
-export async function modelLabel(kind: MediaKind) {
+/** The model chat images (or videos) are made with ("Qwen-Image-2.1 → LTX-2.5" for a video from a reference). */
+export async function modelLabel(kind: MediaKind, withRef = false) {
   await ensureWorkflows();
-  return modeOf(chatMode(kind)).label;
+  if (!withRef) return modeOf(chatMode(kind)).label;
+  const img = modeOf(refImageMode()).label;
+  return kind === "video" ? `${img} → ${modeOf("refvideo").label}` : img;
 }
 
-/** Makes an image (or as many as the settings ask for) or a video and resolves with the saved files. */
-export async function renderMedia(kind: MediaKind, prompt: string, progress: (pct: number, label: string) => void): Promise<Asset[]> {
+/** Makes an image (or as many as the settings ask for) or a video and resolves with the saved files. With a
+ *  reference, the picture's character or item goes into the scene (for a video, into its first frame). */
+export async function renderMedia(kind: MediaKind, prompt: string, progress: (pct: number, label: string) => void, r?: Reference): Promise<Asset[]> {
   await ensureWorkflows();
-  const gm = chatMode(kind);
-  return new Promise<Asset[]>((resolve, reject) => {
-    if (job || starting) return reject(new Error("Studio is already rendering something; wait for it to finish"));
-    waiter = { progress, resolve, reject };
-    queue(gm, prompt, null).catch((e) => {
-      waiter = null;
-      reject(e);
-    });
-  });
+  if (!r) return run(chatMode(kind), prompt, null, {}, progress);
+  const gm = kind === "video" ? "refvideo" : refImageMode();
+  for (const need of kind === "video" ? (["refvideo", refImageMode()] as GenMode[]) : [gm])
+    if (!workflows[need]) throw new Error(`workflows\\${modeOf(need).file} wasn't found`);
+  return kind === "video" ? refVideo(prompt, r, "auto", progress) : run(gm, prompt, r, { kind: "auto" }, progress);
 }
 
 /** The generation settings form for chat's popover (the same settings as Studio's). */

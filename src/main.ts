@@ -15,6 +15,7 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { initSystem, onGpu, showSystem, unloadAll, type Gpu } from "./system";
 import { allowRenders, cancelRender, chatSettings, initStudio, modelLabel, openRender, renderMedia, renderMenu, showStudio, type MediaKind } from "./studio";
 import { onSettingsChange } from "./gensettings";
+import { CONSENT, hasFiles, imageIn, imageToBase64, referenceFromBase64 } from "./reference";
 import { initVoice, showVoice } from "./voice";
 import { initCamera, showCameraPane } from "./camera";
 import { initLive, startLive, LIVE_CTX, LIVE_MODELS } from "./live";
@@ -268,7 +269,7 @@ function addUserBubble(text: string, images?: string[]) {
     for (const b64 of images) {
       const img = document.createElement("img");
       img.src = `data:image/jpeg;base64,${b64}`;
-      img.alt = "webcam frame";
+      img.alt = "attached picture";
       row.appendChild(img);
     }
     m.appendChild(row);
@@ -610,7 +611,8 @@ function updateToolsButton() {
   $("#tools-count").textContent = n ? String(n) : "";
 }
 
-// ---------- attachments (webcam frames for the next message) ----------
+// ---------- attachments (webcam frames and pictures for the next message) ----------
+// A question about them goes to a model that can see; with /image or /video the first one is a reference image.
 let attachments: string[] = [];
 
 function renderAttachments() {
@@ -620,7 +622,7 @@ function renderAttachments() {
   attachments.forEach((b64, i) => {
     const d = document.createElement("div");
     d.className = "att";
-    d.innerHTML = `<img alt="attached frame" /><button type="button" aria-label="Remove">✕</button>`;
+    d.innerHTML = `<img alt="attached picture" /><button type="button" aria-label="Remove">✕</button>`;
     ($("img", d) as HTMLImageElement).src = `data:image/jpeg;base64,${b64}`;
     $("button", d).addEventListener("click", () => {
       attachments.splice(i, 1);
@@ -628,6 +630,35 @@ function renderAttachments() {
     });
     box.appendChild(d);
   });
+  if (attachments.length) {
+    const note = document.createElement("p");
+    note.className = "ref-note";
+    note.id = "ref-note";
+    box.appendChild(note);
+  }
+  updateRefNote();
+}
+
+/** Under the attachments: what /image or /video will do with them, and the consent note when it's a reference. */
+function updateRefNote() {
+  const note = document.getElementById("ref-note");
+  if (!note) return;
+  const asRef = !!mediaRequest(($("#prompt") as HTMLTextAreaElement).value.trim());
+  note.classList.toggle("on", asRef);
+  note.textContent = asRef
+    ? `${attachments.length > 1 ? "The first picture" : "This picture"} is the reference: its character or item goes into the scene you describe. ${CONSENT}`
+    : "Ask about it, or type /image or /video and a scene to put its character or item in a new picture or clip.";
+}
+
+/** Adds a picked, pasted or dropped picture to the next message. */
+async function attachImage(f: Blob) {
+  try {
+    attachments.push(await imageToBase64(f));
+    renderAttachments();
+    $("#prompt").focus();
+  } catch (e) {
+    toast(errMsg(e), "warn");
+  }
 }
 
 const VISION = /gemma|qwen3\.6|llava|vision|-vl/i;
@@ -698,16 +729,16 @@ function setBusyUi(on: boolean) {
 }
 
 /** Makes images with the Studio's image model (Qwen-Image-2.1 or its turbo), or a video with LTX, and shows them in the chat. */
-async function makeMedia(text: string, kind: MediaKind, prompt: string, hooks?: ReplyHooks) {
+async function makeMedia(text: string, kind: MediaKind, prompt: string, hooks?: ReplyHooks, refB64?: string) {
   const what = kind === "video" ? "video" : "image";
   if (!inTauri) {
     toast(`${kind === "video" ? "Videos" : "Images"} are made in the desktop app.`);
     return hooks?.onDone?.(false);
   }
   if (chat.messages.length === 0) chat.title = text.replace(/\s+/g, " ").slice(0, 60);
-  chat.messages.push({ role: "user", content: text });
+  chat.messages.push({ role: "user", content: text, images: refB64 ? [refB64] : undefined });
   renderChat();
-  const label = await modelLabel(kind);
+  const label = await modelLabel(kind, !!refB64);
   const reply: StoredMessage = { role: "assistant", content: "", model: label };
   const bubble = addAiBubble(label);
   const body = $(".msg-body", bubble);
@@ -718,16 +749,23 @@ async function makeMedia(text: string, kind: MediaKind, prompt: string, hooks?: 
   setBusyUi(true);
   const t0 = Date.now();
   try {
-    const got = await renderMedia(kind, prompt, (pct, label) => {
-      ($(".progress", body) as HTMLElement | null)?.style.setProperty("--v", String(pct));
-      const l = $(".status-line", body);
-      if (l) l.textContent = label;
-    });
+    const ref = refB64 ? await referenceFromBase64(refB64) : undefined;
+    const got = await renderMedia(
+      kind,
+      prompt,
+      (pct, label) => {
+        ($(".progress", body) as HTMLElement | null)?.style.setProperty("--v", String(pct));
+        const l = $(".status-line", body);
+        if (l) l.textContent = label;
+      },
+      ref,
+    );
+    if (ref) URL.revokeObjectURL(ref.url);
     const [a, ...more] = got;
     reply.render = { path: a.path, prompt, seconds: Math.round((Date.now() - t0) / 1000), kind, ...(more.length ? { more: more.map((x) => x.path) } : {}) };
     // What chat models see in later turns.
     const names = got.map((x) => x.name).join(", ");
-    reply.content = `(I made ${got.length > 1 ? `${got.length} images` : `a ${what}`} with ${label} for: "${prompt}". Saved as ${names}.)`;
+    reply.content = `(I made ${got.length > 1 ? `${got.length} images` : `a ${what}`} with ${label}${refB64 ? " from the attached reference picture" : ""} for: "${prompt}". Saved as ${names}.)`;
     renderFigure(bubble, reply.render);
   } catch (e) {
     if (busy?.signal.aborted) reply.content = "*(stopped)*";
@@ -759,7 +797,8 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     return;
   }
   const live = !!opts.live;
-  const media = live || opts.images?.length || attachments.length ? null : mediaRequest(text);
+  // With pictures attached, /image or /video uses the first as a reference image (Live and the camera ask don't make media).
+  const media = live || opts.images?.length ? null : mediaRequest(text);
   if (media?.prompt === "") {
     toast(
       media.kind === "video"
@@ -769,7 +808,13 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     opts.hooks?.onDone?.(false);
     return;
   }
-  if (media) return makeMedia(text, media.kind, media.prompt, opts.hooks);
+  if (media) {
+    const ref = attachments[0];
+    if (attachments.length > 1) toast("Using the first picture as the reference.");
+    attachments = [];
+    renderAttachments();
+    return makeMedia(text, media.kind, media.prompt, opts.hooks, ref);
+  }
   const images = live ? opts.images : opts.images ?? (attachments.length ? attachments : undefined);
   if (!opts.images && !live) {
     attachments = [];
@@ -1116,11 +1161,42 @@ function wire() {
     busy?.abort();
     stopSpeaking();
   });
+  // Attach a picture: the paperclip, pasting one into the message box, or dropping one on the chat.
+  const attachIn = $("#attach-file") as HTMLInputElement;
+  $("#composer-attach").addEventListener("click", () => attachIn.click());
+  attachIn.addEventListener("change", () => {
+    for (const f of Array.from(attachIn.files ?? [])) attachImage(f);
+    attachIn.value = "";
+  });
+  ta.addEventListener("paste", (e) => {
+    const f = imageIn(e.clipboardData);
+    if (!f) return;
+    e.preventDefault();
+    attachImage(f);
+  });
+  ta.addEventListener("input", updateRefNote);
+  const chatScreen = $('[data-screen="chat"]');
+  chatScreen.addEventListener("dragover", (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    chatScreen.classList.add("drop");
+  });
+  chatScreen.addEventListener("dragleave", (e) => {
+    if (!chatScreen.contains(e.relatedTarget as Node)) chatScreen.classList.remove("drop");
+  });
+  chatScreen.addEventListener("drop", (e) => {
+    chatScreen.classList.remove("drop");
+    const f = imageIn(e.dataTransfer);
+    if (!f) return;
+    e.preventDefault();
+    attachImage(f);
+  });
   // Image button: starts the message with /image, so whatever is typed next becomes the picture.
   $("#composer-image").addEventListener("click", () => {
     const v = ta.value.replace(IMAGE_CMD, "").replace(VIDEO_CMD, "");
     ta.value = `/image ${v}`;
     autosize();
+    updateRefNote();
     ta.focus();
     ta.setSelectionRange(ta.value.length, ta.value.length);
   });
