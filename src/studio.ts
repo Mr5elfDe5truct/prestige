@@ -32,7 +32,7 @@ import {
   type Quality,
   type SettingsKey,
 } from "./gensettings";
-import { CONSENT, REF_KINDS, hasFiles, imageIn, loadReference, refPrompt, sceneOf, uploadReference, type RefKind, type Reference } from "./reference";
+import { CONSENT, bindRefChoices, hasFiles, imageIn, loadReference, onRefPrefsChange, refChoicesHtml, refPrefs, refPrompt, sceneOf, uploadReference, type RefKind, type Reference } from "./reference";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
 const $$ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => Array.from(r.querySelectorAll(s)) as T[];
@@ -341,17 +341,7 @@ let mode: "image" | "video" | "webcam" = "image";
 let srcAsset: Asset | null = null;
 // The reference image (a character or item to put in a new scene), and how it's used. Kept across Image and Video.
 let ref: Reference | null = null;
-const stored = (k: string, ok: string[], def: string) => {
-  try {
-    const v = localStorage.getItem(k);
-    return v && ok.includes(v) ? v : def;
-  } catch {
-    return def;
-  }
-};
-let refKind = stored("studio.refKind", ["auto", "character", "item"], "auto") as RefKind;
-// In Video mode: put the reference in a new scene first ("scene"), or animate the reference picture itself ("itself").
-let refFrame = stored("studio.refFrame", ["scene", "itself"], "scene") as "scene" | "itself";
+// How it's used (Auto / Character / Item, and a video's first frame) is in reference.ts, shared with chat.
 // Shown before the progress label during a two-step render ("Step 1 of 2 · first frame · ").
 let stepNote = "";
 const workflows: Partial<Record<GenMode, any>> = {};
@@ -461,7 +451,7 @@ function currentMode(): GenMode {
 const refImageMode = (): GenMode => (imageMode === "fast" ? (workflows.reffast ? "reffast" : "ref") : workflows.ref ? "ref" : "reffast");
 
 /** A video from a reference: Qwen-Image makes the first frame first, unless the reference itself is the first frame. */
-const chained = (gm: GenMode, frame = refFrame) => gm === "refvideo" && frame === "scene";
+const chained = (gm: GenMode) => gm === "refvideo" && refPrefs().frame === "scene";
 
 /** The first frame's size for a video: the video's shape at about a megapixel (LTX scales it to the clip). */
 function frameSize(): Override {
@@ -549,17 +539,8 @@ function initRefSlot() {
     if (f) setRef(f);
   });
   $("#ref-clear").addEventListener("click", () => setRef(null));
-  $("#ref-set").addEventListener("click", (e) => {
-    const b = (e.target as HTMLElement).closest<HTMLElement>("[data-kind], [data-frame]");
-    if (!b) return;
-    if (b.dataset.kind) refKind = b.dataset.kind as RefKind;
-    if (b.dataset.frame) refFrame = b.dataset.frame as typeof refFrame;
-    try {
-      localStorage.setItem("studio.refKind", refKind);
-      localStorage.setItem("studio.refFrame", refFrame);
-    } catch {}
-    renderCreate();
-  });
+  bindRefChoices($("#ref-picks"));
+  onRefPrefsChange(() => renderCreate());
   // Drop a picture anywhere on the create bar, or paste one while Studio is open.
   const create = $("#create");
   create.addEventListener("dragover", (e) => {
@@ -624,14 +605,7 @@ function renderRefSlot(gm: GenMode, webcam: boolean) {
         ? `Reference: ${modeOf(refImageMode()).label} puts it in the first frame, then ${modeOf(gm).label} animates it`
         : `Reference: ${modeOf(gm).label} animates this picture as it is`
       : `Reference: ${modeOf(gm).label} puts it in the scene you describe`;
-  const seg = (attr: string, cur: string, opts: [string, string][], title: string) =>
-    `<span class="seg" role="group" aria-label="${title}">` +
-    opts.map(([v, l]) => `<button type="button" data-${attr}="${v}" class="${v === cur ? "on" : ""}" aria-pressed="${v === cur}">${esc(l)}</button>`).join("") +
-    `</span>`;
-  // How the subject is described only matters when Qwen-Image makes a picture with it.
-  const kinds = gm !== "refvideo" || chained(gm) ? seg("kind", refKind, REF_KINDS, "What the reference shows") : "";
-  const frames = gm === "refvideo" ? seg("frame", refFrame, [["scene", "New scene first"], ["itself", "Animate this picture"]], "First frame") : "";
-  $("#ref-picks").innerHTML = kinds + frames;
+  $("#ref-picks").innerHTML = refChoicesHtml(gm === "refvideo");
   $("#ref-consent").textContent = CONSENT;
 }
 
@@ -1052,7 +1026,7 @@ async function generate() {
     // Two renders: the reference in a new first frame, then the video from it. Errors arrive as a rejection.
     const t0 = Date.now();
     try {
-      const got = await refVideo(prompt, ref!, refKind);
+      const got = await refVideo(prompt, ref!, refPrefs().kind);
       deps.toast(`Done in ${Math.round((Date.now() - t0) / 1000)} s: ${got[0].name}`);
     } catch (e) {
       if (errMsg(e) !== "stopped") deps.toast(`The render failed: ${errMsg(e)}`, "warn");
@@ -1061,7 +1035,7 @@ async function generate() {
   }
   const src = gm === "animate" || gm === "edit" ? srcAsset : gm === "ref" || gm === "reffast" || gm === "refvideo" ? ref : null;
   try {
-    await queue(gm, prompt, src, { kind: refKind });
+    await queue(gm, prompt, src, { kind: refPrefs().kind });
   } catch (e) {
     deps.toast(`Couldn't start the render: ${errMsg(e)}`, "warn");
   }
@@ -1219,7 +1193,8 @@ export async function modelLabel(kind: MediaKind, withRef = false) {
   await ensureWorkflows();
   if (!withRef) return modeOf(chatMode(kind)).label;
   const img = modeOf(refImageMode()).label;
-  return kind === "video" ? `${img} → ${modeOf("refvideo").label}` : img;
+  if (kind !== "video") return img;
+  return chained("refvideo") ? `${img} → ${modeOf("refvideo").label}` : modeOf("refvideo").label;
 }
 
 /** Makes an image (or as many as the settings ask for) or a video and resolves with the saved files. With a
@@ -1227,10 +1202,13 @@ export async function modelLabel(kind: MediaKind, withRef = false) {
 export async function renderMedia(kind: MediaKind, prompt: string, progress: (pct: number, label: string) => void, r?: Reference): Promise<Asset[]> {
   await ensureWorkflows();
   if (!r) return run(chatMode(kind), prompt, null, {}, progress);
+  // The same choices as Studio's reference slot: Auto / Character / Item, and for a video its first frame.
+  const refKind = refPrefs().kind;
   const gm = kind === "video" ? "refvideo" : refImageMode();
-  for (const need of kind === "video" ? (["refvideo", refImageMode()] as GenMode[]) : [gm])
+  for (const need of chained(gm) ? (["refvideo", refImageMode()] as GenMode[]) : [gm])
     if (!workflows[need]) throw new Error(`workflows\\${modeOf(need).file} wasn't found`);
-  return kind === "video" ? refVideo(prompt, r, "auto", progress) : run(gm, prompt, r, { kind: "auto" }, progress);
+  if (chained(gm)) return refVideo(prompt, r, refKind, progress);
+  return run(gm, prompt, r, gm === "refvideo" ? {} : { kind: refKind }, progress);
 }
 
 /** The generation settings form for chat's popover (the same settings as Studio's). */
