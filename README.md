@@ -53,6 +53,7 @@ Everything below was made on the reference PC (RTX 3060 12 GB) from inside the a
 | 💬 | **Chat with every local model** | Streaming from Ollama and the llama.cpp router, a model switcher with roles (Main · Deep thinker · Fast · Vision · General · Code), tokens per second on every reply, history saved on your PC |
 | 🔧 | **Tools in chat** | Web search, page fetching, the Reddit / Hugging Face / GitHub scout, files, PowerShell and browser control from the workstation's tool server, switched per group. Anything that changes something asks first |
 | 🖌️ | **Images in chat** | Type `/image a lighthouse at dusk` (or *"draw me…"*, *"make an image of…"*, or click the picture button) and Qwen-Image-2.1 (or its 4-step turbo) paints it right in the conversation, with live progress. Click the picture to open it; right-click for the full menu. `/video` (or *"make a video of…"*) makes an LTX-2.5 clip with sound the same way |
+| 🎮 | **Canvas** | Ask for something you can see or play (*"make me a snake game"*, *"let's play chess"*, a chart, a 3D scene, or `/canvas` and anything) and the model writes it as one HTML page that opens in a panel beside the chat and runs there. **Code** shows (and lets you edit) what it wrote, **Rerun** starts it again, and when the page throws errors **Fix it** sends them back to the model for a corrected version. Pages run sandboxed on their own origin: they can load libraries from a CDN, but can't reach Prestige, your files or the local AI services |
 | 🔊 | **Replies read aloud** | A speaker button on every reply, or switch on **Read replies aloud** in the message box and Kokoro reads each answer as it streams. The mic button talks to it |
 | 🔎 | **Search past chats** | Search box in **Past chats** (Ctrl+K) finds every conversation containing your words, shows the passage and jumps to it. Models can search them too (*"what did we decide about…"*), via the **Past chats** tool |
 | 🏷️ | **Know your models** | Every model shows what it can do (🔧 tools, 👁 vision, 🧠 thinking, 💻 code, 🔓 uncensored) and whether it fits in VRAM, detected automatically for anything you add |
@@ -164,8 +165,8 @@ Mic or camera blocked? Check **Windows Settings → Privacy & security → Micro
 
 | Part | What |
 |---|---|
-| `src/` (TypeScript + Vite) | `main.ts` chat (and images, read-aloud and search in it) · `system.ts` dashboard · `studio.ts` gallery and generation · `reference.ts` reference images · `voice.ts` + `speech.ts` voice · `live.ts` + `livespeech.ts` + `mic-worklet.js` Live calls · `camera.ts` webcam · `tools.ts` chat tools · `memory.ts` shared memory · `backends.ts` Ollama / llama.cpp |
-| `src-tauri/` (Rust + Tauri 2) | GPU (every card) and RAM readouts, the workstation's GPU plan, chat files, chat search and settings, start/stop scripts, gallery thumbnails, ComfyUI websocket and uploads, mic and camera permissions |
+| `src/` (TypeScript + Vite) | `main.ts` chat (and images, read-aloud and search in it) · `canvas.ts` the Canvas · `system.ts` dashboard · `studio.ts` gallery and generation · `reference.ts` reference images · `voice.ts` + `speech.ts` voice · `live.ts` + `livespeech.ts` + `mic-worklet.js` Live calls · `camera.ts` webcam · `tools.ts` chat tools · `memory.ts` shared memory · `backends.ts` Ollama / llama.cpp |
+| `src-tauri/` (Rust + Tauri 2) | The Canvas's own origin (`canvas.rs`), GPU (every card) and RAM readouts, the workstation's GPU plan, chat files, chat search and settings, start/stop scripts, gallery thumbnails, ComfyUI websocket and uploads, mic and camera permissions |
 | Look | Dragon red & gold · fonts Rye, Oxanium, IBM Plex Sans and JetBrains Mono, bundled from Fontsource (SIL OFL) |
 
 ## 🔗 Part of the Custom AI Workstation

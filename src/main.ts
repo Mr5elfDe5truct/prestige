@@ -29,6 +29,7 @@ import { checkForUpdates, initUpdates } from "./updates";
 import { GROUPS, describeCall, loadTools, runTool, toolContext, toolSpecs, type ToolDef, type ToolStep } from "./tools";
 import { errMsg, nameFor, listModels, ping, streamChat, OLLAMA, LLAMA, type ChatMessage, type ModelInfo, type StreamStats } from "./backends";
 import { addMemory, memoryContext, listMemories, rememberRequest, DEFAULT_OWUI, type MemoryConfig } from "./memory";
+import { CANVAS_CMD, CANVAS_HINT, canvasOnChat, canvasReplyStart, findCanvas, initCanvas, openCanvas, streamCanvas, streamEnded, wantsCanvas } from "./canvas";
 
 const inTauri = "__TAURI_INTERNALS__" in window;
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
@@ -289,6 +290,39 @@ function md(text: string) {
   return DOMPurify.sanitize(marked.parse(text, { async: false, gfm: true, breaks: true }) as string);
 }
 
+// Building a page, only web search stays on (for real data in a chart, say): with file, command or image tools the models
+// try to "edit" a page file that doesn't exist, or make pictures for it.
+const CANVAS_TOOLS = new Set(["web"]);
+
+/** An older reply with its page swapped for a note (a newer version comes later in the chat). */
+function withoutPage(text: string) {
+  const c = findCanvas(text);
+  return c ? `${text.slice(0, c.start)}\n(An earlier version of the page "${c.title}" was here; the newest version is further down.)\n${text.slice(c.end)}` : text;
+}
+
+/** A reply's text, with the page it wrote for the Canvas shown as a card that opens it (the code is in the canvas).
+ *  `live`: the reply is still streaming, so an unclosed page is being written rather than cut off. */
+function renderBody(body: HTMLElement, text: string, live = false) {
+  const c = findCanvas(text);
+  if (!c) {
+    body.innerHTML = md(text);
+    return null;
+  }
+  body.innerHTML = md(`${text.slice(0, c.start)}\n\n<div class="canvas-card"></div>\n\n${text.slice(c.end)}`);
+  const card = $(".canvas-card", body);
+  card.innerHTML = `<span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 8h18M9 13l-2 2 2 2M15 13l2 2-2 2" /></svg></span><span class="t"><b></b><small></small></span><button type="button" class="btn"></button>`;
+  $("b", card).textContent = c.title;
+  const lines = c.html.split("\n").length;
+  $("small", card).textContent = c.done
+    ? `${lines} lines of HTML · runs in the Canvas`
+    : live ? `Writing… ${lines} lines` : `Unfinished: the reply stopped after ${lines} lines`;
+  const btn = $("button", card) as HTMLButtonElement;
+  btn.textContent = c.done ? "Open in Canvas" : live ? "Writing…" : "Open anyway";
+  btn.disabled = !c.done && live;
+  btn.addEventListener("click", () => openCanvas(c));
+  return c;
+}
+
 function statText(s?: StreamStats, live = false) {
   if (!s) return "";
   const parts = [];
@@ -417,7 +451,7 @@ function renderChat() {
       if (msg.thinking) setThinking(b, msg.thinking, false);
       for (const step of msg.tools ?? []) renderToolStep(b, step);
       if (msg.render) renderFigure(b, msg.render);
-      else $(".msg-body", b).innerHTML = md(msg.content);
+      else renderBody($(".msg-body", b), msg.content);
       $(".msg-stat", b).textContent = statText(msg.stats);
     }
     b.dataset.i = String(i);
@@ -840,7 +874,9 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
   }
   const live = !!opts.live;
   // With pictures attached, /image or /video uses the first as a reference image (Live and the camera ask don't make media).
-  const media = live || opts.images?.length ? null : mediaRequest(text);
+  // "Draw me a chart of…" or "make a snake game" is for the Canvas, unless it asks for a picture or a clip.
+  const forCanvas = CANVAS_CMD.test(text) || (wantsCanvas(text) && !/\b(image|picture|photo|illustration|painting|wallpaper|video|clip)s?\b/i.test(text));
+  const media = live || opts.images?.length || forCanvas ? null : mediaRequest(text);
   if (media?.prompt === "") {
     toast(
       media.kind === "video"
@@ -930,10 +966,16 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
 
     const history = chat.messages.filter((m) => !m.error);
     const last = history.length - 1;
+    // Canvas pages are long: the model re-reads only the newest one, so a few rounds of fixes still fit its context.
+    let newestPage = -1;
+    history.forEach((m, i) => {
+      if (m.role === "assistant" && findCanvas(m.content)) newestPage = i;
+    });
+    const canvasTurn = !live && (wantsCanvas(text) || newestPage >= 0);
     const messages: ChatMessage[] = [
       { role: "system", content: [systemBase(live), live ? LIVE_HINT : "", memoryText].filter(Boolean).join("\n\n") },
       ...history.map((m, i) => {
-        if (!live) return { role: m.role, content: m.content, images: m.images };
+        if (!live) return { role: m.role, content: i < newestPage ? withoutPage(m.content) : m.content, images: m.images };
         // In a call only the newest camera frame is sent (the older ones aren't what the camera sees now), and
         // the small Live models are told what it is.
         const cam = i === last && !!m.images?.length;
@@ -949,7 +991,8 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     const paint = () => {
       pending = false;
       if (!busy) return; // the stream already ended and the final render is in place
-      body.innerHTML = md(reply.content);
+      const page = renderBody(body, reply.content, true);
+      if (page && !page.done) streamCanvas(page);
       // Put the cursor at the end of the last paragraph, not on a line of its own.
       let last: Element = body;
       while (last.lastElementChild && !["PRE", "TABLE"].includes(last.lastElementChild.tagName)) last = last.lastElementChild;
@@ -958,6 +1001,11 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
       last.appendChild(caret);
       scrollDown();
     };
+    // The Canvas: asked to build something (or changing what an earlier reply built), the model writes a page.
+    if (canvasTurn) {
+      messages[0].content += "\n\n" + CANVAS_HINT;
+      canvasReplyStart();
+    }
     // Tools: offered when any group is on and the model can call functions.
     const groups = enabledGroups();
     let toolDefs: ToolDef[] = [];
@@ -965,8 +1013,9 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     // (Not in a call: tool rounds and "Allow?" cards don't work by voice, and they'd hold up the answer.)
     if (!live && groups.size && (await supportsTools(model))) {
       const t = await loadTools();
-      toolDefs = t.tools.filter((x) => groups.has(x.group));
-      specs = toolDefs.length ? toolSpecs(t.tools, groups) : undefined;
+      const offer = canvasTurn ? new Set([...groups].filter((g) => CANVAS_TOOLS.has(g))) : groups;
+      toolDefs = t.tools.filter((x) => offer.has(x.group));
+      specs = toolDefs.length ? toolSpecs(t.tools, offer) : undefined;
       if (specs) messages[0].content += "\n\n" + TOOLS_HINT;
     }
     const handlers = {
@@ -1044,7 +1093,9 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
       bubble.classList.add("error");
     }
   } finally {
-    body.innerHTML = md(reply.content);
+    const page = renderBody(body, reply.content);
+    if (page?.done && !reply.error) openCanvas(page, true);
+    else streamEnded();
     stat.textContent = statText(reply.stats);
     chat.messages.push(reply);
     bubble.dataset.i = String(chat.messages.length - 1);
@@ -1389,6 +1440,7 @@ function go(name: string) {
   showSystem(name === "system");
   showStudio(name === "studio");
   showVoice(name === "voice");
+  canvasOnChat(name === "chat");
   if (name !== "studio") showCameraPane(false);
   window.scrollTo({ top: 0 });
 }
@@ -1423,6 +1475,23 @@ async function main() {
   greet(true);
   wire();
   initSystem({ toast, nameFor, openCatalog: () => openCatalog() });
+  initCanvas({
+    toast,
+    send: (text) => {
+      if (busy) return false;
+      go("chat");
+      send(text);
+      return true;
+    },
+    draft: (text) => {
+      go("chat");
+      const ta = $("#prompt") as HTMLTextAreaElement;
+      ta.value = text;
+      autosize();
+      ta.focus();
+      ta.setSelectionRange(text.length, text.length);
+    },
+  });
   initCatalog({
     toast,
     root: () => settings.stackRoot ?? null,

@@ -117,6 +117,24 @@
         </div>
       </section>
 
+      <!-- The Canvas: pages a chat model writes (games, charts, 3D…) run here, beside the chat (canvas.ts) -->
+      <aside class="canvas" id="canvas" hidden aria-label="Canvas">
+        <div class="canvas-grip" id="canvas-grip" title="Drag to resize"></div>
+        <div class="canvas-head">
+          <b class="canvas-title" id="canvas-title">Canvas</b>
+          <span class="canvas-status" id="canvas-status"></span>
+          <span class="grow"></span>
+          <span class="canvas-tabs"><button type="button" data-ctab="run" class="on">Run</button><button type="button" data-ctab="code">Code</button></span>
+          <button type="button" class="icon-btn ghost" id="canvas-rerun" title="Run it again" aria-label="Run it again"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5" /></svg></button>
+          <button type="button" class="icon-btn ghost" id="canvas-copy" title="Copy the code" aria-label="Copy the code"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a1 1 0 0 1 1-1h10" /></svg></button>
+          <button type="button" class="btn" id="canvas-fix" title="Send the errors back to the model to fix">Fix it</button>
+          <button type="button" class="icon-btn ghost" id="canvas-close" title="Close the canvas" aria-label="Close the canvas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+        </div>
+        <div class="canvas-errors" id="canvas-errors" hidden><b></b><pre></pre></div>
+        <div class="canvas-stage" id="canvas-stage"></div>
+        <textarea class="canvas-code" id="canvas-code" spellcheck="false" hidden aria-label="Canvas code"></textarea>
+      </aside>
+
       <section class="screen wide" data-screen="system" hidden>
         <!-- load, VRAM, temperature and power cards for every GPU (system.ts) -->
         <div class="gpu-cards" id="gpu-cards"></div>
