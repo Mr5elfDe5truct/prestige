@@ -9,7 +9,7 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { errMsg, http } from "./backends";
-import { cardsText, vramGB } from "./gpus";
+import { cardsText, comfyCards, shortName, vramGB } from "./gpus";
 import {
   ASPECTS,
   LTX_FPS,
@@ -256,6 +256,7 @@ interface Plan {
   load: number; // VRAM use relative to the defaults, which fit a 12 GB card (the limits scale with ComfyUI's card)
   secs: number; // rough render time on the reference PC
   warn: string; // "" when it should fit
+  cards?: string; // what each card holds, when ComfyUI has two (or for LTX-2.5, how much of the model fits)
 }
 
 const settingsKey = (gm: GenMode): SettingsKey =>
@@ -272,6 +273,35 @@ const levels = (m: Mode) => (Object.keys(QUALITY_NAMES) as Quality[]).filter((q)
 const stepsOf = (m: Mode, q: Quality) => m.steps?.[q] ?? m.steps?.standard;
 
 const LTX_BASE = 768 * 512 * 97;
+const LTX_FRAME = 768 * 512;
+
+/* LTX-2.5 (two passes: half size, then upscaled 2× and refined), measured on an RTX 3060 12 GB with nvidia-smi and
+ * ComfyUI's own log. ComfyUI fills the card and streams the rest of the 15.7 GB diffusion model from system RAM, so
+ * every length runs; longer clips leave less of the model on the card and take longer:
+ *   size      frames  left for the model (2nd pass)  peak     time
+ *   768×512   121     8.2 GB                         11.9 GB  229 s
+ *   768×512   145     8.0 GB                         11.9 GB  246 s
+ *   768×512   241     7.0 GB                         12.0 GB  321 s
+ *   1280×704  241     4.0 GB                         11.6 GB  595 s
+ * That's ~10 MB per 768×512 frame on top of ~2.8 GB (the desktop, buffers and the 1 GB upscaler). With the upscaler on
+ * a second card (an RTX 2060 on PCIe x4) the model got ~1.1 GB more (9.3 / 9.1 / 8.2 / 5.1 GB) in about the same time
+ * (241 / 256 / 324 / 589 s). Even 4 GB left rendered at the usual pace, so the warnings start below that. */
+const LTX_MODEL_GB = 15.7;
+const LTX_FIXED_MIB = 2854;
+const LTX_FRAME_MIB = 10;
+const LTX_UPSCALER_MIB = 1120;
+const LTX_DRAFT_FIXED_MIB = 2526;
+
+/** GB of the LTX-2.5 diffusion model that stays on ComfyUI's main card for this render (the rest streams from RAM). */
+function ltxRoom(w: number, h: number, frames: number, draft: boolean): { room: number; mainGB: number } {
+  const { main, parts } = comfyCards();
+  const mainGB = main ? main.mem_total / 1024 : 12;
+  // w × h is the size the last pass renders at. A draft is the first pass alone (half size, no upscaler), which left
+  // 9.8 GB for the model at every length measured: ~2.5 GB fixed.
+  const fixed = draft ? LTX_DRAFT_FIXED_MIB : LTX_FIXED_MIB - (parts.includes("upscaler") ? LTX_UPSCALER_MIB : 0);
+  const room = mainGB - (fixed + LTX_FRAME_MIB * frames * ((w * h) / LTX_FRAME)) / 1024;
+  return { room, mainGB };
+}
 const WAN_BASE = 832 * 480 * 81;
 const MP = 1024 * 1024;
 
@@ -330,20 +360,42 @@ function plan(gm: GenMode, src: Source | null = srcAsset, o?: Override): Plan {
     const frames = ltxFrames(s.seconds, s.fps);
     const draft = m.family === "ltx" && s.quality === "draft";
     const work = (w * h * frames) / LTX_BASE;
-    p = { w: draft ? w / 2 : w, h: draft ? h / 2 : h, count: 1, seconds: s.seconds, frames, fps: s.fps, draft, load: draft ? work / 4 : work, secs: m.secs * work * (draft ? 0.3 : 1) };
+    // LTX-2.5's time: ~135 s of loading and the first pass, then ~0.77 s per 768×512 frame (measured; see above).
+    const secs = m.family === "ltx" ? (135 + 0.77 * frames * ((w * h) / LTX_FRAME)) * (draft ? 0.3 : 1) : m.secs * work * (draft ? 0.3 : 1);
+    p = { w: draft ? w / 2 : w, h: draft ? h / 2 : h, count: 1, seconds: s.seconds, frames, fps: s.fps, draft, load: draft ? work / 4 : work, secs };
   }
-  // Videos hold every frame in VRAM at once, so they reach the limit sooner than images. The limits were measured on
-  // a 12 GB card; they scale with the card ComfyUI runs on.
-  const scale = vramGB("comfyui") / 12;
+  const { main, aux, parts } = comfyCards();
+  const auxText = aux ? `${parts.map((x) => ({ upscaler: "the LTX upscaler", vae: "the VAEs", text_encoder: "the text encoders" })[x] ?? x).join(", ")} on the ${shortName(aux)}` : "";
+  if (m.family === "ltx") {
+    // Measured, per card: what's left on the main card for the model decides speed, and only a nearly full card fails.
+    const { room, mainGB } = ltxRoom(p.w, p.h, p.frames!, !!p.draft);
+    const where = main ? `the ${shortName(main)}` : "the GPU";
+    const kept = Math.max(0, Math.min(LTX_MODEL_GB, room));
+    const cards = `${kept.toFixed(1)} of the model's ${LTX_MODEL_GB} GB on ${where}, the rest streamed from RAM` + (auxText ? ` · ${auxText}` : "");
+    const warn =
+      room < 1.5
+        ? `Likely more than ${where}'s ${Math.round(mainGB)} GB can take: it may fail with out of memory. Try a smaller size or a shorter length.`
+        : room < 3
+          ? `Heavy for ${where}: only ${room.toFixed(1)} GB is left for the model, so most of it streams from system RAM and the render is slower.`
+          : "";
+    return { ...p, warn, cards };
+  }
+  // Videos hold every frame in VRAM at once, so they reach the limit sooner than images. The limits were set on a
+  // 12 GB card; they scale with ComfyUI's main card (a second card only takes the parts that can move).
+  const mainGB = main ? main.mem_total / 1024 : vramGB("comfyui");
+  const scale = mainGB / 12;
   const [soft, hard] = (m.family === "image" || m.family === "edit" ? [2.2, 3.5] : [1.35, 2.2]).map((x) => x * scale);
-  const card = cardsText("comfyui");
+  const card = main ? `the ${shortName(main)}'s ${Math.round(mainGB)} GB` : cardsText("comfyui");
   const warn =
     p.load > hard
       ? `Likely more than ${card} of VRAM: it may fail with out of memory. Try a smaller size, a shorter length or fewer images.`
       : p.load > soft
         ? `Heavy for ${card}: ComfyUI may spill into system RAM and render much slower.`
         : "";
-  return { ...p, warn };
+  // The LTX upscaler is the only part other models don't use; the VAEs and text encoders follow them anywhere.
+  const moved = parts.filter((x) => x !== "upscaler");
+  const cards = aux && moved.length ? `the diffusion model on the ${shortName(main!)}, ${moved.map((x) => (x === "vae" ? "the VAE" : "the text encoder")).join(" and ")} on the ${shortName(aux)}` : undefined;
+  return { ...p, warn, cards };
 }
 
 /** Sets a node's inputs if the workflow has that node. */
@@ -838,6 +890,7 @@ function settingsForm(el: HTMLElement, gm: GenMode, withWarn: boolean) {
   el.innerHTML =
     `<div class="set-grid">${f.join("")}</div>` +
     (withWarn && p.warn ? `<p class="vram-warn">${esc(p.warn)}</p>` : "") +
+    (p.cards ? `<p class="credit">VRAM: ${esc(p.cards)}</p>` : "") +
     `<div class="set-foot"><span class="credit">${m.label} · ${aboutTime(p.secs)} on an RTX 3060 12 GB · shared by Studio and chat</span><button type="button" class="linkish" data-reset>Reset to defaults</button></div>`;
   $$<HTMLSelectElement>("select", el).forEach((sel) =>
     sel.addEventListener("change", () => {
