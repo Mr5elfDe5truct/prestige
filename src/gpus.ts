@@ -28,6 +28,8 @@ export interface GpuPlan {
   ollamaContext: number;
   llamaFit: boolean;
   tensorSplit: string | null;
+  /** What ComfyUI loads on its second card ("upscaler", "vae", "text_encoder"); empty with one card. */
+  comfyAux?: string[];
 }
 
 export const SERVICE_NAMES: Record<Service, string> = {
@@ -60,6 +62,7 @@ export async function refreshPlan(root: string | null) {
     // PowerShell writes a one-element list as a bare value in some versions.
     next.gpus = [].concat((next.gpus ?? []) as never);
     for (const k of Object.keys(next.services ?? {}) as Service[]) next.services[k] = [].concat(next.services[k] as never);
+    next.comfyAux = [].concat((next.comfyAux ?? []) as never);
   }
   const changed = JSON.stringify(next) !== JSON.stringify(plan);
   plan = next && next.mode !== "none" ? next : null;
@@ -77,10 +80,10 @@ function biggest(): Gpu | undefined {
   return [...gpus].sort((a, b) => b.mem_total - a.mem_total || a.index - b.index)[0];
 }
 
-/** The cards a service runs on (empty when nvidia-smi has nothing). */
+/** The cards a service runs on, in the plan's order (its main card first), empty when nvidia-smi has nothing. */
 export function cardsFor(s: Service): Gpu[] {
   const idx = plan?.services[s];
-  const cards = idx?.length ? gpus.filter((g) => idx.includes(g.index)) : [];
+  const cards = idx?.length ? idx.map((i) => gpus.find((g) => g.index === i)).filter((g): g is Gpu => !!g) : [];
   if (cards.length) return cards;
   const b = biggest();
   return b ? [b] : [];
@@ -102,6 +105,13 @@ export function vramGB(s: Service): number {
 export function freeGB(s: Service): number | null {
   const c = cardsFor(s);
   return c.length ? c.reduce((t, g) => t + g.mem_total - g.mem_used, 0) / GB : null;
+}
+
+/** ComfyUI's main card, which runs the diffusion model, and the second card with what it holds there (if any). */
+export function comfyCards(): { main?: Gpu; aux?: Gpu; parts: string[] } {
+  const [main, aux] = cardsFor("comfyui");
+  const parts = aux ? (plan?.comfyAux ?? []) : [];
+  return { main, aux: parts.length ? aux : undefined, parts };
 }
 
 /** Whether two services have a card in common, so one has to make room for the other. */
