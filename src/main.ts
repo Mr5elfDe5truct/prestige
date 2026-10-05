@@ -29,6 +29,9 @@ import { checkForUpdates, initUpdates } from "./updates";
 import { GROUPS, describeCall, loadTools, runTool, toolContext, toolSpecs, type ToolDef, type ToolStep } from "./tools";
 import { errMsg, nameFor, listModels, ping, streamChat, OLLAMA, LLAMA, type ChatMessage, type ModelInfo, type StreamStats } from "./backends";
 import { addMemory, memoryContext, listMemories, rememberRequest, DEFAULT_OWUI, type MemoryConfig } from "./memory";
+import { addStache } from "./talk";
+import { applyCachedLook, applyLook, closeAppearance, initAppearance, openAppearance, type Look } from "./theme";
+import { pickReaction, reactFilter, reactedNote, showReaction, stripTags, REACT_HINT } from "./emotes";
 import { CANVAS_CMD, CANVAS_HINT, canvasOnChat, canvasReplyStart, findCanvas, initCanvas, openCanvas, streamCanvas, streamEnded, wantsCanvas } from "./canvas";
 
 const inTauri = "__TAURI_INTERNALS__" in window;
@@ -53,6 +56,10 @@ const $$ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = docu
   }
   sprite.appendChild(sym);
   document.body.prepend(sprite);
+  // Every copy of the mark moves its mustache while Prestige speaks (talk.ts).
+  addStache(sym);
+  // Last run's colours, before the launch screen shows (the saved settings are applied again once they load).
+  applyCachedLook();
 }
 
 // ---------- state ----------
@@ -68,6 +75,7 @@ interface StoredMessage {
   tools?: ToolStep[]; // tools the model used for this reply
   // An image (or several, or a video) made from chat. "more" holds the other images of a batch.
   render?: { path: string; prompt: string; seconds?: number; more?: string[]; kind?: MediaKind };
+  react?: string; // an emote reaction: yours on a reply, Prestige's on your message
 }
 interface Chat {
   id: string;
@@ -91,6 +99,7 @@ interface Settings {
   welcomed?: boolean; // the first-run welcome has been shown
   speakReplies?: boolean; // read every chat reply aloud as it streams
   liveCamera?: boolean; // Live calls start with the camera on
+  look?: Look; // Appearance: theme colours, glow, ember drift, emote reactions (theme.ts)
 }
 
 let settings: Settings = {};
@@ -453,13 +462,35 @@ function renderChat() {
       if (msg.render) renderFigure(b, msg.render);
       else renderBody($(".msg-body", b), msg.content);
       $(".msg-stat", b).textContent = statText(msg.stats);
+      if (!msg.error) reactButton(b, msg);
     }
+    showReaction(b, msg.react);
     b.dataset.i = String(i);
   });
   const empty = chat.messages.length === 0;
   $("#hello").hidden = !empty;
   $("#suggests").hidden = !empty;
   scrollDown(true);
+}
+
+/** The smiley beside a reply: react to it with an emote (Prestige hears about it in its next turn). */
+function reactButton(bubble: HTMLElement, msg: StoredMessage) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "msg-react";
+  b.title = "React";
+  b.setAttribute("aria-label", "React to this reply");
+  b.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0M9 9.5h.01M15 9.5h.01" /></svg>`;
+  b.addEventListener("click", (e) => {
+    e.stopPropagation();
+    pickReaction(b, msg.react, (emoji) => {
+      msg.react = emoji;
+      showReaction(bubble, emoji, true);
+      persist().catch(() => {});
+    });
+  });
+  const meta = $(".msg-meta", bubble);
+  meta.insertBefore(b, $(".msg-speak", meta));
 }
 
 function scrollDown(force = false) {
@@ -854,6 +885,7 @@ async function makeMedia(text: string, kind: MediaKind, prompt: string, hooks?: 
   } finally {
     chat.messages.push(reply);
     bubble.dataset.i = String(chat.messages.length - 1);
+    if (!reply.error) reactButton(bubble, reply);
     busy = null;
     setBusyUi(false);
     scrollDown();
@@ -914,7 +946,11 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
   }
   if (chat.messages.length === 0 && !live) chat.title = text.replace(/\s+/g, " ").slice(0, 60);
   chat.model = model.name;
-  chat.messages.push({ role: "user", content: text, images });
+  // Emote reactions (not in a call: everything there is spoken). The reply to react to is the one before this message.
+  const emotes = !live && settings.look?.emotes !== false;
+  const lastReply = [...chat.messages].reverse().find((m) => m.role === "assistant" && !m.error);
+  const youMsg: StoredMessage = { role: "user", content: text, images };
+  chat.messages.push(youMsg);
   renderChat();
 
   const reply: StoredMessage = { role: "assistant", content: "", model: model.name };
@@ -929,6 +965,7 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
   scrollDown(true);
 
   busy = new AbortController();
+  let reacts: ReturnType<typeof reactFilter> | null = null;
   document.body.classList.add("busy");
   $("#thinking").hidden = false;
   $("#stop").hidden = false;
@@ -973,7 +1010,16 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     });
     const canvasTurn = !live && (wantsCanvas(text) || newestPage >= 0);
     const messages: ChatMessage[] = [
-      { role: "system", content: [systemBase(live), live ? LIVE_HINT : "", memoryText].filter(Boolean).join("\n\n") },
+      {
+        role: "system",
+        content: [
+          systemBase(live),
+          live ? LIVE_HINT : "",
+          emotes ? REACT_HINT : "",
+          emotes && lastReply?.react ? reactedNote(lastReply.react) : "",
+          memoryText,
+        ].filter(Boolean).join("\n\n"),
+      },
       ...history.map((m, i) => {
         if (!live) return { role: m.role, content: i < newestPage ? withoutPage(m.content) : m.content, images: m.images };
         // In a call only the newest camera frame is sent (the older ones aren't what the camera sees now), and
@@ -1018,8 +1064,9 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
       specs = toolDefs.length ? toolSpecs(t.tools, offer) : undefined;
       if (specs) messages[0].content += "\n\n" + TOOLS_HINT;
     }
-    const handlers = {
-      onToken: (t: string) => {
+    // A reply can open with [react: 😂]: that becomes a reaction on the user's message and is never shown or spoken.
+    reacts = reactFilter(
+      (t) => {
         reply.content += t;
         opts.hooks?.onDelta?.(t);
         if (speakIt) {
@@ -1031,6 +1078,15 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
           requestAnimationFrame(paint);
         }
       },
+      (emoji) => {
+        if (!emotes) return;
+        youMsg.react = emoji;
+        const mine = $(`#thread [data-i="${chat.messages.indexOf(youMsg)}"]`);
+        if (mine) showReaction(mine, emoji, true);
+      },
+    );
+    const handlers = {
+      onToken: (t: string) => reacts!.push(t),
       onThinking: (t: string) => {
         thinking += t;
         setThinking(bubble, thinking, !reply.content);
@@ -1093,12 +1149,15 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
       bubble.classList.add("error");
     }
   } finally {
+    reacts?.flush();
+    if (!reply.error) reply.content = stripTags(reply.content);
     const page = renderBody(body, reply.content);
     if (page?.done && !reply.error) openCanvas(page, true);
     else streamEnded();
     stat.textContent = statText(reply.stats);
     chat.messages.push(reply);
     bubble.dataset.i = String(chat.messages.length - 1);
+    if (!reply.error) reactButton(bubble, reply);
     if (speakIt && !busy?.signal.aborted) speakEnd();
     busy = null;
     document.body.classList.remove("busy");
@@ -1391,6 +1450,8 @@ function wire() {
     rootInput.value = info.root;
     keepInput.checked = !!settings.keepRunning;
     $("#settings-test").textContent = "";
+    openAppearance(settings.look);
+    dlg.returnValue = ""; // Esc keeps the last return value: don't let it count as Save
     dlg.showModal();
   };
   $("#memory-status").addEventListener("click", openSettings);
@@ -1413,8 +1474,12 @@ function wire() {
         : `Didn't work: ${m}`;
     }
   });
+  initAppearance();
   dlg.addEventListener("close", async () => {
+    // Appearance shows as you change it: Save keeps it, anything else puts the saved look back.
+    const look = closeAppearance(dlg.returnValue === "save");
     if (dlg.returnValue !== "save") return;
+    settings.look = Object.values(look).some((v) => v !== undefined) ? look : undefined;
     settings.userName = nameInput.value.trim() || undefined;
     settings.aboutUser = aboutInput.value.trim() || undefined;
     greet($("#offline").hidden);
@@ -1510,6 +1575,7 @@ async function main() {
   onSpeechError((msg) => toast(msg, "warn"));
   // The Voice screen's avatar is an inline copy of the mark, so its eye can follow the audio.
   $("#voice-mark").innerHTML = markSvg;
+  addStache($("#voice-mark svg"));
   initVoice({
     toast,
     memCfg,
@@ -1580,6 +1646,7 @@ async function main() {
   });
   renderChat();
   await loadSettings();
+  applyLook(settings.look);
   setVoice(settings.voice ?? DEFAULT_VOICE); // the saved voice (initVoice ran before settings were loaded)
   updateToolsButton();
   updateSpeakButton();

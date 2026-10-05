@@ -10,6 +10,8 @@ import { errMsg, freeLlamaVram, http, OLLAMA, type ModelInfo } from "./backends"
 import { freeGB, readGpus, sharesCard } from "./gpus";
 import { audio, isVox, listVoices, outputLevel, transcribe, DEFAULT_VOICE, VOICE_SERVER } from "./speech";
 import { LiveSpeaker } from "./livespeech";
+import { addStache } from "./talk";
+import { themeRgb } from "./theme";
 import { snapshot } from "./camera";
 import type { MemoryConfig } from "./memory";
 
@@ -115,6 +117,7 @@ let spoken = ""; // the reply that was playing when the user cut in
 export function initLive(d: Deps) {
   deps = d;
   $("#live-mark").innerHTML = markSvg;
+  addStache($("#live-mark svg"));
   speaker.onError = (m) => deps.toast(m, "warn");
   speaker.onFirstAudio = (at) => {
     if (!turn || turn.audio) return;
@@ -723,12 +726,13 @@ function animate() {
   let smooth = 0;
   const step = (t: number) => {
     raf = requestAnimationFrame(step);
+    const c = themeRgb();
     const talking = state === "speaking";
     const level = talking ? outputLevel() : state === "hearing" ? Math.min(1, micLvl * 6) * 0.6 : 0;
     smooth = smooth * 0.6 + level * 0.4;
     if (eye) {
       eye.style.opacity = String(talking ? 0.45 + Math.min(1, smooth * 1.6) * 0.55 : state === "thinking" ? 0.5 : 0.28);
-      eye.style.filter = talking ? `drop-shadow(0 0 ${8 + smooth * 30}px #d6202b)` : "drop-shadow(0 0 4px #d6202b)";
+      eye.style.filter = talking ? `drop-shadow(0 0 ${(8 + smooth * 30) * c.glow}px var(--red))` : `drop-shadow(0 0 ${4 * c.glow}px var(--red))`;
     }
     $("#live-level").style.setProperty("--v", String(Math.round(Math.min(1, (talking ? smooth : micLvl * 6)) * 100)));
     const dpr = window.devicePixelRatio || 1;
@@ -759,13 +763,13 @@ function animate() {
       }
       g.beginPath();
       g.arc(cx, cy, ring.r, 0, Math.PI * 2);
-      g.strokeStyle = ring.gold ? `rgba(217,164,65,${ring.a})` : `rgba(214,32,43,${ring.a})`;
+      g.strokeStyle = ring.gold ? `rgba(${c.trim},${ring.a})` : `rgba(${c.accent},${ring.a})`;
       g.lineWidth = talking ? 2 : 1.2;
       g.stroke();
     }
     const halo = g.createRadialGradient(cx, cy, base * 0.3, cx, cy, base * (1.7 + smooth));
-    halo.addColorStop(0, `rgba(214,32,43,${0.1 + smooth * 0.35})`);
-    halo.addColorStop(1, "rgba(214,32,43,0)");
+    halo.addColorStop(0, `rgba(${c.accent},${(0.1 + smooth * 0.35) * c.glow})`);
+    halo.addColorStop(1, `rgba(${c.accent},0)`);
     g.fillStyle = halo;
     g.fillRect(0, 0, w, h);
   };

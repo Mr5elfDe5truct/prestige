@@ -6,6 +6,7 @@ import {
   setVoice, speakDelta, speakEnd, stopSpeaking, transcribe, DEFAULT_VOICE,
 } from "./speech";
 import { errMsg } from "./backends";
+import { themeRgb } from "./theme";
 import type { MemoryConfig } from "./memory";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
@@ -312,12 +313,13 @@ function animate() {
   const eye = document.querySelectorAll<SVGCircleElement>(".voice-stage .eye-glow");
   const step = (t: number) => {
     raf = requestAnimationFrame(step);
+    const c = themeRgb();
     const speaking = state === "speaking";
     const listening = state === "recording" || state === "listening";
     const level = speaking ? outputLevel() : listening ? micLevel() * 0.6 : 0;
     eye.forEach((e) => {
       e.style.opacity = String(0.35 + Math.min(1, level * 1.6) * 0.65);
-      e.style.filter = `drop-shadow(0 0 ${6 + level * 26}px #d6202b)`;
+      e.style.filter = `drop-shadow(0 0 ${(6 + level * 26) * c.glow}px var(--red))`;
     });
     $("#voice-level").style.setProperty("--v", String(Math.round(level * 100)));
     if (!visible) return;
@@ -347,14 +349,14 @@ function animate() {
       }
       ctx.beginPath();
       ctx.arc(w / 2, h * 0.52, ring.r, 0, Math.PI * 2);
-      ctx.strokeStyle = ring.gold ? `rgba(217,164,65,${ring.a})` : `rgba(214,32,43,${ring.a})`;
+      ctx.strokeStyle = ring.gold ? `rgba(${c.trim},${ring.a})` : `rgba(${c.accent},${ring.a})`;
       ctx.lineWidth = speaking ? 2 : 1.2;
       ctx.stroke();
     }
     // A soft halo that breathes with the level.
     const g = ctx.createRadialGradient(w / 2, h * 0.52, base * 0.3, w / 2, h * 0.52, base * (1.6 + level));
-    g.addColorStop(0, `rgba(214,32,43,${0.12 + level * 0.35})`);
-    g.addColorStop(1, "rgba(214,32,43,0)");
+    g.addColorStop(0, `rgba(${c.accent},${(0.12 + level * 0.35) * c.glow})`);
+    g.addColorStop(1, `rgba(${c.accent},0)`);
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, w, h);
   };
