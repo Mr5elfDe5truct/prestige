@@ -132,13 +132,39 @@ function loadJson(k: string): any {
   }
 }
 
+/** The saved picks over the defaults, dropping any that aren't valid: a wrong type, NaN, or a choice that doesn't
+ *  exist. 0.15.0 and 0.16.0 saved an image's size as null, which rendered as width and height null. */
+function sane<T extends object>(defaults: T, saved: any, valid: Partial<Record<keyof T, (v: any) => boolean>> = {}): T {
+  const out: any = { ...defaults };
+  for (const [k, d] of Object.entries(defaults)) {
+    const v = saved?.[k];
+    if (v === undefined) continue;
+    const finite = typeof v !== "number" || Number.isFinite(v);
+    // A null default (seed, the long video's models) takes null, a number or a string; others need their own type.
+    const typeOk = v === null ? d === null : finite && (d === null ? typeof v === "number" || typeof v === "string" : typeof v === typeof d);
+    const check = valid[k as keyof T];
+    if (typeOk && (v === null || !check || check(v))) out[k] = v;
+  }
+  return out;
+}
+
+// A function declaration: load() runs as this module initialises, before later consts exist.
+function isQuality(v: any) {
+  return v in QUALITY_NAMES;
+}
+
 function load(): GenSettings {
   const s = loadJson(KEY) ?? {};
   return {
-    image: { ...DEFAULTS.image, ...s.image },
-    video: { ...DEFAULTS.video, ...s.video },
-    animate: { ...DEFAULTS.animate, ...s.animate },
-    long: { ...DEFAULTS.long, ...s.long },
+    image: sane(DEFAULTS.image, s.image, {
+      aspect: (v) => ASPECTS.some(([a]) => a === v),
+      size: (v) => v in AREA,
+      quality: isQuality,
+      count: (v) => v >= 1,
+    }),
+    video: sane(DEFAULTS.video, s.video, { quality: isQuality, seconds: (v) => v > 0, fps: (v) => v > 0 }),
+    animate: sane(DEFAULTS.animate, s.animate, { quality: isQuality, seconds: (v) => v > 0 }),
+    long: sane(DEFAULTS.long, s.long, { quality: isQuality, size: (v) => v > 0, frames: (v) => v > 0, shots: (v) => v >= 1 }),
   };
 }
 
