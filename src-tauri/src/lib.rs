@@ -2,6 +2,7 @@
 // launching the workstation's start-all.ps1, and the Studio gallery (studio.rs). All chat traffic goes from the UI to
 // Ollama / llama.cpp / Open WebUI on 127.0.0.1 through the HTTP plugin.
 
+mod canvas;
 mod models;
 mod studio;
 
@@ -411,6 +412,9 @@ pub fn run() {
                 _ => PermissionResponse::Default,
             }
         })
+        // The Canvas: pages the chat model wrote, on their own origin (canvas.rs).
+        .register_uri_scheme_protocol("canvas", canvas::serve)
+        .manage(canvas::Canvases::default())
         .manage(studio::GalleryCache::default())
         .manage(models::GgufCache::default())
         .manage(models::Downloads::default())
@@ -447,7 +451,8 @@ pub fn run() {
             models::download_file,
             models::cancel_download,
             models::add_llama_model,
-            models::restart_llama
+            models::restart_llama,
+            canvas::canvas_put
         ])
         .build(tauri::generate_context!())
         .expect("error while building Prestige")
