@@ -895,9 +895,11 @@ function settingsForm(el: HTMLElement, gm: GenMode, withWarn: boolean) {
   $$<HTMLSelectElement>("select", el).forEach((sel) =>
     sel.addEventListener("change", () => {
       const k = sel.dataset.k!;
-      const num = ["seconds", "fps", "count", "size", "frames", "shots"].includes(k);
+      // Numbers stay numbers (length, fps, count, the long video's size…); words stay words. "size" is both: the long
+      // video's longest side, and an image's Small / Standard / Large, which Number() turned into NaN (saved as null).
       const model = k === "high" || k === "low";
-      update(key, { [k]: num ? Number(sel.value) : model ? sel.value || null : sel.value } as any);
+      const value = /^\d+$/.test(sel.value) ? Number(sel.value) : model ? sel.value || null : sel.value;
+      update(key, { [k]: value } as any);
     }),
   );
   const seedIn = $<HTMLInputElement>("input[data-k=seed]", el);
