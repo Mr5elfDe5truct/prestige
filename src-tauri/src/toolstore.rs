@@ -61,3 +61,52 @@ pub fn tools_setup(script: String, env: HashMap<String, String>) -> Result<(), S
     cmd.spawn().map_err(|e| format!("couldn't open PowerShell: {e}"))?;
     Ok(())
 }
+
+/// True for a plain https:// web address: the only kind of link a tool card opens.
+fn is_web_link(url: &str) -> bool {
+    url.strip_prefix("https://").is_some_and(|rest| {
+        !rest.is_empty() && !rest.starts_with('/') && url.chars().all(|c| c.is_ascii_graphic() && !matches!(c, '"' | '\'' | '`' | '^' | '<' | '>' | '|' | '\\'))
+    })
+}
+
+/// Opens a tool's setup page (where its key comes from) in the default browser. The app window won't follow a
+/// target="_blank" link itself, so the card's Open link comes here.
+#[tauri::command]
+pub fn tools_open_link(url: String) -> Result<(), String> {
+    if !is_web_link(&url) {
+        return Err("that isn't a web address".into());
+    }
+    crate::hidden(&mut Command::new("explorer.exe")).arg(&url).spawn().map_err(|e| format!("couldn't open the browser: {e}"))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opens_only_web_links() {
+        assert!(is_web_link("https://github.com/settings/personal-access-tokens"));
+        assert!(is_web_link("https://app.todoist.com/app/settings/integrations/developer"));
+        assert!(is_web_link("https://api-dashboard.search.brave.com/"));
+        assert!(!is_web_link("http://example.com/"));
+        assert!(!is_web_link("https://"));
+        assert!(!is_web_link("https:///etc"));
+        assert!(!is_web_link("file:///C:/Windows/System32/calc.exe"));
+        assert!(!is_web_link(r"C:\Windows\System32\calc.exe"));
+        assert!(!is_web_link(r#"https://example.com/" & calc"#));
+        assert!(!is_web_link("https://example.com/ calc"));
+        assert!(!is_web_link(r"https://example.com\..\calc.exe"));
+    }
+
+    #[test]
+    fn every_card_link_opens() {
+        // Each card's Open link in the tool store (src/toolstore.ts) must be one tools_open_link will open.
+        let ts = include_str!("../../src/toolstore.ts");
+        let links: Vec<&str> = ts.lines().filter_map(|l| l.trim().strip_prefix("link: \"")?.split('"').next()).collect();
+        assert!(links.len() >= 8, "found only {} links", links.len());
+        for l in links {
+            assert!(is_web_link(l), "{l}");
+        }
+    }
+}

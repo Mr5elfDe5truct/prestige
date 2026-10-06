@@ -512,7 +512,8 @@ pub fn run() {
             phone::phone_set_state,
             toolstore::tools_extra_get,
             toolstore::tools_extra_set,
-            toolstore::tools_setup
+            toolstore::tools_setup,
+            toolstore::tools_open_link
         ])
         .build(tauri::generate_context!())
         .expect("error while building Prestige")

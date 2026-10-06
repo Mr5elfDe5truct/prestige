@@ -227,9 +227,13 @@ function card(e: Entry) {
     if (e.link) {
       const a = document.createElement("a");
       a.href = e.link;
-      a.target = "_blank";
-      a.rel = "noopener";
       a.textContent = "Open";
+      // The app window won't follow the link itself, so the default browser opens it.
+      a.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        if (!inTauri) return void window.open(e.link, "_blank", "noopener");
+        invoke("tools_open_link", { url: e.link }).catch((err) => deps.toast(`Couldn't open the link: ${errMsg(err)}`, "warn"));
+      });
       needs.appendChild(a);
     }
   }
