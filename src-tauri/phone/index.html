@@ -1,0 +1,391 @@
+<!doctype html>
+<!-- Prestige on your phone: a remote for the Prestige desktop app, served by it over your own network (phone.rs).
+     Prestige by R.G. Studios · developed by Ryan B. Gyles. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="theme-color" content="#0a0707" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" href="/icon.png" />
+    <link rel="apple-touch-icon" href="/icon.png" />
+    <title>Prestige</title>
+    <style>
+      :root {
+        --bg: #0a0707; --panel: #120c0c; --panel-2: #1a1111; --line: #2c1c1c; --fg: #efe4d6; --muted: #9c8a7f;
+        --red: #d6202b; --red-deep: #7a0d12; --gold: #d9a441; --ok: #58b36a;
+        --body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+        color-scheme: dark;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 15px/1.5 var(--body); }
+      body { display: flex; flex-direction: column; height: 100dvh; padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); }
+      button { font: inherit; color: inherit; cursor: pointer; }
+      [hidden] { display: none !important; }
+      header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); background: linear-gradient(180deg, var(--panel), var(--bg)); }
+      .brand { display: flex; flex-direction: column; line-height: 1.1; }
+      .brand b { font-family: Georgia, serif; font-size: 19px; letter-spacing: .03em; }
+      .brand small { font-size: 9px; letter-spacing: .2em; text-transform: uppercase; color: var(--muted); }
+      .grow { flex: 1; }
+      .icon { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2); padding: 0; }
+      .icon svg { width: 18px; height: 18px; }
+      select { max-width: 46vw; background: var(--panel-2); color: var(--fg); border: 1px solid var(--line); border-radius: 999px; padding: 7px 10px; font: 13px var(--body); }
+      main { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 14px; -webkit-overflow-scrolling: touch; }
+      .msg { max-width: 92%; overflow-wrap: anywhere; }
+      .you { align-self: flex-end; background: var(--panel-2); border: 1px solid var(--line); border-radius: 16px 16px 4px 16px; padding: 8px 12px; white-space: pre-wrap; }
+      .ai .who { font-size: 12px; font-weight: 600; color: var(--gold); margin-bottom: 2px; }
+      .ai .body p { margin: 0 0 8px; }
+      .ai .body p:last-child { margin-bottom: 0; }
+      .ai .body pre { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px; overflow-x: auto; font: 12.5px var(--mono); white-space: pre; }
+      .ai .body code { font: .9em var(--mono); background: var(--panel-2); border-radius: 4px; padding: 1px 4px; }
+      .ai .body a { color: var(--gold); }
+      .ai .body strong { color: var(--gold); }
+      .ai .body h1, .ai .body h2, .ai .body h3 { font-size: 16px; margin: 10px 0 4px; }
+      .ai .body ul { margin: 4px 0 8px; padding-left: 20px; }
+      .ai.err .body { color: #ff8a8a; }
+      .media { display: grid; gap: 6px; }
+      .media img, .media video { width: 100%; border-radius: 10px; border: 1px solid var(--line); display: block; }
+      .caption { font-size: 12px; color: var(--muted); margin-top: 4px; }
+      .chip { display: inline-block; font: 11px var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; margin-bottom: 6px; }
+      .status { font: 12px var(--mono); color: var(--muted); }
+      .caret { display: inline-block; width: 7px; height: 1em; background: var(--red); vertical-align: -2px; margin-left: 2px; animation: blink .8s steps(2) infinite; }
+      @keyframes blink { 50% { opacity: 0; } }
+      .hello { margin: auto; text-align: center; color: var(--muted); padding: 30px 10px; }
+      .hello b { display: block; font-family: Georgia, serif; font-size: 22px; color: var(--fg); margin-bottom: 6px; }
+      footer { padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--panel); }
+      form.composer { display: flex; align-items: flex-end; gap: 8px; }
+      textarea { flex: 1; resize: none; max-height: 140px; min-height: 42px; background: var(--panel-2); color: var(--fg); border: 1px solid var(--red-deep); border-radius: 20px; padding: 10px 14px; font: 16px var(--body); }
+      .send { background: var(--red); border-color: var(--red); color: #fff; border-radius: 50%; }
+      .hint { font-size: 11px; color: var(--muted); margin: 6px 4px 0; }
+      .drawer { position: fixed; inset: 0; z-index: 10; background: rgba(0, 0, 0, .6); display: flex; }
+      .drawer > div { width: min(84vw, 340px); height: 100%; background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: calc(10px + env(safe-area-inset-top)) 10px 10px; gap: 8px; }
+      .drawer .list { overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+      .drawer .item { text-align: left; background: none; border: 0; border-radius: 8px; padding: 9px 10px; }
+      .drawer .item.sel, .drawer .item:active { background: var(--panel-2); }
+      .drawer .item span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .drawer .item small { color: var(--muted); font: 11px var(--mono); }
+      .btn { border: 1px solid var(--line); background: var(--panel-2); border-radius: 8px; padding: 9px 12px; }
+      .btn.primary { background: var(--red); border-color: var(--red); color: #fff; font-weight: 600; }
+      .pair { margin: auto; width: min(92vw, 380px); display: flex; flex-direction: column; gap: 12px; text-align: center; padding: 20px; }
+      .pair img { width: 72px; height: 72px; margin: 0 auto; border-radius: 16px; }
+      .pair input { text-align: center; font: 28px var(--mono); letter-spacing: .3em; background: var(--panel-2); color: var(--fg); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+      .pair p { color: var(--muted); margin: 0; font-size: 13.5px; }
+      .err-text { color: #ff8a8a; min-height: 1.4em; }
+      .toast { position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%); background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; font-size: 13px; max-width: 90vw; }
+    </style>
+  </head>
+  <body>
+    <section class="pair" id="pair" hidden>
+      <img src="/icon.png" alt="" />
+      <div class="brand" style="align-items:center"><b>Prestige</b><small>by R.G. Studios</small></div>
+      <p>Enter the code from <b>Settings → Phone access</b> on your PC. You only do this once on this phone.</p>
+      <input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" />
+      <button class="btn primary" id="pair-btn">Pair this phone</button>
+      <div class="err-text" id="pair-err"></div>
+    </section>
+
+    <header id="top" hidden>
+      <button class="icon" id="menu" aria-label="Chats"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10" /></svg></button>
+      <div class="brand"><b>Prestige</b><small id="who">by R.G. Studios</small></div>
+      <span class="grow"></span>
+      <select id="model" aria-label="Model"></select>
+    </header>
+    <main id="thread" hidden></main>
+    <footer id="bottom" hidden>
+      <form class="composer" id="composer">
+        <textarea id="text" rows="1" placeholder="Message Prestige… (/image, /research…)" enterkeyhint="send"></textarea>
+        <button type="button" class="icon" id="stop" aria-label="Stop" hidden><svg viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="1" /></svg></button>
+        <button type="submit" class="icon send" id="send" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h13M13 6l6 6-6 6" /></svg></button>
+      </form>
+      <p class="hint" id="hint">Runs on your PC · the conversation shows in Prestige there too</p>
+    </footer>
+    <div class="drawer" id="drawer" hidden>
+      <div>
+        <div style="display:flex;gap:8px"><button class="btn primary" id="new-chat" style="flex:1">New chat</button><button class="btn" id="close-drawer">Close</button></div>
+        <div class="list" id="chats"></div>
+        <span class="grow"></span>
+        <button class="btn" id="unpair">Unpair this phone</button>
+      </div>
+    </div>
+    <div class="toast" id="toast" hidden></div>
+
+    <script>
+      "use strict";
+      const $ = (s) => document.querySelector(s);
+      let token = localStorage.getItem("prestige-token") || "";
+      let chatId = localStorage.getItem("prestige-chat") || null;
+      let chat = null;
+      let streaming = null; // { text, el } while a reply streams in
+      let busy = false;
+      let awaiting = false; // sent a message, waiting for its reply to start
+      let es = null;
+
+      const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+      function toast(t) {
+        const el = $("#toast");
+        el.textContent = t;
+        el.hidden = false;
+        clearTimeout(el._t);
+        el._t = setTimeout(() => (el.hidden = true), 3200);
+      }
+
+      /** A small Markdown subset: code blocks, inline code, bold, italic, links, headings, lists. */
+      function md(src) {
+        const blocks = [];
+        let s = esc(src).replace(/```[^\n]*\n?([\s\S]*?)(```|$)/g, (_, code) => `\u0000${blocks.push(code) - 1}\u0000`);
+        s = s
+          .replace(/`([^`\n]+)`/g, "<code>$1</code>")
+          .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+          .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
+          .replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+        const out = [];
+        let list = false;
+        for (const line of s.split("\n")) {
+          const h = line.match(/^(#{1,3})\s+(.*)/);
+          const li = line.match(/^\s*(?:[-*+]|\d+\.)\s+(.*)/);
+          if (li) {
+            if (!list) out.push("<ul>");
+            list = true;
+            out.push(`<li>${li[1]}</li>`);
+            continue;
+          }
+          if (list) out.push("</ul>");
+          list = false;
+          if (h) out.push(`<h${h[1].length + 1}>${h[2]}</h${h[1].length + 1}>`);
+          else if (line.trim()) out.push(`<p>${line}</p>`);
+        }
+        if (list) out.push("</ul>");
+        return out.join("").replace(/\u0000(\d+)\u0000/g, (_, i) => `<pre>${blocks[i]}</pre>`);
+      }
+
+      async function api(path, opts = {}) {
+        const r = await fetch(path, { ...opts, headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(opts.headers || {}) } });
+        if (r.status === 401) {
+          signOut();
+          throw new Error("not paired");
+        }
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+        return j;
+      }
+      const fileUrl = (p) => `/api/file?path=${encodeURIComponent(p)}&t=${encodeURIComponent(token)}`;
+
+      // ---------- pairing ----------
+      function showPair() {
+        ["#top", "#thread", "#bottom"].forEach((s) => ($(s).hidden = true));
+        $("#pair").hidden = false;
+        const m = location.hash.match(/code=(\d{6})/);
+        if (m) $("#code").value = m[1];
+        $("#code").focus();
+      }
+      function signOut() {
+        token = "";
+        localStorage.removeItem("prestige-token");
+        es?.close();
+        showPair();
+      }
+      $("#pair-btn").addEventListener("click", async () => {
+        $("#pair-err").textContent = "";
+        const code = $("#code").value.replace(/\D/g, "");
+        const name = /iPhone|iPad/.test(navigator.userAgent) ? "iPhone" : /Android/.test(navigator.userAgent) ? "Android phone" : "Browser";
+        try {
+          const r = await fetch("/api/pair", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, name }) });
+          const j = await r.json();
+          if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+          token = j.token;
+          localStorage.setItem("prestige-token", token);
+          history.replaceState(null, "", "/");
+          start();
+        } catch (e) {
+          $("#pair-err").textContent = e.message;
+        }
+      });
+
+      // ---------- the chat ----------
+      function setBusy(on) {
+        busy = on;
+        $("#stop").hidden = !on;
+        $("#send").disabled = on;
+      }
+
+      function bubble(m) {
+        const el = document.createElement("div");
+        if (m.role === "user") {
+          el.className = "msg you";
+          el.textContent = m.content;
+          return el;
+        }
+        el.className = `msg ai${m.error ? " err" : ""}`;
+        el.innerHTML = `<div class="who">${esc(m.model || "Prestige")}</div>${m.note ? `<div class="chip">${esc(m.note)}</div>` : ""}<div class="body"></div>`;
+        const body = el.querySelector(".body");
+        if (m.render) {
+          const paths = [m.render.path, ...(m.render.more || [])];
+          body.innerHTML = `<div class="media">${paths
+            .map((p) => (m.render.kind === "video" ? `<video controls playsinline preload="metadata" src="${esc(fileUrl(p))}"></video>` : `<a href="${esc(fileUrl(p))}" target="_blank"><img loading="lazy" alt="" src="${esc(fileUrl(p))}" /></a>`))
+            .join("")}</div><div class="caption">${esc(m.render.prompt || "")}</div>`;
+        } else body.innerHTML = md(m.content || "");
+        return el;
+      }
+
+      function render() {
+        const th = $("#thread");
+        th.innerHTML = "";
+        const msgs = chat?.messages || [];
+        if (!msgs.length) th.innerHTML = `<div class="hello"><b>${esc(greeting())}</b>Ask anything. It runs on your PC.</div>`;
+        for (const m of msgs) th.appendChild(bubble(m));
+        if (streaming) th.appendChild(streaming.el);
+        th.scrollTop = th.scrollHeight;
+      }
+      function greeting() {
+        const h = new Date().getHours();
+        return h < 5 ? "Good evening" : h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
+      }
+
+      async function loadChat(id) {
+        chatId = id;
+        if (id) localStorage.setItem("prestige-chat", id);
+        else localStorage.removeItem("prestige-chat");
+        try {
+          chat = id ? await api(`/api/chat?id=${encodeURIComponent(id)}`) : null;
+        } catch {
+          chat = null;
+          chatId = null;
+        }
+        render();
+      }
+
+      async function loadState() {
+        try {
+          const s = await api("/api/state");
+          const sel = $("#model");
+          const cur = sel.value || s.model;
+          sel.innerHTML = (s.models || []).map((m) => `<option value="${esc(m.key)}">${esc(m.name)}</option>`).join("") || `<option value="">No models</option>`;
+          if (cur) sel.value = cur;
+          $("#who").textContent = s.character ? `talking to ${s.character}` : "by R.G. Studios";
+          setBusy(!!s.busy);
+        } catch {}
+      }
+
+      function connect() {
+        es?.close();
+        es = new EventSource(`/api/events?t=${encodeURIComponent(token)}`);
+        es.onmessage = (e) => {
+          let ev;
+          try {
+            ev = JSON.parse(e.data);
+          } catch {
+            return;
+          }
+          if (ev.type === "started") {
+            setBusy(true);
+            // The reply to what this phone just sent (a new chat gets its id here).
+            if (awaiting) chatId = ev.chatId;
+            awaiting = false;
+            if (ev.chatId !== chatId) return;
+            localStorage.setItem("prestige-chat", chatId);
+            streaming = { text: "", el: document.createElement("div") };
+            streaming.el.className = "msg ai";
+            streaming.el.innerHTML = `<div class="who">${esc(ev.who || "Prestige")}</div><div class="body"><span class="status">${esc(ev.status || "Thinking…")}</span></div>`;
+            loadChat(chatId);
+          } else if (ev.type === "delta" && streaming && ev.chatId === chatId) {
+            streaming.text += ev.text;
+            streaming.el.querySelector(".body").innerHTML = md(streaming.text) + '<span class="caret"></span>';
+            $("#thread").scrollTop = $("#thread").scrollHeight;
+          } else if (ev.type === "status" && streaming && ev.chatId === chatId && !streaming.text) {
+            streaming.el.querySelector(".body").innerHTML = `<span class="status">${esc(ev.text)}</span>`;
+          } else if (ev.type === "done") {
+            setBusy(false);
+            streaming = null;
+            if (ev.chatId === chatId) loadChat(chatId);
+          } else if (ev.type === "saved" && ev.chatId === chatId && !streaming) {
+            loadChat(chatId);
+          } else if (ev.type === "error") {
+            toast(ev.text);
+            awaiting = false;
+            if (!ev.busy) setBusy(false);
+          } else if (ev.type === "state") loadState();
+        };
+        es.onerror = () => {
+          // The browser reconnects by itself; check we're still paired.
+          api("/api/state").catch(() => {});
+        };
+      }
+
+      async function send(text) {
+        try {
+          awaiting = true;
+          await api("/api/send", { method: "POST", body: JSON.stringify({ chatId, text, model: $("#model").value || null }) });
+          setBusy(true);
+        } catch (e) {
+          awaiting = false;
+          toast(e.message);
+        }
+      }
+
+      $("#composer").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const t = $("#text").value.trim();
+        if (!t || busy) return;
+        $("#text").value = "";
+        $("#text").style.height = "";
+        send(t);
+      });
+      $("#text").addEventListener("input", () => {
+        const ta = $("#text");
+        ta.style.height = "auto";
+        ta.style.height = `${Math.min(ta.scrollHeight, 140)}px`;
+      });
+      $("#stop").addEventListener("click", () => api("/api/stop", { method: "POST" }).catch(() => {}));
+
+      // ---------- chats ----------
+      async function openDrawer() {
+        $("#drawer").hidden = false;
+        const box = $("#chats");
+        box.innerHTML = `<span class="status">Loading…</span>`;
+        try {
+          const list = await api("/api/chats");
+          box.innerHTML = "";
+          for (const c of list) {
+            const b = document.createElement("button");
+            b.className = `item${c.id === chatId ? " sel" : ""}`;
+            b.innerHTML = `<span>${esc(c.title || "Untitled")}</span><small>${esc(new Date(c.updated).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }))}${c.model ? " · " + esc(c.model) : ""}</small>`;
+            b.addEventListener("click", () => {
+              $("#drawer").hidden = true;
+              loadChat(c.id);
+            });
+            box.appendChild(b);
+          }
+          if (!list.length) box.innerHTML = `<span class="status">No chats yet.</span>`;
+        } catch (e) {
+          box.textContent = e.message;
+        }
+      }
+      $("#menu").addEventListener("click", openDrawer);
+      $("#close-drawer").addEventListener("click", () => ($("#drawer").hidden = true));
+      $("#drawer").addEventListener("click", (e) => {
+        if (e.target === $("#drawer")) $("#drawer").hidden = true;
+      });
+      $("#new-chat").addEventListener("click", () => {
+        $("#drawer").hidden = true;
+        loadChat(null);
+      });
+      $("#unpair").addEventListener("click", async () => {
+        if (!confirm("Unpair this phone? You'll need the code from the PC to use it again.")) return;
+        await api("/api/forget", { method: "POST" }).catch(() => {});
+        signOut();
+      });
+
+      function start() {
+        $("#pair").hidden = true;
+        ["#top", "#thread", "#bottom"].forEach((s) => ($(s).hidden = false));
+        loadState();
+        loadChat(chatId);
+        connect();
+      }
+
+      if (token) start();
+      else showPair();
+    </script>
+  </body>
+</html>

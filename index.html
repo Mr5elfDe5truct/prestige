@@ -309,6 +309,21 @@
         <h2 class="sub">Workstation</h2>
         <label>Workstation folder (holds start-all.ps1 and stop-all.ps1)<input id="stack-root" type="text" spellcheck="false" /></label>
         <label class="check"><input id="keep-running" type="checkbox" /> Keep the AI services running when Prestige closes</label>
+        <h2 class="sub">Phone access</h2>
+        <p class="muted">Use Prestige from your phone's browser on the same Wi-Fi, or anywhere over <a href="https://tailscale.com" target="_blank" rel="noopener">Tailscale</a>. It stays off unless you switch it on, only answers devices on your own network, and each phone needs the pairing code once. Chats from the phone run here and show here too.</p>
+        <label class="check"><input id="phone-on" type="checkbox" /> Let my phone use Prestige</label>
+        <div class="phone-box" id="phone-box" hidden>
+          <div class="phone-qr" id="phone-qr" title="Scan with the phone's camera"></div>
+          <div class="phone-info">
+            <span class="eyebrow">Open on your phone</span>
+            <div class="phone-urls" id="phone-urls"></div>
+            <span class="eyebrow">Pairing code</span>
+            <div><b class="phone-code" id="phone-code"></b> <button class="linkish" type="button" id="phone-new-code">new code</button></div>
+            <span class="eyebrow">Paired phones</span>
+            <div class="phone-devices" id="phone-devices"></div>
+            <p class="muted" id="phone-note">When Windows asks, allow Prestige on <b>private</b> networks. For Tailscale, install it on this PC and the phone and use the 100.x address.</p>
+          </div>
+        </div>
         <h2 class="sub">Shared memory</h2>
         <p>Prestige reads and writes the same memory as Open WebUI, so every model in both apps knows the same things about you.</p>
         <p class="muted">To connect it: in Open WebUI open <b>Admin Panel → Settings → General</b> and turn on <b>Enable API Keys</b>, then <b>Settings → Account → API keys</b> → create a key and paste it here. It's saved only on this PC, in Prestige's app data folder.</p>

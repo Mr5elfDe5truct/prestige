@@ -28,6 +28,9 @@ tauri-plugin-dialog = "2"
 pdf-extract = "0.12.1"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 tauri-plugin-notification = "2"
+tiny_http = "0.12"
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+getrandom = "0.2"
 
 [profile.release]
 codegen-units = 1
