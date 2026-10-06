@@ -39,6 +39,7 @@ import {
   addDropped, addFiles, citeLabel, docById, hasDocs, initKnowledge, knowledgeFor, openKnowledge, openSource, readyDocs, type KbDoc, type Source,
 } from "./knowledge";
 import { RESEARCH_CMD, deepResearch } from "./research";
+import { DO_CMD, brains, describe as describeAct, doItForMe } from "./computer";
 import {
   activeCharacter, characterById, characterMemory, characterPrompt, faceScene, initCharacters, remember, renderPicker, setCharacterVoice, voiceOf, wantsFace,
 } from "./characters";
@@ -122,6 +123,7 @@ interface Settings {
   character?: string; // the character being talked to (characters.ts); undefined = Prestige itself
   phone?: boolean; // phone access is on (phone.rs)
   phonePort?: number; // its port, 8765 unless set
+  computerModel?: string; // the model that drives the PC for /do (its key); undefined = the best one there
 }
 
 let settings: Settings = {};
@@ -1245,6 +1247,100 @@ async function runResearch(text: string, question: string, hooks?: ReplyHooks) {
   }
 }
 
+/** /do: a vision model works through the task on this PC (computer.ts). A card first says what will happen and which
+ *  model drives; Start shrinks Prestige to the step-by-step panel. Afterwards every step and the model's summary are
+ *  posted in this reply. */
+async function runComputer(text: string, task: string, hooks?: ReplyHooks) {
+  if (!inTauri) {
+    toast("Computer use runs in the desktop app.");
+    return hooks?.onDone?.(false);
+  }
+  const canSee = (m: ModelInfo) => !!m.inputModalities?.includes("image") || VISION.test(m.id);
+  const list = brains(models, canSee);
+  if (!list.length) {
+    toast("No model that can see the screen is available. Start the services, or get Qwen3.8 27B or Nex-N2.5-mini from the catalog.", "warn");
+    return hooks?.onDone?.(false);
+  }
+  if (chat.messages.length === 0) chat.title = `Do: ${task.replace(/\s+/g, " ").slice(0, 54)}`;
+  chat.messages.push({ role: "user", content: text });
+  renderChat();
+  const reply: StoredMessage = { role: "assistant", content: "", model: "Computer use", tools: [] };
+  const bubble = addAiBubble("Computer use");
+  const body = $(".msg-body", bubble);
+  const replyChat = chat.id;
+  const pick = list.find((m) => m.key === settings.computerModel) ?? list[0];
+  body.innerHTML = `<div class="cu-card">
+      <p><b>Do it for me:</b> <span class="cu-card-task"></span></p>
+      <p class="credit">The model looks at your screen and uses the mouse and keyboard, one step at a time. Prestige shrinks to a
+      panel in the corner where you approve each step (or turn that off) and can stop it any time. It won't type passwords,
+      pay for anything or send messages; it stops and tells you instead.</p>
+      <label class="field">Model<select class="cu-card-model"></select></label>
+      <div class="acts"><button type="button" class="btn" data-a="no">Cancel</button><button type="button" class="btn primary" data-a="yes">Start</button></div>
+    </div>`;
+  $(".cu-card-task", body).textContent = task;
+  const sel = $(".cu-card-model", body) as HTMLSelectElement;
+  sel.innerHTML = list.map((m) => `<option value="${escapeHtml(m.key)}"${m.key === pick.key ? " selected" : ""}>${escapeHtml(m.name)}</option>`).join("");
+  scrollDown(true);
+  busy = new AbortController();
+  setBusyUi(true);
+  const go = await new Promise<boolean>((resolve) => {
+    body.querySelectorAll<HTMLButtonElement>("[data-a]").forEach((b) => b.addEventListener("click", () => resolve(b.dataset.a === "yes"), { once: true }));
+    busy!.signal.addEventListener("abort", () => resolve(false), { once: true });
+  });
+  const model = list.find((m) => m.key === sel.value) ?? pick;
+  try {
+    if (!go) {
+      reply.content = "*(not started)*";
+      return;
+    }
+    if (model.key !== settings.computerModel) {
+      settings.computerModel = model.key;
+      saveSettings().catch(() => {});
+    }
+    reply.model = `Computer use · ${model.name}`;
+    $(".msg-who", bubble).textContent = reply.model;
+    body.innerHTML = `<span class="status-line">Working on it in the panel…</span>`;
+    phonePush({ type: "status", chatId: replyChat, text: `Computer use: ${task}` });
+    const r = await doItForMe(task, model);
+    for (const s of r.steps) {
+      const step: ToolStep = {
+        name: "computer",
+        args: { action: describeAct(s.act) },
+        ok: s.state === "done",
+        denied: s.state === "skipped",
+        ms: s.ms,
+        result: [s.thought, s.state === "skipped" ? "(you skipped this step)" : "", s.note ? `Failed: ${s.note}` : ""].filter(Boolean).join("\n"),
+      };
+      reply.tools!.push(step);
+      renderToolStep(bubble, step);
+    }
+    const head = { done: "Done.", failed: "It stopped before finishing.", stopped: "You stopped it.", limit: "It ran out of steps." }[r.status];
+    reply.content = r.status === "done" || r.status === "failed" ? r.summary : `${head} ${r.summary === "Stopped." ? "" : r.summary}`.trim();
+    reply.note = `computer use · ${r.steps.length} step${r.steps.length === 1 ? "" : "s"} · ${r.status} · ${r.seconds < 90 ? `${r.seconds} s` : `${Math.round(r.seconds / 60)} min`}`;
+    if (r.status === "failed") bubble.classList.add("warn");
+  } catch (e) {
+    reply.error = true;
+    reply.content = `Computer use didn't run: ${errMsg(e)}`;
+    bubble.classList.add("error");
+  } finally {
+    busy = null;
+    setBusyUi(false);
+    renderBody(body, reply.content);
+    if (reply.note) {
+      const chip = document.createElement("div");
+      chip.className = "chip";
+      chip.textContent = reply.note;
+      bubble.insertBefore(chip, $(".tool-steps", bubble) ?? body);
+    }
+    chat.messages.push(reply);
+    bubble.dataset.i = String(chat.messages.length - 1);
+    if (!reply.error) reactButton(bubble, reply);
+    scrollDown();
+    persist().catch((e) => toast(`Couldn't save this chat: ${e}`, "warn"));
+    hooks?.onDone?.(!reply.error);
+  }
+}
+
 /** A finished research report's steps (often 15 or more) fold into one line, a click away. */
 function foldSteps(bubble: HTMLElement) {
   const box = bubble.querySelector<HTMLElement>(".tool-steps");
@@ -1303,6 +1399,16 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
       return;
     }
     return runResearch(text, question, opts.hooks);
+  }
+  // "/do open Notepad and write a haiku": a vision model does it on this PC (asks first; not from Live calls).
+  if (!live && DO_CMD.test(text)) {
+    const task = text.replace(DO_CMD, "").trim();
+    if (!task) {
+      toast("Say what to do after /do, e.g. /do open Notepad and type a shopping list");
+      opts.hooks?.onDone?.(false);
+      return;
+    }
+    return runComputer(text, task, opts.hooks);
   }
   // With pictures attached, /image or /video uses the first as a reference image (Live and the camera ask don't make media).
   // "Draw me a chart of…" or "make a snake game" is for the Canvas, unless it asks for a picture or a clip.
@@ -1943,6 +2049,14 @@ function wire() {
     ta.value = `/image ${v}`;
     autosize();
     updateRefNote();
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+  });
+  // Do it for me: starts the message with /do, so what's typed becomes the task.
+  $("#composer-do").addEventListener("click", () => {
+    const v = ta.value.replace(DO_CMD, "");
+    ta.value = `/do ${v}`;
+    autosize();
     ta.focus();
     ta.setSelectionRange(ta.value.length, ta.value.length);
   });

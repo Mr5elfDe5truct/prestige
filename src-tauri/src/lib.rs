@@ -3,6 +3,7 @@
 // Ollama / llama.cpp / Open WebUI on 127.0.0.1 through the HTTP plugin.
 
 mod canvas;
+mod computer;
 mod knowledge;
 mod models;
 mod phone;
@@ -513,7 +514,10 @@ pub fn run() {
             toolstore::tools_extra_get,
             toolstore::tools_extra_set,
             toolstore::tools_setup,
-            toolstore::tools_open_link
+            toolstore::tools_open_link,
+            computer::cu_screenshot,
+            computer::cu_act,
+            computer::cu_panel
         ])
         .build(tauri::generate_context!())
         .expect("error while building Prestige")
