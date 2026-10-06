@@ -276,7 +276,8 @@ async function readLines(body: ReadableStream<Uint8Array>, onLine: (line: string
   if (buf.trim()) onLine(buf.trim());
 }
 
-/** Ollama request options for special cases (Live mode: no thinking, a smaller context, kept loaded for the call). */
+/** Request options for special cases (Live mode: no thinking, a smaller context, kept loaded for the call). `think` also
+ *  applies to llama.cpp models; the others are Ollama's. */
 export interface ChatExtra {
   think?: boolean;
   numCtx?: number;
@@ -350,7 +351,15 @@ export async function streamChat(
     const r = await http(`${LLAMA}/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: model.id, messages: messages.map(toOpenAI), stream: true, stream_options: { include_usage: true }, ...withTools }),
+      body: JSON.stringify({
+        model: model.id,
+        messages: messages.map(toOpenAI),
+        stream: true,
+        stream_options: { include_usage: true },
+        // Qwen's chat templates take this to skip thinking (Deep Research's quick steps).
+        ...(extra.think === false ? { chat_template_kwargs: { enable_thinking: false } } : {}),
+        ...withTools,
+      }),
       signal,
     });
     if (!r.ok || !r.body) throw new Error(`llama.cpp answered ${r.status}: ${(await r.text()).slice(0, 300)}`);
