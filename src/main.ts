@@ -14,7 +14,9 @@ import DOMPurify from "dompurify";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { initSystem, onGpus, showSystem, unloadAll } from "./system";
 import { ollamaCtx, onPlanChange, readGpus, refreshPlan, shortName, type Gpu } from "./gpus";
-import { allowRenders, cancelRender, chatSettings, initStudio, modelLabel, openRender, renderMedia, renderMenu, showStudio, type MediaKind } from "./studio";
+import {
+  allowRenders, cancelRender, chatSettings, editLabel, editMedia, initStudio, modelLabel, openRender, renderMedia, renderMenu, showStudio, type MediaKind,
+} from "./studio";
 import { onSettingsChange } from "./gensettings";
 import { CONSENT, bindRefChoices, hasFiles, imageIn, imageToBase64, onRefPrefsChange, refChoicesHtml, referenceFromBase64 } from "./reference";
 import { initVoice, showVoice } from "./voice";
@@ -869,7 +871,7 @@ function updateRefNote() {
   const media = mediaRequest(($("#prompt") as HTMLTextAreaElement).value.trim());
   note.classList.toggle("on", !!media);
   if (!media) {
-    note.textContent = "Ask about it, or type /image or /video and a scene to put its character or item in a new picture or clip.";
+    note.textContent = "Ask about it, /edit and what to change (\"/edit make it night\"), or /image or /video and a scene to put its character or item in a new picture or clip.";
     return;
   }
   note.innerHTML = `<span class="ref-picks">${refChoicesHtml(media.kind === "video")}</span><span class="ref-note-text"></span>`;
@@ -935,6 +937,7 @@ function retractLiveTurn(): string | null {
 // "/image a lighthouse at dusk" (or /imagine, /img), or a plain ask like "draw me…" / "make an image of…".
 // "/video waves on rocks at dawn" (or /clip), or "make a video of…".
 const IMAGE_CMD = /^\/(?:image|imagine|img)\b\s*/i;
+const EDIT_CMD = /^\/edit\b\s*/i;
 const VIDEO_CMD = /^\/(?:video|clip)\b\s*/i;
 const VIDEO_ASK =
   /^(?:please\s+)?(?:(?:can|could|would)\s+you\s+)?(?:make|generate|create|render)\s+(?:me\s+)?(?:an?\s+)?(?:video|clip|animation)\s+(?:of|showing)\s+/i;
@@ -956,7 +959,7 @@ function setBusyUi(on: boolean) {
 }
 
 /** Makes images with the Studio's image model (Qwen-Image-2.1 or its turbo), or a video with LTX, and shows them in the chat. */
-async function makeMedia(text: string, kind: MediaKind, prompt: string, hooks?: ReplyHooks, refB64?: string, refKind?: RefKind) {
+async function makeMedia(text: string, kind: MediaKind, prompt: string, hooks?: ReplyHooks, refB64?: string, refKind?: RefKind, edit = false) {
   const what = kind === "video" ? "video" : "image";
   if (!inTauri) {
     toast(`${kind === "video" ? "Videos" : "Images"} are made in the desktop app.`);
@@ -965,7 +968,7 @@ async function makeMedia(text: string, kind: MediaKind, prompt: string, hooks?: 
   if (chat.messages.length === 0) chat.title = text.replace(/\s+/g, " ").slice(0, 60);
   chat.messages.push({ role: "user", content: text, images: refB64 ? [refB64] : undefined });
   renderChat();
-  const label = await modelLabel(kind, !!refB64);
+  const label = edit ? editLabel() : await modelLabel(kind, !!refB64);
   const reply: StoredMessage = { role: "assistant", content: "", model: label };
   const bubble = addAiBubble(label);
   const body = $(".msg-body", bubble);
@@ -977,23 +980,21 @@ async function makeMedia(text: string, kind: MediaKind, prompt: string, hooks?: 
   const t0 = Date.now();
   try {
     const ref = refB64 ? await referenceFromBase64(refB64) : undefined;
-    const got = await renderMedia(
-      kind,
-      prompt,
-      (pct, label) => {
-        ($(".progress", body) as HTMLElement | null)?.style.setProperty("--v", String(pct));
-        const l = $(".status-line", body);
-        if (l) l.textContent = label;
-      },
-      ref,
-      refKind,
-    );
+    const progress = (pct: number, label: string) => {
+      ($(".progress", body) as HTMLElement | null)?.style.setProperty("--v", String(pct));
+      const l = $(".status-line", body);
+      if (l) l.textContent = label;
+    };
+    // /edit changes the picture itself; otherwise it's a new picture (with the reference's subject in it, if any).
+    const got = edit && ref ? await editMedia(prompt, ref, progress) : await renderMedia(kind, prompt, progress, ref, refKind);
     if (ref) URL.revokeObjectURL(ref.url);
     const [a, ...more] = got;
     reply.render = { path: a.path, prompt, seconds: Math.round((Date.now() - t0) / 1000), kind, ...(more.length ? { more: more.map((x) => x.path) } : {}) };
     // What chat models see in later turns.
     const names = got.map((x) => x.name).join(", ");
-    reply.content = `(I made ${got.length > 1 ? `${got.length} images` : `a ${what}`} with ${label}${refB64 ? " from the attached reference picture" : ""} for: "${prompt}". Saved as ${names}.)`;
+    reply.content = edit
+      ? `(I edited the picture with ${label}: "${prompt}". Saved as ${names}.)`
+      : `(I made ${got.length > 1 ? `${got.length} images` : `a ${what}`} with ${label}${refB64 ? " from the attached reference picture" : ""} for: "${prompt}". Saved as ${names}.)`;
     renderFigure(bubble, reply.render);
   } catch (e) {
     if (busy?.signal.aborted) reply.content = "*(stopped)*";
@@ -1145,6 +1146,30 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     return;
   }
   const live = !!opts.live;
+  // "/edit make it night": changes the attached picture, or the last one made in this chat, by instruction.
+  if (!live && !opts.images && EDIT_CMD.test(text)) {
+    const instruction = text.replace(EDIT_CMD, "").trim();
+    let src = attachments[0];
+    if (!src) {
+      const last = [...chat.messages].reverse().find((m) => m.render && m.render.kind !== "video");
+      if (last?.render && inTauri) {
+        try {
+          await allowRenders();
+          src = await imageToBase64(await (await fetch(convertFileSrc(last.render.path))).blob());
+        } catch {
+          /* gone from disk: asks for a picture below */
+        }
+      }
+    }
+    if (!instruction || !src) {
+      toast(!src ? "Attach a picture to edit (or make one in this chat first), then /edit and what to change." : "Say what to change after /edit, e.g. /edit make it night");
+      opts.hooks?.onDone?.(false);
+      return;
+    }
+    attachments = [];
+    renderAttachments();
+    return makeMedia(text, "image", instruction, opts.hooks, src, undefined, true);
+  }
   if (!live && RESEARCH_CMD.test(text)) {
     const question = text.replace(RESEARCH_CMD, "").trim();
     if (!question) {

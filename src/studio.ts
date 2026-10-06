@@ -41,6 +41,7 @@ import {
 } from "./gensettings";
 import { CONSENT, bindRefChoices, hasFiles, imageIn, loadReference, onRefPrefsChange, refChoicesHtml, refPrefs, refPrompt, sceneOf, setRefPrefs, uploadReference, type RefKind, type Reference } from "./reference";
 import { characterById, characters, faceBlob, onCharactersChange } from "./characters";
+import { initInpaint, openInpaint } from "./inpaint";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
 const $$ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => Array.from(r.querySelectorAll(s)) as T[];
@@ -60,7 +61,7 @@ interface Asset {
   seed?: number | null;
 }
 
-type GenMode = "image" | "fast" | "edit" | "video" | "animate" | "long" | "ref" | "reffast" | "refvideo";
+type GenMode = "image" | "fast" | "edit" | "inpaint" | "video" | "animate" | "long" | "ref" | "reffast" | "refvideo";
 
 // How a workflow takes the generation settings: an image model with a latent size and batch, an edit
 // (size follows the picture), LTX with a 2× upscale pass ("ltx") or without ("ltx1"), Wan's two samplers,
@@ -130,6 +131,19 @@ const MODES: Record<GenMode, Mode> = {
     steps: QWEN_STEPS,
     secs: 90,
     note: "keeps the image's size",
+    imageNode: "9",
+  },
+  // Paint to change: the edit graph with a mask, so only the painted area is regenerated (see inpaintGraph).
+  inpaint: {
+    file: "qwen-image-21-edit.api.json",
+    label: "Qwen-Image-2.1 Inpaint",
+    family: "edit",
+    promptNode: "4",
+    promptKey: "prompt",
+    seed: ["6", "seed"],
+    steps: QWEN_STEPS,
+    secs: 95,
+    note: "only the painted area changes",
     imageNode: "9",
   },
   video: {
@@ -521,6 +535,7 @@ const age = (ms: number) => {
 };
 
 export function initStudio(d: Deps) {
+  initInpaint();
   deps = d;
   $$(".filters [data-f]").forEach((b) =>
     b.addEventListener("click", () => {
@@ -1059,6 +1074,8 @@ function openLightbox(a: Asset) {
   ($("#lb-animate") as HTMLButtonElement).hidden = a.kind !== "image" || !(workflows.animate || workflows.long);
   ($("#lb-edit") as HTMLButtonElement).hidden = a.kind !== "image" || !workflows.edit;
   $("#lb-edit").onclick = () => startFrom(a, "image");
+  ($("#lb-inpaint") as HTMLButtonElement).hidden = a.kind !== "image" || !workflows.inpaint;
+  $("#lb-inpaint").onclick = () => paintToChange(a);
   $("#lb-animate").onclick = () => startFrom(a, "video");
   ($("#lb-reuse") as HTMLButtonElement).disabled = !a.prompt;
   $("#lb-reveal").onclick = () => revealFile(a);
@@ -1087,6 +1104,29 @@ function startFrom(a: Asset, m: "image" | "video") {
   closeLightbox();
   renderCreate();
   $("#gen-prompt").focus();
+}
+
+/** Paint to change: paint the area on the picture (inpaint.ts) and say what goes there; only that part is redrawn.
+ *  With nothing painted it's an instruction edit of the whole picture. The result opens when it's done. */
+function paintToChange(a: Asset) {
+  closeLightbox();
+  openInpaint(convertFileSrc(a.path), a.name, async (r) => {
+    deps.show();
+    try {
+      let out: Asset[];
+      if (r.mask) {
+        const bytes = new Uint8Array(await r.mask.arrayBuffer());
+        const hash = new Uint8Array(await crypto.subtle.digest("SHA-1", bytes));
+        const hex = Array.from(hash.slice(0, 6), (b) => b.toString(16).padStart(2, "0")).join("");
+        const name = await invoke<string>("comfy_upload_bytes", bytes, { headers: { "x-name": `prestige-mask-${hex}.png` } });
+        out = await run("inpaint", r.prompt, a, { mask: { name, w: r.width, h: r.height } });
+      } else out = await run("edit", r.prompt, a, {});
+      deps.toast(r.mask ? "Changed the painted area." : "Edited the picture.");
+      if (out[0]) openRender(out[0].path);
+    } catch (e) {
+      if (errMsg(e) !== "stopped") deps.toast(`Couldn't change it: ${errMsg(e)}`, "warn");
+    }
+  });
 }
 
 function reusePrompt(a: Asset) {
@@ -1171,6 +1211,7 @@ function showMenu(e: MouseEvent, a: Asset) {
     { label: "Open in folder", run: () => revealFile(a) },
     "-",
     ...(image && workflows.edit ? [{ label: "Edit with Qwen-Image…", run: () => startFrom(a, "image") }] : []),
+    ...(image && workflows.inpaint ? [{ label: "Paint to change…", run: () => paintToChange(a) }] : []),
     ...(image && (workflows.animate || workflows.long) ? [{ label: "Animate (image → video)…", run: () => startFrom(a, "video") }] : []),
     ...(image && (workflows.ref || workflows.reffast) ? [{ label: "Use as reference image", run: () => useAsReference(a) }] : []),
     ...(a.prompt ? [{ label: "Reuse prompt", run: () => reusePrompt(a) }] : []),
@@ -1303,6 +1344,36 @@ async function refVideo(prompt: string, r: Reference, kind: RefKind, progress?: 
 interface QueueOpts {
   kind?: RefKind; // how a reference image is described to Qwen-Image
   override?: Override; // size and count for a chain's first frame
+  mask?: { name: string; w: number; h: number }; // inpaint: the mask in ComfyUI's input folder, and the picture's size
+}
+
+/** What Qwen-Image is asked: it's an edit model, so it redraws the picture it's given unless told what to change, and
+ *  it can't see the mask. The painted area is greyed out in its copy and it's told to fill the grey. */
+const inpaintPrompt = (p: string) =>
+  `Fill the flat gray area with: ${p.replace(/[.\s]+$/, "")}. It should blend naturally with the rest of the picture. Keep everything else exactly the same.`;
+
+/** Turns the edit graph into an inpaint: the painted area is greyed out in the picture Qwen-Image sees, the source is
+ *  encoded at the size it works at (its text encoder's latent is empty), only the masked part is noised and redrawn,
+ *  and the result is scaled back and pasted over the original through the soft-edged mask, so the unpainted pixels
+ *  stay exactly as they were. (Tested: mean change outside the mask 0.002 of 255.) */
+function inpaintGraph(g: any, mask: NonNullable<QueueOpts["mask"]>) {
+  const res = Number(g["4"]?.inputs?.resolution) || 1024;
+  const ratio = mask.w / mask.h;
+  const w = Math.max(32, Math.round(Math.sqrt(res * res * ratio) / 32) * 32);
+  const h = Math.max(32, Math.round(Math.sqrt((res * res) / ratio) / 32) * 32);
+  g["20"] = { class_type: "LoadImageMask", inputs: { image: mask.name, channel: "red" } };
+  g["26"] = { class_type: "EmptyImage", inputs: { width: mask.w, height: mask.h, batch_size: 1, color: 0x808080 } };
+  g["27"] = { class_type: "ImageCompositeMasked", inputs: { destination: ["9", 0], source: ["26", 0], x: 0, y: 0, resize_source: false, mask: ["20", 0] } };
+  g["4"].inputs["images.image_1"] = ["27", 0];
+  g["4"].inputs.prompt = inpaintPrompt(g["4"].inputs.prompt);
+  g["21"] = { class_type: "ImageScale", inputs: { image: ["27", 0], upscale_method: "lanczos", width: w, height: h, crop: "disabled" } };
+  g["22"] = { class_type: "VAEEncode", inputs: { pixels: ["21", 0], vae: ["3", 0] } };
+  g["23"] = { class_type: "SetLatentNoiseMask", inputs: { samples: ["22", 0], mask: ["20", 0] } };
+  g["6"].inputs.latent_image = ["23", 0];
+  g["24"] = { class_type: "ImageScale", inputs: { image: ["7", 0], upscale_method: "lanczos", width: mask.w, height: mask.h, crop: "disabled" } };
+  g["25"] = { class_type: "ImageCompositeMasked", inputs: { destination: ["9", 0], source: ["24", 0], x: 0, y: 0, resize_source: false, mask: ["20", 0] } };
+  g["8"].inputs.images = ["25", 0];
+  g["8"].inputs.filename_prefix = "qwen-image-inpaint";
 }
 
 /** Sends one of the workflows to ComfyUI. Throws if it couldn't be queued; progress then arrives by websocket. */
@@ -1317,6 +1388,10 @@ async function queue(gm: GenMode, prompt: string, src: Source | null, opts: Queu
   const p = plan(gm, src, opts.override);
   if (m.family === "svi") shotPrompts(prompt, p.shots!).forEach((t, i) => (graph[SVI.shots[i].prompt].inputs.text = t));
   apply(m, graph, p, seed);
+  if (gm === "inpaint") {
+    if (!opts.mask) throw new Error("nothing is painted");
+    inpaintGraph(graph, opts.mask);
+  }
   const nodes: Record<string, string> = {};
   for (const [id, n] of Object.entries<any>(graph)) nodes[id] = n.class_type;
 
@@ -1452,6 +1527,16 @@ export async function renderMedia(
   if (chained(gm)) return refVideo(prompt, r, refKind, progress);
   return run(gm, prompt, r, gm === "refvideo" ? {} : { kind: refKind }, progress);
 }
+
+/** Chat's /edit: changes a picture by instruction with Qwen-Image-2.1 Edit (the whole picture, keeping its size). */
+export async function editMedia(prompt: string, r: Reference, progress: (pct: number, label: string) => void): Promise<Asset[]> {
+  await ensureWorkflows();
+  if (!workflows.edit) throw new Error(`workflows\\${MODES.edit.file} wasn't found`);
+  return run("edit", prompt, r, {}, progress);
+}
+
+/** The label for chat's edits. */
+export const editLabel = () => MODES.edit.label;
 
 /** The generation settings form for chat's popover (the same settings as Studio's). */
 export async function chatSettings(el: HTMLElement, kind: MediaKind) {

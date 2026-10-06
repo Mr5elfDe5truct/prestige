@@ -423,6 +423,7 @@
             <button class="btn" id="lb-reveal">Open in folder</button>
             <button class="btn" id="lb-copy">Copy prompt</button>
             <button class="btn" id="lb-edit">Edit (Qwen-Image)</button>
+            <button class="btn" id="lb-inpaint" title="Paint over a part of the picture and regenerate only that part">Paint to change…</button>
             <button class="btn" id="lb-animate">Animate (image → video)</button>
             <button class="btn" id="lb-save">Save a copy as…</button>
             <button class="btn danger" id="lb-delete" title="Move to the Recycle Bin (Delete key)">Delete</button>
@@ -431,6 +432,29 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- Paint to change: paint a mask on a render and regenerate only that area (inpaint.ts) -->
+    <div class="inpaint" id="inpaint" hidden role="dialog" aria-modal="true" aria-label="Paint to change">
+      <div class="ip-bar">
+        <b>Paint to change</b><span class="credit" id="ip-name"></span>
+        <span class="grow"></span>
+        <span class="seg"><button type="button" id="ip-brush" class="on" title="Brush: paint over what to change">Brush</button><button type="button" id="ip-erase" title="Eraser: take paint away">Eraser</button></span>
+        <label class="ip-size" title="Brush size ([ and ] change it)">Size<input id="ip-size" type="range" min="6" max="160" value="48" /></label>
+        <button type="button" class="btn" id="ip-undo" title="Undo (Ctrl+Z)">Undo</button>
+        <button type="button" class="btn" id="ip-clear">Clear</button>
+      </div>
+      <div class="ip-stage">
+        <div class="ip-frame"><img id="ip-img" alt="" /><canvas id="ip-paint"></canvas><span class="ip-ring" id="ip-ring"></span></div>
+      </div>
+      <form class="ip-form" id="ip-form">
+        <p class="credit" id="ip-hint"></p>
+        <div class="prompt-row">
+          <input id="ip-prompt" type="text" autocomplete="off" placeholder="What should be there? e.g. a red vintage car, an open window, no people" />
+          <button type="button" class="btn" id="ip-cancel">Cancel</button>
+          <button type="submit" class="btn primary" id="ip-go">Change the painted area</button>
+        </div>
+      </form>
     </div>
 
     <dialog class="sheet" id="del-confirm">
