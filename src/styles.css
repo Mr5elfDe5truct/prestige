@@ -784,3 +784,25 @@ dialog.characters[open] { display: flex; flex-direction: column; gap: 12px; }
 .ip-form .credit { margin: 0 0 6px; }
 .ip-form .prompt-row { display: flex; gap: 8px; }
 .ip-form input { flex: 1; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font: 14px var(--body); padding: 10px 12px; }
+/* ---------- 0.24: render queue ---------- */
+.rq { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.rq-head { display: flex; align-items: baseline; gap: 10px; }
+.rq-head b { font-family: var(--display); font-size: 13px; }
+.rq-head .grow { flex: 1; }
+.rq-list { display: flex; flex-direction: column; gap: 2px; max-height: 220px; overflow-y: auto; }
+.rq-row { position: relative; display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; }
+.rq-row:hover { background: var(--panel-2); }
+.rq-row.running::after { content: ""; position: absolute; left: 6px; right: 6px; bottom: 0; height: 2px; background: linear-gradient(90deg, var(--red), var(--gold)) no-repeat; background-size: calc(var(--v, 0) * 1%) 100%; }
+.rq-ico { text-align: center; font-size: 12px; }
+.rq-row.running .rq-ico { color: var(--red); animation: blink .8s steps(2) infinite; }
+.rq-row.done .rq-ico { color: var(--ok); }
+.rq-row.failed .rq-ico { color: #ff6b6b; }
+.rq-row.stopped .rq-ico, .rq-row.waiting .rq-ico { color: var(--muted); }
+.rq-t { min-width: 0; display: flex; flex-direction: column; }
+.rq-t b { font-weight: 500; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rq-t small { font: 10.5px var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rq-row.failed .rq-t small { color: #ff8a8a; }
+.rq-acts { display: flex; gap: 10px; }
+.dock button { position: relative; }
+#studio-count { position: absolute; top: 2px; right: 6px; min-width: 16px; height: 16px; border-radius: 8px; background: var(--red); color: #fff; font: 600 10px/16px var(--mono); padding: 0 4px; }
+#studio-count:empty { display: none; }
