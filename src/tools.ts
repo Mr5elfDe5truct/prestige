@@ -24,6 +24,16 @@ export const GROUPS: ToolGroup[] = [
   { id: "desktop", label: "PowerShell", hint: "run commands and manage processes on this PC", defaultOn: false },
   { id: "browser", label: "Browser control", hint: "drive a Chrome window (Playwright)", defaultOn: false },
 ];
+const BUILT_IN = GROUPS.length;
+const SERVERS = ["fetch", "workstation", "filesystem", "desktop", "browser"];
+let extraServers: string[] = [];
+
+/** Tools added from the tool store (toolstore.ts): each is a server on the tool server and a group in the menu. */
+export function setExtraServers(list: ToolGroup[]) {
+  GROUPS.splice(BUILT_IN, GROUPS.length - BUILT_IN, ...list);
+  extraServers = list.map((g) => g.id);
+  cache = null;
+}
 
 export interface ToolDef {
   name: string; // what the model calls
@@ -122,7 +132,7 @@ export async function loadTools(force = false): Promise<{ tools: ToolDef[]; erro
   );
   const errors: string[] = [];
   const seen = new Map<string, number>();
-  const servers = ["fetch", "workstation", "filesystem", "desktop", "browser"];
+  const servers = [...SERVERS, ...extraServers];
   await Promise.all(
     servers.map(async (server) => {
       try {
