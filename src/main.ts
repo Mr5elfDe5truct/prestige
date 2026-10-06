@@ -33,6 +33,9 @@ import { addStache } from "./talk";
 import { applyCachedLook, applyLook, closeAppearance, initAppearance, openAppearance, type Look } from "./theme";
 import { pickReaction, reactFilter, reactedNote, showReaction, stripTags, REACT_HINT } from "./emotes";
 import { CANVAS_CMD, CANVAS_HINT, canvasOnChat, canvasReplyStart, findCanvas, initCanvas, openCanvas, streamCanvas, streamEnded, wantsCanvas } from "./canvas";
+import {
+  addDropped, addFiles, citeLabel, docById, hasDocs, initKnowledge, knowledgeFor, openKnowledge, openSource, readyDocs, type KbDoc, type Source,
+} from "./knowledge";
 
 const inTauri = "__TAURI_INTERNALS__" in window;
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
@@ -76,6 +79,7 @@ interface StoredMessage {
   // An image (or several, or a video) made from chat. "more" holds the other images of a batch.
   render?: { path: string; prompt: string; seconds?: number; more?: string[]; kind?: MediaKind };
   react?: string; // an emote reaction: yours on a reply, Prestige's on your message
+  sources?: Source[]; // passages from Knowledge this reply was given (shown under it, cited in it)
 }
 interface Chat {
   id: string;
@@ -84,6 +88,7 @@ interface Chat {
   updated: number;
   model?: string;
   messages: StoredMessage[];
+  files?: string[]; // Knowledge files attached to this chat (dropped or attached here)
 }
 interface Settings {
   model?: string;
@@ -100,6 +105,8 @@ interface Settings {
   speakReplies?: boolean; // read every chat reply aloud as it streams
   liveCamera?: boolean; // Live calls start with the camera on
   look?: Look; // Appearance: theme colours, glow, ember drift, emote reactions (theme.ts)
+  kbAll?: boolean; // Knowledge: search every file for every chat (undefined = on)
+  kbTool?: boolean; // the "Your files" tool group was added to saved tool groups
 }
 
 let settings: Settings = {};
@@ -461,12 +468,14 @@ function renderChat() {
       for (const step of msg.tools ?? []) renderToolStep(b, step);
       if (msg.render) renderFigure(b, msg.render);
       else renderBody($(".msg-body", b), msg.content);
+      if (msg.sources?.length) renderSources(b, msg.sources, msg.content);
       $(".msg-stat", b).textContent = statText(msg.stats);
       if (!msg.error) reactButton(b, msg);
     }
     showReaction(b, msg.react);
     b.dataset.i = String(i);
   });
+  renderChatFiles();
   const empty = chat.messages.length === 0;
   $("#hello").hidden = !empty;
   $("#suggests").hidden = !empty;
@@ -491,6 +500,104 @@ function reactButton(bubble: HTMLElement, msg: StoredMessage) {
   });
   const meta = $(".msg-meta", bubble);
   meta.insertBefore(b, $(".msg-speak", meta));
+}
+
+// ---------- Knowledge in chat ----------
+/** Under a reply: the passages it was given, as file · page chips (the ones it cited first), and its [file, p. N]
+ *  citations turned into buttons that open the file. */
+function renderSources(bubble: HTMLElement, sources: Source[], text: string) {
+  bubble.querySelector(".sources")?.remove();
+  const body = $(".msg-body", bubble);
+  const labels = new Map(sources.map((s) => [citeLabel(s).toLowerCase(), s]));
+  // In-text citations: text nodes only, so code blocks and links stay as they are.
+  const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode as Text);
+  for (const n of nodes) {
+    if (n.parentElement?.closest("pre, code, a, button") || !/\[[^\[\]]+\]/.test(n.data)) continue;
+    const frag = document.createDocumentFragment();
+    let last = 0;
+    for (const m of n.data.matchAll(/\[([^\[\]]{2,200})\]/g)) {
+      // A citation can name several sources: [a.pdf, p. 2; b.pdf, p. 7].
+      const parts = m[1].split(/\s*;\s*/).map((p) => labels.get(p.trim().toLowerCase()));
+      if (!parts.every(Boolean)) continue;
+      frag.append(n.data.slice(last, m.index));
+      parts.forEach((s) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "cite";
+        b.textContent = citeLabel(s!);
+        b.title = `${s!.text.slice(0, 400)}${s!.text.length > 400 ? "…" : ""}\n\nClick to open the file.`;
+        b.addEventListener("click", () => openSource(s!));
+        frag.append(b);
+      });
+      last = m.index! + m[0].length;
+    }
+    if (!last) continue;
+    frag.append(n.data.slice(last));
+    n.replaceWith(frag);
+  }
+  // The chips: one per file and page, cited ones first.
+  const seen = new Map<string, { s: Source; cited: boolean }>();
+  const said = text.toLowerCase();
+  for (const s of sources) {
+    const key = citeLabel(s).toLowerCase();
+    if (!seen.has(key)) seen.set(key, { s, cited: said.includes(key) });
+  }
+  const row = document.createElement("div");
+  row.className = "sources";
+  row.innerHTML = `<span class="eyebrow">Sources</span>`;
+  for (const { s, cited } of [...seen.values()].sort((a, b) => Number(b.cited) - Number(a.cited))) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = cited ? "cited" : "";
+    b.textContent = citeLabel(s);
+    b.title = `${cited ? "" : "Given to the model but not cited. "}${s.text.slice(0, 400)}${s.text.length > 400 ? "…" : ""}\n\nClick to open the file.`;
+    b.addEventListener("click", () => openSource(s));
+    row.appendChild(b);
+  }
+  body.after(row);
+}
+
+/** Above the message box: the files attached to this chat (their passages go with every message). */
+function renderChatFiles() {
+  const box = $("#chat-files");
+  const ids = chat.files ?? [];
+  box.hidden = !ids.length;
+  box.innerHTML = "";
+  for (const id of ids) {
+    const d = docById(id);
+    const chip = document.createElement("span");
+    chip.className = "cf";
+    chip.innerHTML = `<span></span><small></small><button type="button" aria-label="Detach from this chat" title="Stop using it in this chat (it stays in Knowledge)">✕</button>`;
+    $("span", chip).textContent = d?.name ?? "a removed file";
+    $("small", chip).textContent = !d ? "gone" : d.state === "ready" ? (d.pages ? `${d.pages} p.` : "ready") : d.state === "error" ? "error" : "reading…";
+    chip.title = d?.error ?? d?.path ?? "";
+    $("button", chip).addEventListener("click", () => {
+      chat.files = (chat.files ?? []).filter((x) => x !== id);
+      if (!chat.files.length) chat.files = undefined;
+      renderChatFiles();
+      if (chat.messages.length) persist().catch(() => {});
+    });
+    box.appendChild(chip);
+  }
+  if (ids.length) {
+    const note = document.createElement("span");
+    note.className = "cf-note";
+    note.textContent = "Ask about them: answers cite the file and page.";
+    box.appendChild(note);
+  }
+  const badge = document.getElementById("kb-count-badge");
+  if (badge) badge.textContent = readyDocs().length ? String(readyDocs().length) : "";
+}
+
+/** Adds documents to Knowledge and attaches them to this chat. */
+function attachDocs(added: KbDoc[]) {
+  if (!added.length) return;
+  chat.files = [...new Set([...(chat.files ?? []), ...added.map((d) => d.id)])];
+  renderChatFiles();
+  if (chat.messages.length) persist().catch(() => {});
+  toast(`Reading ${added.length === 1 ? added[0].name : `${added.length} files`}. Ask about ${added.length === 1 ? "it" : "them"} any time.`);
 }
 
 function scrollDown(force = false) {
@@ -1001,6 +1108,22 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
       }
     }
 
+    // Knowledge: passages from the user's files that match this question (and the one before, for follow-ups).
+    let kbText = "";
+    if (!live && (chat.files?.length || (settings.kbAll !== false && readyDocs().length))) {
+      body.innerHTML = `<span class="status-line">Searching your files…</span>`;
+      try {
+        const asked = chat.messages.filter((m) => m.role === "user").slice(-2).map((m) => m.content).join("\n");
+        const kb = await knowledgeFor(asked, chat.files ?? []);
+        if (kb) {
+          kbText = kb.text;
+          reply.sources = kb.sources;
+        }
+      } catch (e) {
+        toast(`Couldn't search your files: ${errMsg(e)}`, "warn");
+      }
+    }
+
     const history = chat.messages.filter((m) => !m.error);
     const last = history.length - 1;
     // Canvas pages are long: the model re-reads only the newest one, so a few rounds of fixes still fit its context.
@@ -1018,6 +1141,7 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
           emotes ? REACT_HINT : "",
           emotes && lastReply?.react ? reactedNote(lastReply.react) : "",
           memoryText,
+          kbText,
         ].filter(Boolean).join("\n\n"),
       },
       ...history.map((m, i) => {
@@ -1152,6 +1276,7 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     reacts?.flush();
     if (!reply.error) reply.content = stripTags(reply.content);
     const page = renderBody(body, reply.content);
+    if (reply.sources?.length && !reply.error) renderSources(bubble, reply.sources, reply.content);
     if (page?.done && !reply.error) openCanvas(page, true);
     else streamEnded();
     stat.textContent = statText(reply.stats);
@@ -1316,9 +1441,13 @@ function wire() {
   // Attach a picture: the paperclip, pasting one into the message box, or dropping one on the chat.
   const attachIn = $("#attach-file") as HTMLInputElement;
   $("#composer-attach").addEventListener("click", () => attachIn.click());
-  attachIn.addEventListener("change", () => {
-    for (const f of Array.from(attachIn.files ?? [])) attachImage(f);
+  // Pictures are attached to the next message; documents go into Knowledge and are attached to this chat.
+  attachIn.addEventListener("change", async () => {
+    const files = Array.from(attachIn.files ?? []);
     attachIn.value = "";
+    for (const f of files) if (f.type.startsWith("image/")) attachImage(f);
+    const docs = files.filter((f) => !f.type.startsWith("image/"));
+    if (docs.length) attachDocs(await addFiles(docs.map((file) => ({ file }))));
   });
   ta.addEventListener("paste", (e) => {
     const f = imageIn(e.clipboardData);
@@ -1339,12 +1468,14 @@ function wire() {
   chatScreen.addEventListener("dragleave", (e) => {
     if (!chatScreen.contains(e.relatedTarget as Node)) chatScreen.classList.remove("drop");
   });
-  chatScreen.addEventListener("drop", (e) => {
+  chatScreen.addEventListener("drop", async (e) => {
     chatScreen.classList.remove("drop");
     const f = imageIn(e.dataTransfer);
-    if (!f) return;
+    const docs = hasDocs(e.dataTransfer);
+    if (!f && !docs) return;
     e.preventDefault();
-    attachImage(f);
+    if (f) attachImage(f);
+    if (docs && e.dataTransfer) attachDocs(await addDropped(e.dataTransfer));
   });
   // Image button: starts the message with /image, so whatever is typed next becomes the picture.
   $("#composer-image").addEventListener("click", () => {
@@ -1557,6 +1688,16 @@ async function main() {
       ta.setSelectionRange(text.length, text.length);
     },
   });
+  initKnowledge({
+    toast,
+    useAll: () => settings.kbAll !== false,
+    setUseAll: (on) => {
+      settings.kbAll = on ? undefined : false;
+      saveSettings();
+    },
+    onChange: () => renderChatFiles(),
+  });
+  $("#kb-btn").addEventListener("click", () => openKnowledge());
   initCatalog({
     toast,
     root: () => settings.stackRoot ?? null,
@@ -1646,6 +1787,12 @@ async function main() {
   });
   renderChat();
   await loadSettings();
+  // Tool groups saved before Knowledge existed: switch its search on once (it can be switched off like the rest).
+  if (settings.toolGroups && !settings.kbTool) {
+    settings.toolGroups = [...new Set([...settings.toolGroups, "knowledge"])];
+    settings.kbTool = true;
+    saveSettings();
+  }
   applyLook(settings.look);
   setVoice(settings.voice ?? DEFAULT_VOICE); // the saved voice (initVoice ran before settings were loaded)
   updateToolsButton();

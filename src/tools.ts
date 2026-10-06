@@ -4,6 +4,7 @@
 // uses the camera or starts a render.
 import { invoke } from "@tauri-apps/api/core";
 import { errMsg, http } from "./backends";
+import { libraryNote, readyDocs, searchFilesTool } from "./knowledge";
 
 export const MCPO = "http://127.0.0.1:8200";
 
@@ -17,6 +18,7 @@ export interface ToolGroup {
 export const GROUPS: ToolGroup[] = [
   { id: "web", label: "Web search", hint: "search the web (DuckDuckGo) and read pages", defaultOn: true },
   { id: "history", label: "Past chats", hint: "look up what you talked about in earlier chats (stays on this PC)", defaultOn: true },
+  { id: "knowledge", label: "Your files", hint: "search the files in Knowledge and cite their pages (stays on this PC)", defaultOn: true },
   { id: "workstation", label: "Workstation", hint: "Reddit / Hugging Face / GitHub scout, webcam snapshot, video jobs", defaultOn: true },
   { id: "filesystem", label: "Files", hint: "read and write files in your folders", defaultOn: false },
   { id: "desktop", label: "PowerShell", hint: "run commands and manage processes on this PC", defaultOn: false },
@@ -99,6 +101,25 @@ export async function loadTools(force = false): Promise<{ tools: ToolDef[]; erro
       confirm: false,
     },
   ];
+  // Only offered once there are files to search.
+  if (readyDocs().length) tools.push(
+    {
+      name: "search_my_files",
+      group: "knowledge",
+      server: "",
+      op: "search_my_files",
+      description:
+        "Search the user's own documents in Knowledge (PDFs, Word files, notes, code) on this PC. Returns the best-matching " +
+        "passages labelled with file and page; cite them like [file.pdf, p. 3]. Use it for questions about their files, or to " +
+        "look further when the passages already given don't answer the question." + libraryNote(),
+      parameters: {
+        type: "object",
+        properties: { query: { type: "string", description: "What to look for, as a question or a few words" } },
+        required: ["query"],
+      },
+      confirm: false,
+    },
+  );
   const errors: string[] = [];
   const seen = new Map<string, number>();
   const servers = ["fetch", "workstation", "filesystem", "desktop", "browser"];
@@ -176,6 +197,11 @@ export async function runTool(t: ToolDef, args: any): Promise<string> {
     const q = String(args?.query ?? "").trim();
     if (!q) throw new Error("empty query");
     return searchPastChats(q);
+  }
+  if (t.op === "search_my_files") {
+    const q = String(args?.query ?? "").trim();
+    if (!q) throw new Error("empty query");
+    return searchFilesTool(q);
   }
   if (t.op === "web_search") {
     const q = String(args?.query ?? "").trim();

@@ -669,3 +669,50 @@ canvas.embers { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index:
 .emote-float { position: fixed; z-index: 120; pointer-events: none; font-size: 20px; transform: translate(-50%, -50%); animation: emote-float 1s ease-out both; }
 @keyframes emote-float { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.4); } 15% { opacity: 1; } 100% { opacity: 0; transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) rotate(var(--rot)) scale(1.15); } }
 body.no-emotes .msg-react, body.no-emotes .react-badge { display: none; }
+
+/* ---------- 0.20: Knowledge (chat with your files) ---------- */
+.kb-btn { position: relative; }
+.kb-btn .count { position: absolute; top: -2px; right: -4px; min-width: 16px; height: 16px; border-radius: 8px; background: var(--red-deep); color: var(--fg); font: 600 10px/16px var(--mono); padding: 0 4px; }
+.kb-btn .count:empty { display: none; }
+dialog.knowledge { width: min(680px, calc(100vw - 32px)); max-height: calc(100vh - 48px); display: none; }
+dialog.knowledge[open] { display: flex; flex-direction: column; gap: 10px; }
+dialog.knowledge.drop { outline: 2px dashed var(--gold); outline-offset: -8px; }
+.kb-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.kb-head p { margin: 4px 0 0; }
+.kb-model .btn { flex: none; white-space: nowrap; }
+.kb-model { display: flex; align-items: center; justify-content: space-between; gap: 12px; font: 12px var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--panel-2); }
+.kb-drop { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; border: 1px dashed var(--line); border-radius: 10px; padding: 14px; color: var(--muted); font-size: 13px; }
+.kb-drop svg { width: 22px; height: 22px; color: var(--gold); flex: none; }
+.kb-drop > span:first-of-type { flex: 1; min-width: 180px; }
+.kb-drop-acts { display: flex; gap: 8px; }
+.kb-list-head { display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px; }
+.kb-list { overflow-y: auto; min-height: 60px; max-height: 46vh; display: flex; flex-direction: column; gap: 2px; border-top: 1px solid var(--line); padding-top: 6px; }
+.kb-empty { padding: 10px 4px; margin: 0; }
+.kb-doc, .kb-folder > summary { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; position: relative; }
+.kb-doc:hover, .kb-folder > summary:hover { background: var(--panel-2); }
+.kb-doc.embedding::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: 1px; height: 2px; background: linear-gradient(90deg, var(--red), var(--gold)) no-repeat; background-size: calc(var(--v, 0) * 1%) 100%; }
+.kb-folder > summary { cursor: pointer; list-style: none; }
+.kb-folder > summary::-webkit-details-marker { display: none; }
+.kb-folder > .kb-doc { margin-left: 22px; }
+.kb-ico { font: 600 9px var(--mono); letter-spacing: .05em; color: var(--gold); border: 1px solid color-mix(in srgb, var(--gold) 40%, var(--line)); border-radius: 4px; padding: 2px 4px; min-width: 32px; text-align: center; }
+.kb-t { min-width: 0; display: flex; flex-direction: column; }
+.kb-t b { font-weight: 500; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kb-t small { font: 11px var(--mono); color: var(--muted); }
+.kb-doc.error .kb-t small { color: #ff8a8a; }
+.kb-doc.queued .kb-t small, .kb-doc.reading .kb-t small, .kb-doc.embedding .kb-t small { color: var(--gold); }
+.kb-acts { display: flex; gap: 10px; opacity: 0; }
+.kb-doc:hover .kb-acts, .kb-doc:focus-within .kb-acts { opacity: 1; }
+.chat-files { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chat-files .cf { display: inline-flex; align-items: center; gap: 6px; max-width: 260px; border: 1px solid var(--line); background: var(--panel-2); border-radius: 999px; padding: 3px 4px 3px 10px; font-size: 12px; }
+.chat-files .cf span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-files .cf small { font: 10.5px var(--mono); color: var(--gold); }
+.chat-files .cf button { border: 0; background: none; color: var(--muted); padding: 0 6px; }
+.chat-files .cf button:hover { color: var(--red); }
+.chat-files .cf-note { font-size: 11.5px; color: var(--muted); }
+.sources { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+.sources .eyebrow { margin-right: 2px; }
+.sources button { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 2px 10px; font: 11px var(--mono); color: var(--muted); max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sources button.cited { color: var(--fg); border-color: color-mix(in srgb, var(--gold) 50%, var(--line)); }
+.sources button:hover { border-color: var(--gold); color: var(--fg); }
+.msg-body .cite { border: 0; background: color-mix(in srgb, var(--gold) 14%, transparent); color: var(--gold); border-radius: 4px; padding: 0 4px; font: .85em var(--mono); }
+.msg-body .cite:hover { background: color-mix(in srgb, var(--gold) 28%, transparent); }

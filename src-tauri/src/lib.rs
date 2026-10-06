@@ -3,6 +3,7 @@
 // Ollama / llama.cpp / Open WebUI on 127.0.0.1 through the HTTP plugin.
 
 mod canvas;
+mod knowledge;
 mod models;
 mod studio;
 
@@ -419,6 +420,7 @@ pub fn run() {
         .manage(models::GgufCache::default())
         .manage(models::Downloads::default())
         .manage(studio::ComfyListener::default())
+        .manage(knowledge::Knowledge::default())
         .invoke_handler(tauri::generate_handler![
             gpu_stats,
             gpu_plan,
@@ -452,7 +454,16 @@ pub fn run() {
             models::cancel_download,
             models::add_llama_model,
             models::restart_llama,
-            canvas::canvas_put
+            canvas::canvas_put,
+            knowledge::kb_list,
+            knowledge::kb_add_paths,
+            knowledge::kb_add_bytes,
+            knowledge::kb_pick,
+            knowledge::kb_remove,
+            knowledge::kb_reindex,
+            knowledge::kb_resume,
+            knowledge::kb_search,
+            knowledge::kb_open
         ])
         .build(tauri::generate_context!())
         .expect("error while building Prestige")
