@@ -283,7 +283,7 @@ pub fn reveal(path: String) -> Result<(), String> {
 }
 
 /// A render the Studio may act on: an existing image or video inside ComfyUI's output folder.
-fn render_path(root: Option<String>, path: &str) -> Result<PathBuf, String> {
+pub(crate) fn render_path(root: Option<String>, path: &str) -> Result<PathBuf, String> {
     let dir = output_dir(root).canonicalize().map_err(|_| "ComfyUI's output folder doesn't exist".to_string())?;
     let p = PathBuf::from(path.replace('/', "\\"));
     let real = p.canonicalize().map_err(|_| "That file doesn't exist any more".to_string())?;

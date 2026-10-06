@@ -5,6 +5,7 @@
 mod canvas;
 mod knowledge;
 mod models;
+mod phone;
 mod studio;
 
 use serde::Serialize;
@@ -284,6 +285,15 @@ fn delete_chat(app: AppHandle, id: String) -> Result<(), String> {
     fs::remove_file(path).map_err(|e| e.to_string())
 }
 
+/// For the phone page (phone.rs): the same chat list and chat files the app uses.
+pub(crate) fn chat_list(app: &AppHandle) -> Result<Vec<serde_json::Value>, String> {
+    list_chats(app.clone())
+}
+
+pub(crate) fn chat_load(app: &AppHandle, id: String) -> Result<serde_json::Value, String> {
+    load_chat(app.clone(), id)
+}
+
 /// A piece of `text` around byte offset `at`, about `width` characters long, on one line.
 fn snippet(text: &str, at: usize, width: usize) -> String {
     let before = width / 3;
@@ -395,7 +405,7 @@ fn store_set(app: AppHandle, name: String, value: serde_json::Value) -> Result<(
     fs::rename(&tmp, &path).map_err(|e| e.to_string())
 }
 
-fn read_settings(app: &AppHandle) -> serde_json::Value {
+pub(crate) fn read_settings(app: &AppHandle) -> serde_json::Value {
     data_dir(app, "")
         .ok()
         .and_then(|d| fs::read_to_string(d.join("settings.json")).ok())
@@ -446,6 +456,7 @@ pub fn run() {
         .manage(models::Downloads::default())
         .manage(studio::ComfyListener::default())
         .manage(knowledge::Knowledge::default())
+        .manage(phone::Phone::default())
         .invoke_handler(tauri::generate_handler![
             gpu_stats,
             gpu_plan,
@@ -490,7 +501,14 @@ pub fn run() {
             knowledge::kb_reindex,
             knowledge::kb_resume,
             knowledge::kb_search,
-            knowledge::kb_open
+            knowledge::kb_open,
+            phone::phone_start,
+            phone::phone_stop,
+            phone::phone_status,
+            phone::phone_new_code,
+            phone::phone_forget,
+            phone::phone_push,
+            phone::phone_set_state
         ])
         .build(tauri::generate_context!())
         .expect("error while building Prestige")
