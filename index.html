@@ -30,6 +30,9 @@
           </button>
           <div class="model-menu" id="model-menu" hidden role="menu"></div>
         </div>
+        <button class="icon-btn ghost kb-btn" id="kb-btn" aria-label="Knowledge: chat with your files" title="Knowledge: chat with your files (PDFs, Word documents, notes, folders)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h13v15H6a2 2 0 0 0-2 2z" /><path d="M4 20a2 2 0 0 0 2 2h13v-4" /><path d="M9 8h6M9 11h4" /></svg><span class="count" id="kb-count-badge"></span>
+        </button>
         <span class="grow"></span>
         <!-- GPU, VRAM and temperature meters, one GPU/VRAM pair per card (main.ts) -->
         <div class="hud-gpus" id="hud-gpus">
@@ -77,10 +80,11 @@
             <button data-suggest>Remember that I like the Dragon theme</button>
           </div>
           <div class="attachments" id="attachments" hidden></div>
+          <div class="chat-files" id="chat-files" hidden></div>
           <form class="composer" id="composer">
             <button type="button" class="icon-btn" id="composer-tools" aria-label="Tools" title="Tools"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z" /></svg><span class="count" id="tools-count"></span></button>
-            <button type="button" class="icon-btn" id="composer-attach" aria-label="Attach a picture" title="Attach a picture (or paste or drop one). With /image or /video it's a reference: its character or item goes into a new scene"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.4 3.4 0 0 1 4.8 4.8l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9" /></svg></button>
-            <input type="file" id="attach-file" accept="image/*" multiple hidden />
+            <button type="button" class="icon-btn" id="composer-attach" aria-label="Attach a picture or a document" title="Attach a picture or a document (or paste or drop one, or a whole folder). Ask about a document and the answer cites its pages. With /image or /video a picture is a reference: its character or item goes into a new scene"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.4 3.4 0 0 1 4.8 4.8l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9" /></svg></button>
+            <input type="file" id="attach-file" accept="image/*,.pdf,.docx,.txt,.md,.markdown,.html,.htm,.csv,.json,.xml,.yaml,.yml,.log,.rst,.tex,.py,.js,.ts,.rs,.cs,.java,.go,.cpp,.c,.h,.ps1,.sql" multiple hidden />
             <button type="button" class="icon-btn" id="composer-cam" aria-label="Attach a webcam frame" title="Attach a webcam frame"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7h4l2-3h6l2 3h4v12H3z" /><circle cx="12" cy="13" r="4" /></svg></button>
             <button type="button" class="icon-btn" id="composer-image" aria-label="Make an image" title="Make an image. Or type /image (or /video) followed by what to make"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="M21 16l-5-5-9 9" /></svg></button>
             <button type="button" class="icon-btn" id="composer-gen" aria-label="Image and video settings" title="Image and video settings: size, quality, seed, length…"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0" /><circle cx="16" cy="6" r="2" /><circle cx="10" cy="12" r="2" /><circle cx="18" cy="18" r="2" /></svg></button>
@@ -304,6 +308,27 @@
           <button class="btn primary" id="save-settings" value="save">Save</button>
         </div>
       </form>
+    </dialog>
+
+    <!-- Knowledge: files the chat can read and cite (knowledge.ts) -->
+    <dialog class="sheet knowledge" id="knowledge">
+      <div class="kb-head">
+        <div>
+          <h2>Knowledge</h2>
+          <p class="muted">Chat with your files. Prestige reads them on this PC and answers with the file and page it found each fact on. Nothing leaves this computer.</p>
+        </div>
+        <button class="btn" id="kb-close" type="button">Close</button>
+      </div>
+      <div class="kb-model"><span id="kb-model"></span><button class="btn primary" id="kb-get" type="button" hidden>Get it</button></div>
+      <div class="kb-drop">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 15V3M7 8l5-5 5 5" /><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" /></svg>
+        <span>Drop PDFs, Word documents, notes or a whole folder here</span>
+        <span class="kb-drop-acts"><button class="btn" id="kb-add" type="button">Add files…</button><button class="btn" id="kb-add-folder" type="button">Add a folder…</button></span>
+      </div>
+      <label class="check"><input id="kb-all" type="checkbox" /> Use my files in every chat (only passages that match the question go in)</label>
+      <div class="kb-list-head"><span class="eyebrow">Your files</span><span class="credit" id="kb-count"></span></div>
+      <div class="kb-list" id="kb-list"></div>
+      <p class="credit">Reads PDF (text, not scans), Word (.docx), text, Markdown, HTML, CSV, JSON and code. Files added from a folder or the picker are read where they are; dropped files are copied into Prestige's app data folder. Removing a file here never deletes your original.</p>
     </dialog>
 
     <dialog class="sheet welcome" id="welcome">

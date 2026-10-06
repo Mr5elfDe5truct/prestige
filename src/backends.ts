@@ -126,6 +126,8 @@ const KNOWN: Known[] = [
   { match: /^qwen2\.5-coder:1\.5b/i, name: "Qwen2.5 Coder 1.5B", role: "Code · small", order: 6 },
   // UI-TARS drives the mouse and keyboard; it isn't a chat model.
   { match: /ui-tars/i, name: "UI-TARS", order: 99, hide: true },
+  // Embedding models read files for Knowledge; they can't chat.
+  { match: /embed|^bge-|minilm|^e5-|^gte-|paraphrase-multilingual/i, name: "Embedding model", order: 99, hide: true },
 ];
 
 // Display names for models that came from the catalog (filled in by catalog.ts).
