@@ -56,7 +56,16 @@ $latest = Join-Path $nsis "latest.json"
 [IO.File]::WriteAllText($latest, ($manifest | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding $false))
 Write-Host "Wrote $latest"
 
+# The Android app goes up with it (androiduild.ps1 needs a JDK and the Android SDK; without them it's skipped).
+$files = @($exe, $latest)
+try {
+    & (Join-Path $Root "androiduild.ps1")
+    $files += Join-Path $Root "androiduild\Prestige-$version.apk"
+} catch {
+    Write-Warning "No Android app in this release: $_"
+}
+
 if ($NoPublish) { return }
-gh release create "v$version" $exe $latest --repo $Repo --title $Title --notes $Notes --latest
+gh release create "v$version" @files --repo $Repo --title $Title --notes $Notes --latest
 if ($LASTEXITCODE) { throw "gh release failed" }
 Write-Host "Published https://github.com/$Repo/releases/tag/v$version"
