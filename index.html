@@ -211,6 +211,11 @@
             </div>
           </div>
           <div class="job" id="job" hidden><div class="progress"><i></i></div><span class="progress-label" id="job-label"></span></div>
+          <!-- The render queue: everything waiting, rendering and finished this session (studio.ts) -->
+          <div class="rq" id="rq" hidden>
+            <div class="rq-head"><b>Render queue</b><span class="credit" id="rq-sum"></span><span class="grow"></span><button type="button" class="linkish" id="rq-clear">clear finished</button></div>
+            <div class="rq-list" id="rq-list"></div>
+          </div>
         </div>
         <div class="gal-head">
           <h2>Renders</h2>
@@ -248,7 +253,7 @@
       <nav class="dock" aria-label="Sections">
         <button class="active" data-go="chat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z" /></svg>Chat</button>
         <button data-go="system"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></svg>System</button>
-        <button data-go="studio"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="1" /><rect x="13" y="3" width="8" height="8" rx="1" /><rect x="3" y="13" width="8" height="8" rx="1" /><path d="M15 14l5 3-5 3z" /></svg>Studio</button>
+        <button data-go="studio"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="1" /><rect x="13" y="3" width="8" height="8" rx="1" /><rect x="3" y="13" width="8" height="8" rx="1" /><path d="M15 14l5 3-5 3z" /></svg>Studio<span class="count" id="studio-count" title="Renders waiting or rendering"></span></button>
         <span class="sep"></span>
         <button class="voice" data-go="voice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 12h2M7 8v8M11 5v14M15 8v8M19 11v2" /></svg>Voice</button>
         <button class="live-btn" data-live title="Live: a hands-free voice (and webcam) call with Prestige"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="6" width="13" height="12" rx="2" /><path d="M15 10l6-3v10l-6-3z" /><circle cx="8.5" cy="12" r="2" /></svg>Live</button>

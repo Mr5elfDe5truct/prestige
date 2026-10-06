@@ -428,6 +428,8 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
+        // "Your render is done" while Prestige is in the background (the render queue).
+        .plugin(tauri_plugin_notification::init())
         // Voice and webcam: Prestige's own page may use the mic and camera without WebView2 asking every time.
         .on_permission_request(|_, kind| {
             use tauri::webview::{PermissionKind, PermissionResponse};

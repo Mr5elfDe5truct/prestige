@@ -8,6 +8,7 @@
 // and show them inline. Size, quality, seed, count, length and fps come from gensettings.ts, shared with chat.
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { errMsg, http } from "./backends";
 import { cardsText, comfyCards, shortName, vramGB } from "./gpus";
 import {
@@ -536,6 +537,10 @@ const age = (ms: number) => {
 
 export function initStudio(d: Deps) {
   initInpaint();
+  $("#rq-clear").addEventListener("click", () => {
+    for (let i = rq.length - 1; i >= 0; i--) if (!["waiting", "running"].includes(rq[i].state)) rq.splice(i, 1);
+    renderQueue();
+  });
   deps = d;
   $$(".filters [data-f]").forEach((b) =>
     b.addEventListener("click", () => {
@@ -671,8 +676,10 @@ function renderCreate() {
   const wf = workflows[gm] && !missing;
   const m = modeOf(gm);
   $("#create").classList.toggle("disabled", !wf);
-  ($("#gen-btn") as HTMLButtonElement).disabled = !wf || !!job || starting;
-  ($("#gen-btn") as HTMLButtonElement).textContent = gm === "animate" || gm === "long" ? "Animate" : gm === "edit" ? "Edit" : "Generate";
+  ($("#gen-btn") as HTMLButtonElement).disabled = !wf;
+  // While something renders, the button adds to the queue.
+  ($("#gen-btn") as HTMLButtonElement).textContent =
+    job || starting || current ? "Add to queue" : gm === "animate" || gm === "long" ? "Animate" : gm === "edit" ? "Edit" : "Generate";
   ($("#gen-prompt") as HTMLInputElement).placeholder =
     gm === "image" || gm === "fast"
       ? "Describe an image… e.g. a red and gold dragon coiled around a glowing GPU"
@@ -1119,8 +1126,8 @@ function paintToChange(a: Asset) {
         const hash = new Uint8Array(await crypto.subtle.digest("SHA-1", bytes));
         const hex = Array.from(hash.slice(0, 6), (b) => b.toString(16).padStart(2, "0")).join("");
         const name = await invoke<string>("comfy_upload_bytes", bytes, { headers: { "x-name": `prestige-mask-${hex}.png` } });
-        out = await run("inpaint", r.prompt, a, { mask: { name, w: r.width, h: r.height } });
-      } else out = await run("edit", r.prompt, a, {});
+        out = await run("inpaint", r.prompt, a, { mask: { name, w: r.width, h: r.height } }, undefined, { from: "Paint to change" });
+      } else out = await run("edit", r.prompt, a, {}, undefined, { from: "Paint to change" });
       deps.toast(r.mask ? "Changed the painted area." : "Edited the picture.");
       if (out[0]) openRender(out[0].path);
     } catch (e) {
@@ -1296,13 +1303,16 @@ async function generate() {
   const prompt = ($("#gen-prompt") as HTMLInputElement).value.trim();
   if (mode === "webcam") return;
   const gm = currentMode();
-  if (!prompt || !workflows[gm] || job || starting) return;
+  if (!prompt || !workflows[gm]) return;
+  // Something already rendering: this one waits its turn in the queue.
+  const busy = rq.some((j) => j.state === "waiting" || j.state === "running");
+  if (busy) deps.toast("Added to the render queue. It starts when the ones ahead of it finish.");
   if (chained(gm)) {
     // Two renders: the reference in a new first frame, then the video from it. Errors arrive as a rejection.
     const t0 = Date.now();
     try {
       const got = await refVideo(prompt, ref!, refPrefs().kind);
-      deps.toast(`Done in ${Math.round((Date.now() - t0) / 1000)} s: ${got[0].name}`);
+      if (studioShown()) deps.toast(`Done in ${Math.round((Date.now() - t0) / 1000)} s: ${got[0].name}`);
     } catch (e) {
       if (errMsg(e) !== "stopped") deps.toast(`The render failed: ${errMsg(e)}`, "warn");
     }
@@ -1310,35 +1320,36 @@ async function generate() {
   }
   const src = gm === "animate" || gm === "long" || gm === "edit" ? srcAsset : gm === "ref" || gm === "reffast" || gm === "refvideo" ? ref : null;
   try {
-    await queue(gm, prompt, src, { kind: refPrefs().kind });
+    enqueue(gm, prompt, src, { kind: refPrefs().kind });
   } catch (e) {
-    deps.toast(`Couldn't start the render: ${errMsg(e)}`, "warn");
+    deps.toast(`Couldn't add the render: ${errMsg(e)}`, "warn");
   }
 }
 
-/** Queues a render and resolves with its files when it's done (rejects if it fails or is stopped). */
-function run(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpts, progress?: (pct: number, label: string) => void) {
+/** Adds a render to the queue and resolves with its files when it's done (rejects if it fails or is stopped).
+ *  `front`: straight after the running one (a chain's second step); `note`: shown before its progress. */
+function run(
+  gm: GenMode,
+  prompt: string,
+  src: Source | null,
+  opts: QueueOpts,
+  progress?: (pct: number, label: string) => void,
+  how: { front?: boolean; note?: string; from?: string } = {},
+) {
   return new Promise<Asset[]>((resolve, reject) => {
-    if (job || starting) return reject(new Error("Studio is already rendering something; wait for it to finish"));
-    waiter = { progress: progress ?? (() => {}), resolve, reject };
-    queue(gm, prompt, src, opts).catch((e) => {
-      waiter = null;
+    try {
+      enqueue(gm, prompt, src, opts, { ...how, waiter: { progress: progress ?? (() => {}), resolve, reject } });
+    } catch (e) {
       reject(e);
-    });
+    }
   });
 }
 
 /** A video featuring the reference: Qwen-Image puts it in a first frame at the video's shape, then LTX animates it. */
-async function refVideo(prompt: string, r: Reference, kind: RefKind, progress?: (pct: number, label: string) => void) {
+async function refVideo(prompt: string, r: Reference, kind: RefKind, progress?: (pct: number, label: string) => void, from?: string) {
   const first = refImageMode();
-  try {
-    stepNote = "Step 1 of 2 · first frame · ";
-    const [frame] = await run(first, prompt, r, { kind, override: frameSize() }, progress);
-    stepNote = "Step 2 of 2 · video · ";
-    return await run("refvideo", prompt, frame, {}, progress);
-  } finally {
-    stepNote = "";
-  }
+  const [frame] = await run(first, prompt, r, { kind, override: frameSize() }, progress, { note: "Step 1 of 2 · first frame · ", from });
+  return run("refvideo", prompt, frame, {}, progress, { front: true, note: "Step 2 of 2 · video · ", from });
 }
 
 interface QueueOpts {
@@ -1376,11 +1387,39 @@ function inpaintGraph(g: any, mask: NonNullable<QueueOpts["mask"]>) {
   g["8"].inputs.filename_prefix = "qwen-image-inpaint";
 }
 
-/** Sends one of the workflows to ComfyUI. Throws if it couldn't be queued; progress then arrives by websocket. */
-async function queue(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpts = {}) {
+// ---------- the render queue ----------
+// Every render (Studio, chat, Paint to change) goes through here and they run one at a time. A render's settings,
+// seed and workflow are fixed when it's added, so changing the settings afterwards only affects new ones.
+interface QJob {
+  id: number;
+  gm: GenMode;
+  prompt: string;
+  label: string; // the model, e.g. "Qwen-Image-2.1"
+  from: string; // "Studio", "chat", "Paint to change"
+  src: Source | null;
+  graph: any;
+  nodes: Record<string, string>;
+  seed: number;
+  count: number;
+  note: string; // "Step 1 of 2 · first frame · "
+  state: "waiting" | "running" | "done" | "failed" | "stopped";
+  pct: number;
+  status: string;
+  added: number;
+  took?: number;
+  result?: Asset[];
+  error?: string;
+  waiter?: { progress: (pct: number, label: string) => void; resolve: (a: Asset[]) => void; reject: (e: Error) => void };
+  cancelled?: boolean; // stopped while it was getting ready
+}
+const rq: QJob[] = [];
+let current: QJob | null = null;
+let jobIds = 1;
+
+/** Builds a render's workflow now, with the current settings and a fresh seed (it may run much later). */
+function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpts) {
   const wf = workflows[gm];
   if (!wf) throw new Error(`workflows\\${MODES[gm].file} wasn't found`);
-  if (job || starting) throw new Error("Studio is already rendering something; wait for it to finish");
   const m = modeOf(gm);
   const graph = structuredClone(wf);
   graph[m.promptNode].inputs[m.promptKey ?? "text"] = gm === "ref" || gm === "reffast" ? refPrompt(opts.kind ?? "auto", prompt) : prompt;
@@ -1394,7 +1433,163 @@ async function queue(gm: GenMode, prompt: string, src: Source | null, opts: Queu
   }
   const nodes: Record<string, string> = {};
   for (const [id, n] of Object.entries<any>(graph)) nodes[id] = n.class_type;
+  return { graph, nodes, seed, count: p.count, label: modeOf(gm).label };
+}
 
+/** Adds a render to the queue (throws when its workflow is missing). */
+function enqueue(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpts, how: { front?: boolean; note?: string; from?: string; waiter?: QJob["waiter"] } = {}) {
+  const j: QJob = {
+    id: jobIds++,
+    gm,
+    prompt,
+    src,
+    ...prepare(gm, prompt, src, opts),
+    from: how.from ?? "Studio",
+    note: how.note ?? "",
+    state: "waiting",
+    pct: 0,
+    status: "Waiting",
+    added: Date.now(),
+    waiter: how.waiter,
+  };
+  if (how.front) {
+    const at = rq.findIndex((x) => x.state === "waiting");
+    rq.splice(at < 0 ? rq.length : at, 0, j);
+  } else rq.push(j);
+  renderQueue();
+  pump();
+  return j;
+}
+
+/** Starts the next waiting render when nothing is running. */
+async function pump() {
+  if (current || job || starting) return;
+  const next = rq.find((x) => x.state === "waiting");
+  if (!next) return;
+  current = next;
+  next.state = "running";
+  stepNote = next.note;
+  waiter = next.waiter ?? null;
+  renderQueue();
+  try {
+    await submit(next);
+  } catch (e) {
+    const msg = errMsg(e);
+    next.state = msg === "stopped" ? "stopped" : "failed";
+    next.error = msg;
+    current = null;
+    stepNote = "";
+    const w = waiter;
+    waiter = null;
+    if (w) w.reject(new Error(msg));
+    else if (msg !== "stopped") deps.toast(`Couldn't start the render: ${msg}`, "warn");
+    notify(next);
+    renderQueue();
+    pump();
+  }
+}
+
+/** Stops a render: takes a waiting one out of the queue, or interrupts the running one. */
+function cancelJob(j: QJob) {
+  if (j.state === "waiting") {
+    j.state = "stopped";
+    j.waiter?.reject(new Error("stopped"));
+    renderQueue();
+  } else if (j.state === "running") {
+    // Still getting ready (freeing the GPU, uploading): it's dropped before it reaches ComfyUI.
+    j.cancelled = true;
+    if (job) http(`${COMFY}/interrupt`, { method: "POST" }).catch(() => {});
+  }
+}
+
+/** Puts a failed or stopped render back in the queue, as it was (same settings and seed). */
+function retryJob(j: QJob) {
+  rq.push({ ...j, id: jobIds++, state: "waiting", pct: 0, status: "Waiting", error: undefined, result: undefined, took: undefined, added: Date.now(), waiter: undefined, note: "", cancelled: undefined });
+  renderQueue();
+  pump();
+}
+
+/** A finished render while Prestige is in the background (or on another screen) says so. */
+async function notify(j: QJob) {
+  if (j.state !== "done" && j.state !== "failed") return;
+  const away = !document.hasFocus() || document.hidden;
+  const title = j.state === "done" ? `${j.result && j.result.length > 1 ? `${j.result.length} renders` : "Your render"} is ready` : "A render failed";
+  const body = `${j.label}: ${j.prompt.slice(0, 120)}${j.state === "failed" && j.error ? ` (${j.error.slice(0, 100)})` : ""}`;
+  if (away) {
+    try {
+      let ok = await isPermissionGranted();
+      if (!ok) ok = (await requestPermission()) === "granted";
+      if (ok) sendNotification({ title, body });
+    } catch {
+      /* not in the app */
+    }
+  } else if (!j.waiter && !studioShown()) deps.toast(`${title}: ${j.prompt.slice(0, 60)}`);
+}
+
+const ago = (ms: number) => {
+  const s = Math.round(ms / 1000);
+  return s >= 60 ? `${Math.floor(s / 60)} min ${s % 60} s` : `${s} s`;
+};
+
+/** The queue under the create bar, and the count on the Studio button. */
+function renderQueue() {
+  const live = rq.filter((j) => j.state === "waiting" || j.state === "running");
+  const badge = document.getElementById("studio-count");
+  if (badge) badge.textContent = live.length ? String(live.length) : "";
+  // Chat renders that are waiting hear how many are ahead.
+  rq.filter((j) => j.state === "waiting" && j.waiter).forEach((j) => {
+    const ahead = rq.filter((x) => (x.state === "waiting" || x.state === "running") && rq.indexOf(x) < rq.indexOf(j)).length;
+    j.waiter!.progress(0, `Waiting in the render queue (${ahead} ahead)…`);
+  });
+  const box = document.getElementById("rq");
+  if (!box) return;
+  box.hidden = rq.length < 2 && !rq.some((j) => j.state === "waiting");
+  const waiting = rq.filter((j) => j.state === "waiting").length;
+  $("#rq-sum").textContent = [current ? "1 rendering" : "", waiting ? `${waiting} waiting` : "", rq.length - live.length ? `${rq.length - live.length} finished` : ""]
+    .filter(Boolean)
+    .join(" · ");
+  const list = $("#rq-list");
+  list.innerHTML = "";
+  for (const j of rq) {
+    const row = document.createElement("div");
+    row.className = `rq-row ${j.state}`;
+    const icon = { waiting: "⏳", running: "●", done: "✓", failed: "✗", stopped: "■" }[j.state];
+    const status =
+      j.state === "running"
+        ? j.status
+        : j.state === "waiting"
+          ? `Waiting · ${rq.filter((x) => (x.state === "waiting" || x.state === "running") && rq.indexOf(x) < rq.indexOf(j)).length} ahead`
+          : j.state === "done"
+            ? `Done in ${ago((j.took ?? 0) * 1000)}${j.result && j.result.length > 1 ? ` · ${j.result.length} files` : ""}`
+            : j.state === "failed"
+              ? `Failed: ${j.error ?? ""}`
+              : "Stopped";
+    row.innerHTML = `<span class="rq-ico"></span><span class="rq-t"><b></b><small></small></span><span class="rq-acts"></span>`;
+    $(".rq-ico", row).textContent = icon;
+    $("b", row).textContent = j.prompt;
+    $("b", row).title = j.prompt;
+    $("small", row).textContent = `${j.label} · ${j.from} · ${status}`;
+    if (j.state === "running") row.style.setProperty("--v", String(j.pct));
+    const act = (label: string, fn: () => void) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "linkish";
+      b.textContent = label;
+      b.addEventListener("click", fn);
+      $(".rq-acts", row).appendChild(b);
+    };
+    if (j.state === "waiting") act("remove", () => cancelJob(j));
+    if (j.state === "running") act("stop", () => cancelJob(j));
+    if (j.state === "done" && j.result?.[0]) act("open", () => openRender(j.result![0].path));
+    if (j.state === "failed" || j.state === "stopped") act("try again", () => retryJob(j));
+    list.appendChild(row);
+  }
+}
+
+/** Sends a prepared render to ComfyUI. Throws if it couldn't be queued; progress then arrives by websocket. */
+async function submit(j: QJob) {
+  const { gm, graph, nodes, seed, count, prompt, src } = j;
+  const m = modeOf(gm);
   starting = true;
   renderCreate();
   setJob(0, "Freeing the GPU (unloading chat models)…");
@@ -1407,6 +1602,7 @@ async function queue(gm: GenMode, prompt: string, src: Source | null, opts: Queu
       setJob(1, "Uploading the image to ComfyUI…");
       graph[m.imageNode].inputs.image = "path" in src ? await invoke<string>("comfy_upload", { path: src.path }) : await uploadReference(src);
     }
+    if (j.cancelled) throw new Error("stopped");
     const r = await http(`${COMFY}/prompt`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1417,7 +1613,7 @@ async function queue(gm: GenMode, prompt: string, src: Source | null, opts: Queu
       const why = body.error?.message || body.node_errors ? JSON.stringify(body.node_errors ?? body.error).slice(0, 200) : `HTTP ${r.status}`;
       throw new Error(why);
     }
-    job = { id: body.prompt_id, mode: gm, started: Date.now(), prompt, nodes, outputs: [], seed, count: p.count };
+    job = { id: body.prompt_id, mode: gm, started: Date.now(), prompt, nodes, outputs: [], seed, count };
     setJob(2, "Queued. Loading models…");
     render();
   } catch (e) {
@@ -1438,6 +1634,11 @@ function setJob(pct: number, label: string) {
   ($("#job .progress") as HTMLElement).style.setProperty("--v", String(pct));
   $("#job-label").textContent = label;
   waiter?.progress(pct, label);
+  if (current) {
+    current.pct = pct;
+    current.status = label;
+    renderQueue();
+  }
 }
 
 function onComfy(msg: any) {
@@ -1485,12 +1686,23 @@ async function finish(ok: boolean, why = "") {
   await refresh();
   const named = items.filter((a) => done.outputs.includes(a.name));
   const added = named.length ? named : items.filter((a) => !before.has(a.path));
+  const q = current;
+  current = null;
+  stepNote = "";
   if (ok && added.length) {
     fresh = new Set(added.map((a) => a.name));
     render();
+    if (q) Object.assign(q, { state: "done", result: added, took });
     if (w) w.resolve(added);
-    else deps.toast(`Done in ${took} s (seed ${done.seed}): ${added[0].name}${added.length > 1 ? ` and ${added.length - 1} more` : ""}`);
-  } else w?.reject(new Error(why || "ComfyUI finished, but no new file appeared in its output folder"));
+    else if (studioShown()) deps.toast(`Done in ${took} s (seed ${done.seed}): ${added[0].name}${added.length > 1 ? ` and ${added.length - 1} more` : ""}`);
+  } else {
+    const msg = why || "ComfyUI finished, but no new file appeared in its output folder";
+    if (q) Object.assign(q, { state: why === "stopped" ? "stopped" : "failed", error: msg, took });
+    w?.reject(new Error(msg));
+  }
+  if (q) notify(q);
+  renderQueue();
+  pump();
 }
 
 // ---------- used from chat ----------
@@ -1517,22 +1729,22 @@ export async function renderMedia(
   kindOverride?: RefKind,
 ): Promise<Asset[]> {
   await ensureWorkflows();
-  if (!r) return run(chatMode(kind), prompt, null, {}, progress);
+  if (!r) return run(chatMode(kind), prompt, null, {}, progress, { from: "chat" });
   // The same choices as Studio's reference slot: Auto / Character / Item, and for a video its first frame
   // (a character's face is always a Character).
   const refKind = kindOverride ?? refPrefs().kind;
   const gm = kind === "video" ? "refvideo" : refImageMode();
   for (const need of chained(gm) ? (["refvideo", refImageMode()] as GenMode[]) : [gm])
     if (!workflows[need]) throw new Error(`workflows\\${modeOf(need).file} wasn't found`);
-  if (chained(gm)) return refVideo(prompt, r, refKind, progress);
-  return run(gm, prompt, r, gm === "refvideo" ? {} : { kind: refKind }, progress);
+  if (chained(gm)) return refVideo(prompt, r, refKind, progress, "chat");
+  return run(gm, prompt, r, gm === "refvideo" ? {} : { kind: refKind }, progress, { from: "chat" });
 }
 
 /** Chat's /edit: changes a picture by instruction with Qwen-Image-2.1 Edit (the whole picture, keeping its size). */
 export async function editMedia(prompt: string, r: Reference, progress: (pct: number, label: string) => void): Promise<Asset[]> {
   await ensureWorkflows();
   if (!workflows.edit) throw new Error(`workflows\\${MODES.edit.file} wasn't found`);
-  return run("edit", prompt, r, {}, progress);
+  return run("edit", prompt, r, {}, progress, { from: "chat" });
 }
 
 /** The label for chat's edits. */
@@ -1549,9 +1761,10 @@ export async function chatSettings(el: HTMLElement, kind: MediaKind) {
   settingsForm(el, gm, true);
 }
 
-/** Stops the current render (ComfyUI's Cancel). */
+/** Stops chat's render: takes it out of the queue if it's still waiting, or stops it if it's running. */
 export async function cancelRender() {
-  await http(`${COMFY}/interrupt`, { method: "POST" }).catch(() => {});
+  const mine = [...rq].reverse().find((j) => j.from === "chat" && (j.state === "waiting" || j.state === "running"));
+  if (mine) cancelJob(mine);
 }
 
 let allowed: Promise<void> | null = null;
