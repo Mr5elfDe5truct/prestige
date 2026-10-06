@@ -444,9 +444,10 @@ export async function doItForMe(task: string, model: ModelInfo): Promise<CuResul
   }
 }
 
-/** The models that can drive the PC: ones that see pictures, the best computer-use picks first (Qwen3.8 27B, then
- *  Nex-N2.5-mini, which was trained for it). `pick` is the one chosen in Settings, if it's still there. */
+/** The models that can drive the PC: ones that see pictures, the best computer-use picks first. Nex-N2.5-mini was
+ *  trained for it and took ~10 s a step on an RTX 3060 + 2060 against ~33 s for Qwen3.8 27B (whose 2-card preset runs
+ *  its vision projector on the CPU), and finished tasks Qwen3.8 got stuck on, so it leads when it's installed. */
 export function brains(models: ModelInfo[], canSee: (m: ModelInfo) => boolean): ModelInfo[] {
-  const rank = (m: ModelInfo) => (/qwen3\.8.*27b/i.test(m.id) ? 0 : /nex.?n2\.5/i.test(m.id) ? 1 : /qwen3(\.\d)?-?vl|qwen3\.6/i.test(m.id) ? 2 : 3);
+  const rank = (m: ModelInfo) => (/nex.?n2\.5/i.test(m.id) ? 0 : /qwen3\.8.*27b/i.test(m.id) ? 1 : /qwen3(\.\d)?-?vl|qwen3\.6/i.test(m.id) ? 2 : 3);
   return models.filter((m) => canSee(m) && !/ui-tars/i.test(m.id)).sort((a, b) => rank(a) - rank(b) || a.order - b.order);
 }
