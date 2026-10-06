@@ -56,11 +56,11 @@ $latest = Join-Path $nsis "latest.json"
 [IO.File]::WriteAllText($latest, ($manifest | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding $false))
 Write-Host "Wrote $latest"
 
-# The Android app goes up with it (androidbuild.ps1 needs a JDK and the Android SDK; without them it's skipped).
+# The Android app goes up with it (android\build.ps1 needs a JDK and the Android SDK; without them it's skipped).
 $files = @($exe, $latest)
 try {
-    & (Join-Path $Root "androidbuild.ps1")
-    $files += Join-Path $Root "androidbuild\Prestige-$version.apk"
+    & (Join-Path $Root "android\build.ps1")
+    $files += Join-Path $Root "android\build\Prestige-$version.apk"
 } catch {
     Write-Warning "No Android app in this release: $_"
 }
