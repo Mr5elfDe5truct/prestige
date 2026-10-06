@@ -36,6 +36,7 @@ import { CANVAS_CMD, CANVAS_HINT, canvasOnChat, canvasReplyStart, findCanvas, in
 import {
   addDropped, addFiles, citeLabel, docById, hasDocs, initKnowledge, knowledgeFor, openKnowledge, openSource, readyDocs, type KbDoc, type Source,
 } from "./knowledge";
+import { RESEARCH_CMD, deepResearch } from "./research";
 
 const inTauri = "__TAURI_INTERNALS__" in window;
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
@@ -469,6 +470,7 @@ function renderChat() {
       if (msg.render) renderFigure(b, msg.render);
       else renderBody($(".msg-body", b), msg.content);
       if (msg.sources?.length) renderSources(b, msg.sources, msg.content);
+      if (msg.note?.startsWith("deep research")) foldSteps(b);
       $(".msg-stat", b).textContent = statText(msg.stats);
       if (!msg.error) reactButton(b, msg);
     }
@@ -1004,6 +1006,125 @@ async function makeMedia(text: string, kind: MediaKind, prompt: string, hooks?: 
   }
 }
 
+/** Deep Research: searches, reads pages and writes a cited report with the current model (research.ts). Each search and
+ *  page read shows as a step in the reply, with its notes inside. */
+async function runResearch(text: string, question: string, hooks?: ReplyHooks) {
+  const model = current;
+  if (!model) {
+    toast("No model is available. Start the services first.", "warn");
+    return hooks?.onDone?.(false);
+  }
+  if (chat.messages.length === 0) chat.title = `Research: ${question.replace(/\s+/g, " ").slice(0, 50)}`;
+  chat.model = model.name;
+  chat.messages.push({ role: "user", content: text });
+  renderChat();
+  const reply: StoredMessage = { role: "assistant", content: "", model: model.name, tools: [] };
+  const bubble = addAiBubble(model.name, () => reply.content);
+  const body = $(".msg-body", bubble);
+  body.innerHTML = `<span class="status-line">Starting deep research…</span>`;
+  scrollDown(true);
+  busy = new AbortController();
+  setBusyUi(true);
+  const t0 = Date.now();
+  let thinking = "";
+  let pending = false;
+  try {
+    // The conversation so far, so "research that" or a follow-up knows what "that" is.
+    const before = chat.messages.slice(0, -1).filter((m) => !m.error && !m.render).slice(-6);
+    const context = before.length ? `Conversation so far:\n${before.map((m) => `${m.role}: ${m.content.slice(0, 1500)}`).join("\n")}` : "";
+    const res = await deepResearch(
+      question,
+      model,
+      {
+        step: (name, arg) => {
+          const step: ToolStep = { name, args: name === "read" ? { url: arg } : name === "plan" ? { goal: arg } : { query: arg } };
+          reply.tools!.push(step);
+          renderToolStep(bubble, step);
+          const t = performance.now();
+          return {
+            done: (ok, result) => {
+              step.ok = ok;
+              step.ms = Math.round(performance.now() - t);
+              step.result = result && result.length > 2000 ? result.slice(0, 2000) + "…" : result;
+              renderToolStep(bubble, step);
+            },
+          };
+        },
+        status: (s) => {
+          if (!reply.content) body.innerHTML = `<span class="status-line">${escapeHtml(s)}</span>`;
+        },
+        thinking: (t) => {
+          thinking += t;
+          setThinking(bubble, thinking, !reply.content);
+        },
+        token: (t) => {
+          reply.content += t;
+          hooks?.onDelta?.(t);
+          if (!pending) {
+            pending = true;
+            requestAnimationFrame(() => {
+              pending = false;
+              if (busy) {
+                renderBody(body, reply.content, true);
+                scrollDown();
+              }
+            });
+          }
+        },
+      },
+      busy.signal,
+      context,
+    );
+    reply.content = res.report;
+    const mins = Math.max(1, Math.round((Date.now() - t0) / 60000));
+    reply.note = `deep research · ${res.sources.length} sources used of ${res.pages} pages read · ${mins} min`;
+  } catch (e) {
+    if (busy?.signal.aborted) reply.content += reply.content ? "\n\n*(stopped)*" : "*(stopped)*";
+    else {
+      reply.error = true;
+      reply.content = `Deep research didn't finish: ${errMsg(e)}`;
+      bubble.classList.add("error");
+    }
+  } finally {
+    busy = null;
+    setBusyUi(false);
+    if (thinking) setThinking(bubble, thinking, false);
+    reply.thinking = thinking || undefined;
+    renderBody(body, reply.content);
+    if (reply.note) {
+      const chip = document.createElement("div");
+      chip.className = "chip";
+      chip.textContent = reply.note;
+      bubble.insertBefore(chip, $(".tool-steps", bubble) ?? body);
+    }
+    if (!reply.error) foldSteps(bubble);
+    chat.messages.push(reply);
+    bubble.dataset.i = String(chat.messages.length - 1);
+    if (!reply.error) reactButton(bubble, reply);
+    scrollDown();
+    persist().catch((e) => toast(`Couldn't save this chat: ${e}`, "warn"));
+    hooks?.onDone?.(!reply.error);
+  }
+}
+
+/** A finished research report's steps (often 15 or more) fold into one line, a click away. */
+function foldSteps(bubble: HTMLElement) {
+  const box = bubble.querySelector<HTMLElement>(".tool-steps");
+  if (!box || box.children.length < 3 || box.querySelector(".steps-toggle")) return;
+  box.classList.add("folded");
+  const n = box.querySelectorAll(".tool-step").length;
+  const read = box.querySelectorAll('.tool-step[data-state="ok"]').length;
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "steps-toggle linkish";
+  b.textContent = `Show the ${n} research steps (${read} useful)`;
+  b.addEventListener("click", () => {
+    const folded = box.classList.toggle("folded");
+    b.textContent = folded ? `Show the ${n} research steps (${read} useful)` : "Hide the research steps";
+  });
+  box.prepend(b);
+}
+
 async function send(text: string, opts: { images?: string[]; vision?: string; hooks?: ReplyHooks; live?: ModelInfo } = {}) {
   text = text.trim();
   if (!text && (opts.images?.length || attachments.length)) text = "What do you see in this picture?";
@@ -1012,6 +1133,15 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     return;
   }
   const live = !!opts.live;
+  if (!live && RESEARCH_CMD.test(text)) {
+    const question = text.replace(RESEARCH_CMD, "").trim();
+    if (!question) {
+      toast("Ask a question after /research, e.g. /research which heat pumps work best below -20 °C");
+      opts.hooks?.onDone?.(false);
+      return;
+    }
+    return runResearch(text, question, opts.hooks);
+  }
   // With pictures attached, /image or /video uses the first as a reference image (Live and the camera ask don't make media).
   // "Draw me a chart of…" or "make a snake game" is for the Canvas, unless it asks for a picture or a clip.
   const forCanvas = CANVAS_CMD.test(text) || (wantsCanvas(text) && !/\b(image|picture|photo|illustration|painting|wallpaper|video|clip)s?\b/i.test(text));
@@ -1483,6 +1613,14 @@ function wire() {
     ta.value = `/image ${v}`;
     autosize();
     updateRefNote();
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+  });
+  // Research button: starts the message with /research, so what's typed becomes the question.
+  $("#composer-research").addEventListener("click", () => {
+    const v = ta.value.replace(RESEARCH_CMD, "");
+    ta.value = `/research ${v}`;
+    autosize();
     ta.focus();
     ta.setSelectionRange(ta.value.length, ta.value.length);
   });

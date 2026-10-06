@@ -191,8 +191,8 @@ async function searchPastChats(query: string): Promise<string> {
     .join("\n");
 }
 
-/** Runs one tool call and returns its result as text for the model. */
-export async function runTool(t: ToolDef, args: any): Promise<string> {
+/** Runs one tool call and returns its result as text for the model (cut to `max` characters). */
+export async function runTool(t: ToolDef, args: any, max = MAX_RESULT): Promise<string> {
   if (t.op === "search_past_chats") {
     const q = String(args?.query ?? "").trim();
     if (!q) throw new Error("empty query");
@@ -225,7 +225,7 @@ export async function runTool(t: ToolDef, args: any): Promise<string> {
   } catch {
     /* plain text */
   }
-  return out.length > MAX_RESULT ? `${out.slice(0, MAX_RESULT)}\n…(truncated, ${out.length} characters in total)` : out;
+  return out.length > max ? `${out.slice(0, max)}\n…(truncated, ${out.length} characters in total)` : out;
 }
 
 /** A one-line description of a call, e.g. `web_search · "llama.cpp release"`. */

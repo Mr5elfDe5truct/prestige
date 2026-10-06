@@ -716,3 +716,8 @@ dialog.knowledge.drop { outline: 2px dashed var(--gold); outline-offset: -8px; }
 .sources button:hover { border-color: var(--gold); color: var(--fg); }
 .msg-body .cite { border: 0; background: color-mix(in srgb, var(--gold) 14%, transparent); color: var(--gold); border-radius: 4px; padding: 0 4px; font: .85em var(--mono); }
 .msg-body .cite:hover { background: color-mix(in srgb, var(--gold) 28%, transparent); }
+
+/* ---------- 0.21: Deep Research ---------- */
+.tool-steps.folded .tool-step { display: none; }
+.steps-toggle { font-family: var(--mono); font-size: 11.5px; padding: 2px 0; }
+.msg.ai .chip + .tool-steps { margin-top: 0; }
