@@ -1,7 +1,7 @@
 {
   "name": "prestige",
   "private": true,
-  "version": "0.21.0",
+  "version": "0.22.0",
   "description": "Prestige by R.G. Studios: a local AI desktop app.",
   "author": "Ryan B. Gyles",
   "license": "MIT",

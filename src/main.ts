@@ -37,6 +37,10 @@ import {
   addDropped, addFiles, citeLabel, docById, hasDocs, initKnowledge, knowledgeFor, openKnowledge, openSource, readyDocs, type KbDoc, type Source,
 } from "./knowledge";
 import { RESEARCH_CMD, deepResearch } from "./research";
+import {
+  activeCharacter, characterById, characterMemory, characterPrompt, faceScene, initCharacters, remember, renderPicker, setCharacterVoice, voiceOf, wantsFace,
+} from "./characters";
+import type { RefKind } from "./reference";
 
 const inTauri = "__TAURI_INTERNALS__" in window;
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
@@ -90,6 +94,7 @@ interface Chat {
   model?: string;
   messages: StoredMessage[];
   files?: string[]; // Knowledge files attached to this chat (dropped or attached here)
+  character?: string; // the character it was with (picked again when the chat is opened)
 }
 interface Settings {
   model?: string;
@@ -108,6 +113,7 @@ interface Settings {
   look?: Look; // Appearance: theme colours, glow, ember drift, emote reactions (theme.ts)
   kbAll?: boolean; // Knowledge: search every file for every chat (undefined = on)
   kbTool?: boolean; // the "Your files" tool group was added to saved tool groups
+  character?: string; // the character being talked to (characters.ts); undefined = Prestige itself
 }
 
 let settings: Settings = {};
@@ -667,6 +673,8 @@ async function renderHistory() {
     $(".open", row).addEventListener("click", async () => {
       if (busy) return toast("Wait for the reply to finish first.");
       chat = await invoke<Chat>("load_chat", { id: it.id });
+      // Carry on with whoever the chat was with.
+      if ((chat.character ?? undefined) !== settings.character && (!chat.character || characterById(chat.character))) choosePersona(chat.character, true);
       renderChat();
       renderHistory();
       $("#history").hidden = true;
@@ -699,6 +707,8 @@ const pcInfo: { gpu?: string; ramGB?: number } = {};
 /** `live`: for a call, where the Live hint says how to talk instead. */
 function systemBase(live = false): string {
   const name = settings.userName?.trim();
+  const char = activeCharacter();
+  if (char) return characterPrompt(char, name, settings.aboutUser, live);
   const hw = [pcInfo.gpu, pcInfo.ramGB ? `${pcInfo.ramGB} GB RAM` : ""].filter(Boolean).join(", ");
   const owner = name ? `${name}'s own PC` : "the user's own PC";
   const lines = [
@@ -902,7 +912,8 @@ let liveMemory: Promise<string> = Promise.resolve("");
 function beginLiveChat() {
   if (chat.messages.length) chat = newChat();
   const when = new Date().toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  chat.title = `Live call · ${when}`;
+  const c = activeCharacter();
+  chat.title = `Live call${c ? ` with ${c.name}` : ""} · ${when}`;
   renderChat();
   renderHistory();
   const cfg = memCfg();
@@ -945,7 +956,7 @@ function setBusyUi(on: boolean) {
 }
 
 /** Makes images with the Studio's image model (Qwen-Image-2.1 or its turbo), or a video with LTX, and shows them in the chat. */
-async function makeMedia(text: string, kind: MediaKind, prompt: string, hooks?: ReplyHooks, refB64?: string) {
+async function makeMedia(text: string, kind: MediaKind, prompt: string, hooks?: ReplyHooks, refB64?: string, refKind?: RefKind) {
   const what = kind === "video" ? "video" : "image";
   if (!inTauri) {
     toast(`${kind === "video" ? "Videos" : "Images"} are made in the desktop app.`);
@@ -975,6 +986,7 @@ async function makeMedia(text: string, kind: MediaKind, prompt: string, hooks?: 
         if (l) l.textContent = label;
       },
       ref,
+      refKind,
     );
     if (ref) URL.revokeObjectURL(ref.url);
     const [a, ...more] = got;
@@ -1160,6 +1172,11 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     if (attachments.length > 1) toast("Using the first picture as the reference.");
     attachments = [];
     renderAttachments();
+    // Without a picture attached, a prompt about the character ("Vex on a beach", "you as a knight") uses its face.
+    const char = activeCharacter();
+    if (!ref && char && wantsFace(char, media.prompt)) {
+      return makeMedia(text, media.kind, faceScene(char, media.prompt), opts.hooks, char.face, "character");
+    }
     return makeMedia(text, media.kind, media.prompt, opts.hooks, ref);
   }
   const images = live ? opts.images : opts.images ?? (attachments.length ? attachments : undefined);
@@ -1190,8 +1207,12 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
   chat.messages.push(youMsg);
   renderChat();
 
-  const reply: StoredMessage = { role: "assistant", content: "", model: model.name };
-  const bubble = addAiBubble(model.name, () => reply.content);
+  // A character answers as itself (named on the reply, with the model underneath).
+  const char = activeCharacter();
+  chat.character = char?.id;
+  const who = char ? `${char.name} · ${model.name}` : model.name;
+  const reply: StoredMessage = { role: "assistant", content: "", model: who };
+  const bubble = addAiBubble(who, () => reply.content);
   const body = $(".msg-body", bubble);
   // "Speak replies" reads typed chats aloud too (voice chats already speak through their own hooks).
   const speakIt = !!settings.speakReplies && !opts.hooks;
@@ -1209,19 +1230,27 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
   ($("#send") as HTMLButtonElement).disabled = true;
 
   try {
-    // Shared memory: "remember that …" saves a fact; every reply gets the relevant facts.
-    const cfg = memCfg();
+    // Shared memory: "remember that …" saves a fact; every reply gets the relevant facts. Talking to a character, the
+    // fact goes into its own memory, and it gets the shared memory only when that's switched on for it.
+    const cfg = char?.sharedMemory === false ? null : memCfg();
     let memoryText = "";
+    const fact = rememberRequest(text);
+    const savedNote = (note: string) => {
+      reply.note = note;
+      const chip = document.createElement("div");
+      chip.className = "chip";
+      chip.textContent = note;
+      bubble.insertBefore(chip, body);
+    };
+    if (char && fact) {
+      await remember(char, fact);
+      savedNote(`saved to ${char.name}'s memory: ${fact}`);
+    }
     if (cfg) {
-      const fact = rememberRequest(text);
-      if (fact) {
+      if (fact && !char) {
         try {
           await addMemory(cfg, fact);
-          reply.note = `saved to shared memory: ${fact}`;
-          const chip = document.createElement("div");
-          chip.className = "chip";
-          chip.textContent = reply.note;
-          bubble.insertBefore(chip, body);
+          savedNote(`saved to shared memory: ${fact}`);
         } catch (e) {
           toast(`Couldn't save that memory: ${errMsg(e)}`, "warn");
         }
@@ -1271,6 +1300,7 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
           emotes ? REACT_HINT : "",
           emotes && lastReply?.react ? reactedNote(lastReply.react) : "",
           memoryText,
+          char ? characterMemory(char) : "",
           kbText,
         ].filter(Boolean).join("\n\n"),
       },
@@ -1423,6 +1453,37 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     persist().catch((e) => toast(`Couldn't save this chat: ${e}`, "warn"));
     opts.hooks?.onDone?.(!reply.error && !reply.content.endsWith("*(stopped)*"));
   }
+}
+
+// ---------- characters ----------
+/** Talk to a character (or, with undefined, Prestige itself): its prompt, voice and memory from the next reply on. */
+function choosePersona(id: string | undefined, quiet = false) {
+  const c = characterById(id);
+  settings.character = c?.id;
+  saveSettings();
+  stopSpeaking();
+  setVoice(voiceOf(c));
+  renderPicker();
+  if (!quiet) toast(c ? `Now talking to ${c.name}.` : "Back to Prestige.");
+}
+
+/** A voice picked on the Voice screen or in a call: the character's new voice while talking to one, else Prestige's. */
+function setVoicePref(v: string) {
+  const c = activeCharacter();
+  if (c) setCharacterVoice(c, v);
+  else {
+    settings.voice = v;
+    saveSettings();
+  }
+}
+
+/** Live calls show the character's face in place of the top hat. */
+function livePersona() {
+  const c = activeCharacter();
+  const img = $("#live-face") as HTMLImageElement;
+  img.hidden = !c?.face;
+  if (c?.face) img.src = `data:image/jpeg;base64,${c.face}`;
+  $("#live").classList.toggle("has-face", !!c?.face);
 }
 
 // ---------- launch screen ----------
@@ -1863,11 +1924,8 @@ async function main() {
     },
     stopReply: () => busy?.abort(),
     isReplying: () => !!busy,
-    getVoice: () => settings.voice,
-    setVoiceSetting: (v) => {
-      settings.voice = v;
-      saveSettings();
-    },
+    getVoice: () => activeCharacter()?.voice || settings.voice,
+    setVoiceSetting: (v) => setVoicePref(v),
   });
   initLive({
     toast,
@@ -1880,11 +1938,10 @@ async function main() {
     stopReply: () => busy?.abort(),
     isReplying: () => !!busy,
     retractTurn: retractLiveTurn,
-    getVoice: () => settings.voice,
+    getVoice: () => activeCharacter()?.voice || settings.voice,
     setVoiceSetting: (v) => {
-      settings.voice = v;
+      setVoicePref(v);
       setVoice(v);
-      saveSettings();
     },
     getCamera: () => settings.camera,
     getLiveCamera: () => !!settings.liveCamera,
@@ -1903,6 +1960,7 @@ async function main() {
       if (busy) return toast("Wait for the reply to finish first.");
       stopSpeaking();
       go("chat"); // leaving the Voice screen also ends its hands-free listening
+      livePersona();
       startLive();
     }),
   );
@@ -1932,7 +1990,15 @@ async function main() {
     saveSettings();
   }
   applyLook(settings.look);
-  setVoice(settings.voice ?? DEFAULT_VOICE); // the saved voice (initVoice ran before settings were loaded)
+  await initCharacters({
+    toast,
+    active: () => settings.character,
+    choose: (id) => choosePersona(id),
+    defaultVoice: () => settings.voice ?? DEFAULT_VOICE,
+  });
+  if (settings.character && !characterById(settings.character)) settings.character = undefined;
+  // The saved voice, or the character's (initVoice ran before settings were loaded).
+  setVoice(activeCharacter()?.voice || settings.voice || DEFAULT_VOICE);
   updateToolsButton();
   updateSpeakButton();
   // Like open-app.ps1: opening the app starts the workstation if it isn't running.

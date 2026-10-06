@@ -30,6 +30,11 @@
           </button>
           <div class="model-menu" id="model-menu" hidden role="menu"></div>
         </div>
+        <!-- Who you're talking to: Prestige, or one of your characters (characters.ts) -->
+        <div class="persona-pick">
+          <button class="model-btn persona-btn" id="persona-btn" aria-haspopup="menu"><span class="pf-slot"></span><span id="persona-name">Prestige</span><span class="chev">▼</span></button>
+          <div class="model-menu persona-menu" id="persona-menu" hidden role="menu"></div>
+        </div>
         <button class="icon-btn ghost kb-btn" id="kb-btn" aria-label="Knowledge: chat with your files" title="Knowledge: chat with your files (PDFs, Word documents, notes, folders)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h13v15H6a2 2 0 0 0-2 2z" /><path d="M4 20a2 2 0 0 0 2 2h13v-4" /><path d="M9 8h6M9 11h4" /></svg><span class="count" id="kb-count-badge"></span>
         </button>
@@ -182,6 +187,7 @@
               <span class="ref-acts"><button type="button" class="linkish" id="ref-change">change</button><button type="button" class="linkish" id="ref-clear">remove</button></span>
             </div>
             <input type="file" id="ref-file" accept="image/*" hidden />
+            <label class="ref-char" id="ref-char-wrap" hidden>or a character<select id="ref-character" aria-label="Use a character's face as the reference"></select></label>
           </div>
           <form class="prompt-row" id="gen-form">
             <input id="gen-prompt" autocomplete="off" aria-label="Prompt" placeholder="Describe what to make…" />
@@ -260,6 +266,7 @@
       <div class="live-stage">
         <canvas id="live-rings"></canvas>
         <div class="live-mark" id="live-mark"></div>
+        <img class="live-face" id="live-face" alt="" hidden />
         <video class="live-self" id="live-self" muted playsinline hidden></video>
       </div>
       <p class="live-status" id="live-status"></p>
@@ -330,6 +337,50 @@
       <div class="kb-list-head"><span class="eyebrow">Your files</span><span class="credit" id="kb-count"></span></div>
       <div class="kb-list" id="kb-list"></div>
       <p class="credit">Reads PDF (text, not scans), Word (.docx), text, Markdown, HTML, CSV, JSON and code. Files added from a folder or the picker are read where they are; dropped files are copied into Prestige's app data folder. Removing a file here never deletes your original.</p>
+    </dialog>
+
+    <!-- Characters: personas with a personality, voice, face and memory (characters.ts) -->
+    <dialog class="sheet characters" id="characters">
+      <div class="kb-head">
+        <div>
+          <h2>Characters</h2>
+          <p class="muted">Personas to talk to in chat, on the Voice screen and in Live calls. Name one (or say "you") in an /image or /video prompt and its face goes into the picture.</p>
+        </div>
+        <button class="btn" id="ch-close" type="button">Close</button>
+      </div>
+      <div class="ch-body">
+        <div class="ch-side">
+          <div class="ch-list" id="ch-list"></div>
+          <button class="btn" id="ch-new" type="button">＋ New character</button>
+        </div>
+        <p class="muted ch-empty" id="ch-empty">No characters yet. Make one with ＋ New character.</p>
+        <div class="ch-form" id="ch-form" hidden>
+          <div class="ch-top">
+            <div class="ch-face-wrap">
+              <button type="button" class="ch-face" id="ch-face" title="Pick, drop or paste a picture of their face"></button>
+              <button type="button" class="linkish" id="ch-face-clear">remove</button>
+              <input type="file" id="ch-face-file" accept="image/*" hidden />
+            </div>
+            <div class="ch-fields">
+              <label>Name<input id="ch-name" type="text" autocomplete="off" placeholder="e.g. Captain Vex" /></label>
+              <label>Voice<span class="ch-voice-row"><select id="ch-voice"></select><button type="button" class="btn mini" id="ch-clone">Clone from a recording…</button></span></label>
+              <input type="file" id="ch-clone-file" accept="audio/*,.wav,.mp3,.m4a,.flac,.ogg,.webm" hidden />
+            </div>
+          </div>
+          <p class="credit" id="ch-consent"></p>
+          <label>Personality<textarea id="ch-personality" rows="5" placeholder="Who they are and how they talk. e.g. A retired sky-pirate captain: gruff, funny, fond of old maps and bad puns. Calls the user 'first mate'. Short sentences."></textarea></label>
+          <h2 class="sub">Memory</h2>
+          <p class="muted">Their own memory. "Remember that…" while talking to them is saved here.</p>
+          <div class="ch-memory" id="ch-memory"></div>
+          <div class="ch-fact-row"><input id="ch-fact" type="text" autocomplete="off" placeholder="Add something they should remember" /><button type="button" class="btn" id="ch-fact-add">Add</button></div>
+          <label class="check"><input id="ch-shared" type="checkbox" /> Also give them the shared memory (what every model knows about you)</label>
+          <div class="acts">
+            <button class="btn danger" id="ch-delete" type="button">Delete</button>
+            <button class="btn" id="ch-save" type="button">Save</button>
+            <button class="btn primary" id="ch-talk" type="button">Talk to them</button>
+          </div>
+        </div>
+      </div>
     </dialog>
 
     <dialog class="sheet welcome" id="welcome">

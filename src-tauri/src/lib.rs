@@ -372,6 +372,29 @@ fn search_chats(app: AppHandle, query: String, exclude: Option<String>, width: O
     Ok(out)
 }
 
+/// Small JSON documents kept in the app data folder's store\ (characters, …), by a plain name.
+fn store_path(app: &AppHandle, name: &str) -> Result<PathBuf, String> {
+    if name.is_empty() || name.len() > 40 || !name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
+        return Err("invalid store name".into());
+    }
+    Ok(data_dir(app, "store")?.join(format!("{name}.json")))
+}
+
+#[tauri::command]
+fn store_get(app: AppHandle, name: String) -> Result<serde_json::Value, String> {
+    let text = fs::read_to_string(store_path(&app, &name)?).unwrap_or_default();
+    Ok(serde_json::from_str(&text).unwrap_or(serde_json::Value::Null))
+}
+
+#[tauri::command]
+fn store_set(app: AppHandle, name: String, value: serde_json::Value) -> Result<(), String> {
+    let path = store_path(&app, &name)?;
+    // Written next to it first, so a crash mid-write can't leave half a file.
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, serde_json::to_string(&value).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    fs::rename(&tmp, &path).map_err(|e| e.to_string())
+}
+
 fn read_settings(app: &AppHandle) -> serde_json::Value {
     data_dir(app, "")
         .ok()
@@ -435,6 +458,8 @@ pub fn run() {
             search_chats,
             get_settings,
             save_settings,
+            store_get,
+            store_set,
             sys_memory,
             file_sizes,
             studio::gallery_list,
