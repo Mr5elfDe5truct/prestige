@@ -820,3 +820,11 @@ dialog.characters[open] { display: flex; flex-direction: column; gap: 12px; }
 .phone-devices .d small { color: var(--muted); font: 11px var(--mono); }
 .sheet .phone-box .muted { margin: 6px 0 0; }
 @media (max-width: 560px) { .phone-box { flex-direction: column; } }
+/* ---------- 0.26: tool store ---------- */
+#tools-more { align-self: flex-start; }
+.ts-card .ts-needs { margin: 0; font-size: 11.5px; }
+.ts-card .ts-needs a { color: var(--gold); }
+.ts-form { display: flex; flex-direction: column; gap: 8px; }
+.ts-field { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--muted); }
+.ts-field input { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font: 12.5px var(--mono); padding: 7px 9px; }
+.ts-acts { display: flex; gap: 6px; }

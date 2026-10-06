@@ -44,6 +44,7 @@ import {
 } from "./characters";
 import type { RefKind } from "./reference";
 import { initPhone, phonePush, phoneState, refreshPhone } from "./phone";
+import { initToolStore, openToolStore } from "./toolstore";
 import { listen } from "@tauri-apps/api/event";
 
 const inTauri = "__TAURI_INTERNALS__" in window;
@@ -1669,6 +1670,10 @@ function wire() {
     }
   });
   ta.addEventListener("input", autosize);
+  $("#tools-more").addEventListener("click", () => {
+    $("#tools-pop").hidden = true;
+    openToolStore();
+  });
   $("#composer-tools").addEventListener("click", (e) => {
     e.stopPropagation();
     const pop = $("#tools-pop");
@@ -2078,6 +2083,19 @@ async function main() {
   if (settings.character && !characterById(settings.character)) settings.character = undefined;
   // The saved voice, or the character's (initVoice ran before settings were loaded).
   setVoice(activeCharacter()?.voice || settings.voice || DEFAULT_VOICE);
+  // Tools added from the tool store become groups in the Tools menu.
+  await initToolStore({
+    toast,
+    root: () => settings.stackRoot ?? null,
+    enableGroup: (id) => {
+      if (settings.toolGroups && !settings.toolGroups.includes(id)) {
+        settings.toolGroups = [...settings.toolGroups, id];
+        saveSettings();
+      }
+      updateToolsButton();
+    },
+  }).catch(() => {});
+  updateToolsButton();
   // Phone access (off unless it was switched on in Settings).
   await initPhone({
     toast,

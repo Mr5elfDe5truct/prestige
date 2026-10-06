@@ -6,6 +6,7 @@ mod canvas;
 mod knowledge;
 mod models;
 mod phone;
+mod toolstore;
 mod studio;
 
 use serde::Serialize;
@@ -508,7 +509,10 @@ pub fn run() {
             phone::phone_new_code,
             phone::phone_forget,
             phone::phone_push,
-            phone::phone_set_state
+            phone::phone_set_state,
+            toolstore::tools_extra_get,
+            toolstore::tools_extra_set,
+            toolstore::tools_setup
         ])
         .build(tauri::generate_context!())
         .expect("error while building Prestige")

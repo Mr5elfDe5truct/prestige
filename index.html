@@ -109,6 +109,7 @@
             <div id="tools-list"></div>
             <p class="credit" id="tools-note"></p>
             <p class="credit">Read-only lookups run straight away. Anything that changes files, runs commands, uses the camera or drives the browser asks you first.</p>
+            <button type="button" class="btn" id="tools-more">＋ Get more tools (Home Assistant, GitHub, Spotify, Gmail…)</button>
           </div>
           <div class="tools-pop gen-pop" id="gen-pop" hidden>
             <div class="tools-head"><b>Generation settings</b><span class="gen-tabs"><button type="button" data-tab="image" class="on">Image</button><button type="button" data-tab="video">Video</button></span></div>
@@ -512,6 +513,15 @@
         </div>
       </div>
       <div class="cat-grid" id="cat-grid"></div>
+    </dialog>
+
+    <!-- The tool store: MCP servers to add to the workstation's tool server (toolstore.ts) -->
+    <dialog class="sheet catalog" id="toolstore">
+      <div class="cat-head">
+        <div><h2>Get more tools</h2><p class="credit">Add a tool and models in chat can use it (switch it on in the Tools menu). Keys stay on this PC, in the workstation's data folder. Anything that changes something (turning on a light, sending an email) asks you first.</p></div>
+        <button class="btn" id="ts-close">Close</button>
+      </div>
+      <div class="cat-grid" id="ts-grid"></div>
     </dialog>
 
     <div class="toast" id="toast" role="status"></div>
