@@ -1,9 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Prestige for Android by R.G. Studios · developed by Ryan B. Gyles. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.rgstudios.prestige"
-    android:versionCode="27"
-    android:versionName="0.27.0">
+    package="com.rgstudios.prestige">
 
     <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="34" />
 
