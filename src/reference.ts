@@ -96,7 +96,11 @@ export function refPrompt(kind: RefKind, scene: string) {
 }
 
 /** The scene part of a prompt written by refPrompt (what to show and reuse), or the prompt as it is. */
-export const sceneOf = (prompt: string) => prompt.replace(/^Keep the (?:character from|object from|subject of) image 1[\s\S]*?New scene: /, "");
+export const sceneOf = (prompt: string) =>
+  prompt
+    .replace(/^Keep the (?:character from|object from|subject of) image 1[\s\S]*?New scene: /, "")
+    // A Paint to change prompt (studio.ts inpaintPrompt).
+    .replace(/^Fill the flat gray area with: ([\s\S]*?)\. It should blend naturally[\s\S]*$/, "$1");
 
 export const REF_KINDS: [RefKind, string][] = [
   ["auto", "Auto"],
