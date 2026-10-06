@@ -313,20 +313,34 @@ fn events(app: &AppHandle, req: Request) {
     let (tx, rx) = channel::<String>();
     app.state::<Phone>().clients.lock().unwrap().push(tx);
     let mut w = req.into_writer();
-    let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nConnection: keep-alive\r\nX-Accel-Buffering: no\r\n\r\n";
-    if w.write_all(head.as_bytes()).and_then(|_| w.flush()).is_err() {
+    // Chunked, so phone browsers treat it as a stream rather than a body that ends when the connection closes.
+    let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\nCache-Control: no-cache, no-store, no-transform\r\nConnection: keep-alive\r\nX-Accel-Buffering: no\r\nTransfer-Encoding: chunked\r\n\r\n";
+    // A 2 KB comment first: some mobile browsers hold a stream back until that much has arrived. `retry` makes a
+    // dropped connection (the phone slept, Wi-Fi changed) come back within 3 s.
+    let open = format!(":{}\nretry: 3000\n\n", " ".repeat(2048));
+    if w.write_all(head.as_bytes()).and_then(|_| send_chunk(&mut w, &open)).is_err() {
         return;
     }
     loop {
-        let chunk = match rx.recv_timeout(Duration::from_secs(15)) {
+        let event = match rx.recv_timeout(Duration::from_secs(10)) {
             Ok(s) => format!("data: {}\n\n", s.replace('\n', "\ndata: ")),
-            Err(RecvTimeoutError::Timeout) => ": ping\n\n".to_string(),
+            // A real event (comments never reach the page), so the page can tell a quiet stream from a dead one.
+            Err(RecvTimeoutError::Timeout) => "data: {\"type\":\"ping\"}\n\n".to_string(),
             Err(RecvTimeoutError::Disconnected) => break,
         };
-        if w.write_all(chunk.as_bytes()).and_then(|_| w.flush()).is_err() {
+        if send_chunk(&mut w, &event).is_err() {
             break;
         }
     }
+    let _ = w.write_all(b"0\r\n\r\n").and_then(|_| w.flush());
+}
+
+/// One HTTP chunk, flushed straight away.
+fn send_chunk(w: &mut impl Write, s: &str) -> std::io::Result<()> {
+    write!(w, "{:x}\r\n", s.len())?;
+    w.write_all(s.as_bytes())?;
+    w.write_all(b"\r\n")?;
+    w.flush()
 }
 
 /// A render from ComfyUI's output folder (only there), with byte ranges so videos play and seek on phones.
