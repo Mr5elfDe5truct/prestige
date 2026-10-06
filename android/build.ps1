@@ -66,6 +66,6 @@ if (-not (Test-Path $ks)) {
     Write-Host "Made a signing key: $ks (password in $passFile). Back both up."
 }
 $apk = "$out\Prestige-$version.apk"
-Run "$bt\apksigner.bat" @("sign", "--ks", $ks, "--ks-key-alias", "prestige", "--ks-pass", "file:$passFile", "--key-pass", "file:$passFile", "--out", $apk, "$out\aligned.apk")
+Run "$bt\apksigner.bat" @("sign", "--ks", $ks, "--ks-key-alias", "prestige", "--ks-pass", "file:$passFile", "--out", $apk, "$out\aligned.apk")
 Run "$bt\apksigner.bat" @("verify", $apk)
 Write-Host "Built $apk"
