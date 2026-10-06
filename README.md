@@ -7,6 +7,7 @@
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-d9a441?style=for-the-badge"></a>
   <img alt="Windows 11" src="https://img.shields.io/badge/Windows%2011-native-0078D4?style=for-the-badge&logo=windows11&logoColor=white">
   <img alt="100% local" src="https://img.shields.io/badge/100%25%20local-offline-1a1111?style=for-the-badge&labelColor=d6202b">
+  <a href="https://github.com/sponsors/Mr5elfDe5truct"><img alt="Sponsor" src="https://img.shields.io/badge/sponsor-%E2%9D%A4-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white"></a>
   <br>
   <img alt="Tauri 2" src="https://img.shields.io/badge/Tauri-2-24C8DB?style=flat-square&logo=tauri&logoColor=white">
   <img alt="Rust" src="https://img.shields.io/badge/Rust-native-CE422B?style=flat-square&logo=rust&logoColor=white">
@@ -185,6 +186,12 @@ Mic or camera blocked? Check **Windows Settings → Privacy & security → Micro
 
 Prestige is the desktop app for **[Custom AI Workstation](https://github.com/Mr5elfDe5truct/custom-ai-workstation)**:
 one folder, one script, one 12 GB GPU. The workstation holds the services, models and tools; Prestige is the way to use them.
+
+## 💖 Support
+
+Prestige is free and always will be. If it saves you a subscription, you can help keep it going on
+[GitHub Sponsors](https://github.com/sponsors/Mr5elfDe5truct). Every sponsor helps fund new features, more models and
+Linux and macOS support.
 
 ## 🙏 Credits
 
