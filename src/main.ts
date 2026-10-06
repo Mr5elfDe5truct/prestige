@@ -23,13 +23,13 @@ import { initVoice, showVoice } from "./voice";
 import { initCamera, showCameraPane } from "./camera";
 import { initLive, startLive, LIVE_CTX, LIVE_MODELS } from "./live";
 import {
-  onSpeakingChange, onSpeechError, releaseSpeechGpu, setVoice, speak, speakDelta, speakEnd, stopSpeaking, DEFAULT_VOICE,
+  isVox, onSpeakingChange, onSpeechError, releaseSpeechGpu, setVoice, speak, speakDelta, speakEnd, stopSpeaking, DEFAULT_VOICE,
 } from "./speech";
 import { bestFor, capsFor, chipsHtml, supportsTools } from "./caps";
 import { initCatalog, openCatalog } from "./catalog";
 import { checkForUpdates, initUpdates } from "./updates";
 import { GROUPS, describeCall, loadTools, runTool, toolContext, toolSpecs, type ToolDef, type ToolStep } from "./tools";
-import { errMsg, nameFor, listModels, ping, streamChat, OLLAMA, LLAMA, type ChatMessage, type ModelInfo, type StreamStats } from "./backends";
+import { errMsg, freeLlamaVram, nameFor, listModels, ping, streamChat, OLLAMA, LLAMA, type ChatMessage, type ModelInfo, type StreamStats } from "./backends";
 import { addMemory, memoryContext, listMemories, rememberRequest, DEFAULT_OWUI, type MemoryConfig } from "./memory";
 import { addStache } from "./talk";
 import { applyCachedLook, applyLook, closeAppearance, initAppearance, openAppearance, type Look } from "./theme";
@@ -87,7 +87,8 @@ interface StoredMessage {
   images?: string[]; // webcam frames sent with a user message (base64 JPEG)
   tools?: ToolStep[]; // tools the model used for this reply
   // An image (or several, or a video) made from chat. "more" holds the other images of a batch.
-  render?: { path: string; prompt: string; seconds?: number; more?: string[]; kind?: MediaKind };
+  // reply: the model made it with a tool, so its content is the reply to show under it (not a note for later turns).
+  render?: { path: string; prompt: string; seconds?: number; more?: string[]; kind?: MediaKind; reply?: boolean };
   react?: string; // an emote reaction: yours on a reply, Prestige's on your message
   sources?: Source[]; // passages from Knowledge this reply was given (shown under it, cited in it)
 }
@@ -286,6 +287,10 @@ function syncPhone() {
     character: activeCharacter()?.name ?? null,
     busy: !!busy,
     chatId: chat.id,
+    // The phone speaks replies with the PC's voice (the character's, if one is on), and offers Live when a Live model is installed.
+    voice: activeCharacter()?.voice || settings.voice || DEFAULT_VOICE,
+    live: liveModels().length > 0,
+    liveModel: phoneLive?.name ?? null,
   });
 }
 
@@ -431,7 +436,17 @@ function markSpeaking(b: HTMLElement | null) {
 
 /** Images or a video made from chat: each picture (click to open it in the lightbox) and the prompt. */
 function renderFigure(bubble: HTMLElement, r: NonNullable<StoredMessage["render"]>) {
-  const body = $(".msg-body", bubble);
+  let body = $(".msg-body", bubble);
+  // A render a model made with a tool sits above its reply, which is shown as usual.
+  if (r.reply) {
+    let box = $(".msg-figure", bubble);
+    if (!box) {
+      box = document.createElement("div");
+      box.className = "msg-figure";
+      bubble.insertBefore(box, body);
+    }
+    body = box;
+  }
   body.innerHTML = `<div class="chat-renders"></div><p class="render-caption"></p>`;
   const paths = [r.path, ...(r.more ?? [])];
   $(".chat-renders", body).classList.toggle("multi", paths.length > 1);
@@ -482,7 +497,7 @@ function renderChat() {
     let b: HTMLElement;
     if (msg.role === "user") b = addUserBubble(msg.content, msg.images);
     else {
-      b = addAiBubble(msg.model ?? "Assistant", msg.error || msg.render ? undefined : () => msg.content);
+      b = addAiBubble(msg.model ?? "Assistant", msg.error || (msg.render && !msg.render.reply) ? undefined : () => msg.content);
       if (msg.error) b.classList.add("error");
       if (msg.note) {
         const chip = document.createElement("div");
@@ -493,7 +508,7 @@ function renderChat() {
       if (msg.thinking) setThinking(b, msg.thinking, false);
       for (const step of msg.tools ?? []) renderToolStep(b, step);
       if (msg.render) renderFigure(b, msg.render);
-      else renderBody($(".msg-body", b), msg.content);
+      if (!msg.render || msg.render.reply) renderBody($(".msg-body", b), msg.content);
       if (msg.sources?.length) renderSources(b, msg.sources, msg.content);
       if (msg.note?.startsWith("deep research")) foldSteps(b);
       $(".msg-stat", b).textContent = statText(msg.stats);
@@ -742,6 +757,78 @@ function systemBase(live = false): string {
 }
 
 // ---------- tools ----------
+/** The tool server's render tools. Prestige runs these itself (toolRender) so the result shows in the reply. */
+const RENDER_TOOL = /^(make_image|make_video|edit_image)$/;
+const RENDER_HINT =
+  "When the user wants a picture or a video, call make_image or make_video (edit_image changes a picture); " +
+  "it waits for the render and the result is shown in this chat, so don't paste file paths or links.";
+
+/** Makes the picture or clip a model asked for with a tool, through the render queue, and shows it in the reply (above
+ *  its text). Resolves with what the model is told. */
+async function toolRender(
+  op: string,
+  args: any,
+  r: { reply: StoredMessage; bubble: HTMLElement; body: HTMLElement; chatId: string; images?: string[]; signal: AbortSignal },
+): Promise<string> {
+  if (!inTauri) throw new Error("pictures and videos are made in the desktop app");
+  const kind: MediaKind = op === "make_video" ? "video" : "image";
+  const prompt = String(args.prompt ?? "").trim();
+  if (!prompt) throw new Error("say what to make in prompt");
+  // edit_image changes a picture; make_video with image_path starts from one.
+  const src = op === "edit_image" || args.image_path ? await toolSource(String(args.image_path ?? ""), r.images) : undefined;
+  if (op === "edit_image" && !src) throw new Error("there's no picture to edit. Ask the user to attach one.");
+  const ref = src ? await referenceFromBase64(src) : undefined;
+  let last = 0;
+  const progress = (pct: number, label: string) => {
+    if (!r.reply.content) r.body.innerHTML = `<span class="status-line">${escapeHtml(label)} (${Math.round(pct)}%)</span>`;
+    if (Date.now() - last > 2000) {
+      last = Date.now();
+      phonePush({ type: "status", chatId: r.chatId, text: `${label} (${Math.round(pct)}%)` });
+    }
+  };
+  const stop = () => cancelRender();
+  r.signal.addEventListener("abort", stop, { once: true });
+  const t0 = Date.now();
+  try {
+    const got = op === "edit_image" && ref ? await editMedia(prompt, ref, progress) : await renderMedia(kind, prompt, progress, ref);
+    const paths = got.map((x) => x.path);
+    const prev = r.reply.render;
+    // A second render of the same kind in one reply joins the first.
+    r.reply.render =
+      prev && prev.kind === kind
+        ? { ...prev, more: [...(prev.more ?? []), ...paths] }
+        : { path: paths[0], prompt, seconds: Math.round((Date.now() - t0) / 1000), kind, reply: true, ...(paths.length > 1 ? { more: paths.slice(1) } : {}) };
+    renderFigure(r.bubble, r.reply.render);
+    if (!r.reply.content) r.body.innerHTML = "";
+    scrollDown();
+    const names = got.map((x) => x.name).join(", ");
+    return `Done. The ${kind === "video" ? "video" : got.length > 1 ? `${got.length} pictures` : "picture"} (${names}) is already shown to the user in this chat. Don't repeat file paths or links; say a sentence or two about it.`;
+  } finally {
+    r.signal.removeEventListener("abort", stop);
+    if (ref) URL.revokeObjectURL(ref.url);
+  }
+}
+
+/** The picture a render tool starts from: the path the model gave (a render), else the user's attached picture, else
+ *  the last picture made in this chat. */
+async function toolSource(path: string, images?: string[]): Promise<string | undefined> {
+  const load = async (p: string) => {
+    await allowRenders();
+    return imageToBase64(await (await fetch(convertFileSrc(p))).blob());
+  };
+  if (path && /\.(png|jpe?g|webp)$/i.test(path)) {
+    try {
+      return await load(path);
+    } catch {
+      /* not a render Prestige can open: fall back below */
+    }
+  }
+  if (images?.length) return images[0];
+  const lastPic = [...chat.messages].reverse().find((m) => m.render && m.render.kind !== "video");
+  if (lastPic?.render) return load(lastPic.render.path).catch(() => undefined);
+  return undefined;
+}
+
 const TOOLS_HINT =
   "You can call tools to look things up or act on this PC. Use a tool when it actually helps; otherwise just answer. " +
   "For current events or facts you aren't sure of, use web_search, then fetch to read a page. " +
@@ -957,10 +1044,14 @@ function retractLiveTurn(): string | null {
 const IMAGE_CMD = /^\/(?:image|imagine|img)\b\s*/i;
 const EDIT_CMD = /^\/edit\b\s*/i;
 const VIDEO_CMD = /^\/(?:video|clip)\b\s*/i;
-const VIDEO_ASK =
-  /^(?:please\s+)?(?:(?:can|could|would)\s+you\s+)?(?:make|generate|create|render)\s+(?:me\s+)?(?:an?\s+)?(?:video|clip|animation)\s+(?:of|showing)\s+/i;
-const IMAGE_ASK =
-  /^(?:please\s+)?(?:(?:can|could|would)\s+you\s+)?(?:(?:draw|paint|sketch)\s+me\s+|(?:draw|paint|sketch|make|generate|create|render)\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|photo|illustration|drawing|painting|wallpaper)\s+of\s+)/i;
+// "Can you make…", "I'd like…", "give me…", "show me…" a picture (or clip) "of…" / "showing…".
+const ASK_LEAD = String.raw`^(?:(?:hey|ok|okay)[,!]?\s+)?(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?)?`;
+const ASK_VERB = String.raw`(?:(?:make|generate|create|render|produce)\s+(?:me\s+)?|(?:i(?:'d|\s+would)?\s+(?:like|want|need)|give\s+me|show\s+me|send\s+me|can\s+i\s+(?:get|have|see))\s+)(?:an?\s+|another\s+|some\s+)?`;
+const VIDEO_ASK = new RegExp(String.raw`${ASK_LEAD}${ASK_VERB}(?:video|clip|animation)s?\s+(?:of|showing)\s+`, "i");
+const IMAGE_ASK = new RegExp(
+  String.raw`${ASK_LEAD}(?:(?:draw|paint|sketch)\s+me\s+|(?:(?:draw|paint|sketch)\s+(?:me\s+)?(?:an?\s+)?|${ASK_VERB})(?:image|picture|pic|photo|illustration|drawing|painting|wallpaper|portrait)s?\s+(?:of|showing)\s+)`,
+  "i",
+);
 
 /** The prompt in an image or video request ("" for a bare /image or /video), or null when it isn't one. */
 function mediaRequest(text: string): { kind: MediaKind; prompt: string } | null {
@@ -1408,6 +1499,7 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
       toolDefs = t.tools.filter((x) => offer.has(x.group));
       specs = toolDefs.length ? toolSpecs(t.tools, offer) : undefined;
       if (specs) messages[0].content += "\n\n" + TOOLS_HINT;
+      if (toolDefs.some((d) => d.server === "workstation" && RENDER_TOOL.test(d.op))) messages[0].content += " " + RENDER_HINT;
     }
     // A reply can open with [react: 😂]: that becomes a reaction on the user's message and is never shown or spoken.
     reacts = reactFilter(
@@ -1456,6 +1548,19 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
         if (!def) {
           result = `There is no tool called ${call.name}.`;
           step.ok = false;
+        } else if (def.server === "workstation" && RENDER_TOOL.test(def.op)) {
+          // A picture or clip the model makes (however it was asked for) goes through Prestige's own render queue,
+          // so it's posted in this reply, here and on phones, when it's done. No "Allow?" card: like /image, it's
+          // what was asked for, and a phone couldn't answer one.
+          const t0 = performance.now();
+          try {
+            result = await toolRender(def.op, call.arguments ?? {}, { reply, bubble, body, chatId: replyChat, images, signal: busy.signal });
+            step.ok = true;
+          } catch (e) {
+            result = `Error: ${errMsg(e)}`;
+            step.ok = false;
+          }
+          step.ms = Math.round(performance.now() - t0);
         } else if (def.confirm && !(await confirmTool(bubble, def, call.arguments, busy.signal))) {
           step.denied = true;
           result = "The user did not allow this action. Don't retry it; tell them what you would have done instead.";
@@ -1555,7 +1660,12 @@ const phoneReplyEnd = (id: string) => {
 
 /** A message from a paired phone (phone.rs): it runs in the app's own chat, so everything works from the phone, and the
  *  reply streams back to it. A phone message for another chat opens that chat here first; no chat id starts a new one. */
-async function fromPhone(p: { chatId?: string | null; text: string; model?: string | null }) {
+async function fromPhone(p: PhoneSend) {
+  if (busy && (p.interrupt || (p.live && phoneLive))) {
+    // Talking over a reply in a call cuts it off, as on the PC; the next turn starts once it has wrapped up.
+    busy.abort();
+    for (let i = 0; busy && i < 60; i++) await new Promise((r) => setTimeout(r, 50));
+  }
   if (busy) {
     phonePush({ type: "error", text: "Prestige is busy with another reply. Try again when it's done.", busy: true });
     return;
@@ -1568,14 +1678,58 @@ async function fromPhone(p: { chatId?: string | null; text: string; model?: stri
   } catch {
     chat = newChat();
   }
-  const m = p.model ? models.find((x) => x.key === p.model) : null;
-  if (m && m.key !== current?.key) selectModel(m);
   go("chat");
   renderChat();
   renderHistory();
   // The reply streams to phones like every reply (phoneReplyStart / phoneDelta / phoneReplyEnd); this only refreshes
   // the phone's header afterwards. The hooks also keep the reply from being read aloud on the PC.
-  send(p.text, { hooks: { onDone: () => syncPhone() } });
+  const hooks = { onDone: () => syncPhone() };
+  // A turn of a Live call on the phone: what was said, with the camera's frame, answered by the Live model.
+  if (p.live && phoneLive) return send(p.text, { images: p.images?.length ? p.images : undefined, live: phoneLive, hooks });
+  const m = p.model ? models.find((x) => x.key === p.model) : null;
+  if (m && m.key !== current?.key) selectModel(m);
+  // Photos from the phone are attachments, like pictures added here: a vision model looks at them, /image uses the
+  // first as its reference and /edit changes it.
+  if (p.images?.length) {
+    attachments = p.images.slice(0, 4);
+    renderAttachments();
+  }
+  send(p.text, { hooks });
+}
+
+interface PhoneSend {
+  chatId?: string | null;
+  text: string;
+  model?: string | null;
+  images?: string[];
+  live?: boolean;
+  interrupt?: boolean; // a turn of a voice call: it cuts off a reply that's still running
+}
+
+/** The Live model a call on the phone uses (null when no call is on). */
+let phoneLive: ModelInfo | null = null;
+
+/** A Live call starting on the phone: makes room on the GPU, picks the Live model and opens the call's chat. The phone
+ *  does the listening and speaking; each turn arrives as a phone message with live set. */
+async function phoneLiveCall(on: boolean) {
+  if (!on) {
+    phoneLive = null;
+    syncPhone();
+    return;
+  }
+  const have = liveModels();
+  if (!have.length) {
+    phonePush({ type: "error", text: "Live needs Qwen3.5 2B or 4B. Add one from the model catalog on the PC." });
+    return;
+  }
+  busy?.abort();
+  // A VoxCPM2 voice takes ~6 GB, so it gets the smaller Live model (as on the PC).
+  phoneLive = isVox(activeCharacter()?.voice || settings.voice) ? have[have.length - 1] : have[0];
+  await freeLlamaVram(["ollama", "voice"]).catch(() => {});
+  beginLiveChat();
+  go("chat");
+  syncPhone();
+  phonePush({ type: "live", on: true, model: phoneLive.name, chatId: chat.id });
 }
 
 /** A voice picked on the Voice screen or in a call: the character's new voice while talking to one, else Prestige's. */
@@ -2140,7 +2294,8 @@ async function main() {
     port: () => settings.phonePort,
   }).catch((e) => toast(`Phone access: ${errMsg(e)}`, "warn"));
   if (inTauri) {
-    listen<{ chatId?: string | null; text: string; model?: string | null }>("phone-send", (e) => fromPhone(e.payload));
+    listen<PhoneSend>("phone-send", (e) => fromPhone(e.payload));
+    listen<{ on: boolean }>("phone-live", (e) => phoneLiveCall(e.payload.on));
     listen("phone-stop", () => {
       busy?.abort();
       stopSpeaking();

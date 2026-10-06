@@ -129,9 +129,9 @@ fn json(code: u16, v: serde_json::Value) -> Response<std::io::Cursor<Vec<u8>>> {
         .with_header(header("Cache-Control", "no-store"))
 }
 
-fn body_json(req: &mut Request) -> serde_json::Value {
+fn body_json(req: &mut Request, limit: u64) -> serde_json::Value {
     let mut s = String::new();
-    let _ = req.as_reader().take(1 << 20).read_to_string(&mut s);
+    let _ = req.as_reader().take(limit).read_to_string(&mut s);
     serde_json::from_str(&s).unwrap_or(serde_json::Value::Null)
 }
 
@@ -218,7 +218,7 @@ fn handle(app: &AppHandle, mut req: Request) {
             let _ = req.respond(json(200, m));
         }
         (Method::Post, "/api/pair") => {
-            let v = body_json(&mut req);
+            let v = body_json(&mut req, 1 << 16);
             let phone = app.state::<Phone>();
             {
                 let mut fails = phone.fails.lock().unwrap();
@@ -280,15 +280,28 @@ fn api(app: &AppHandle, mut req: Request, path: &str, dev: &Device) {
             }
         }
         (Method::Post, "/api/send") => {
-            let v = body_json(&mut req);
+            // Photos come as base64 JPEGs (a few hundred KB each), so this body can be larger than the others.
+            let v = body_json(&mut req, 24 << 20);
             let text = v["text"].as_str().unwrap_or("").trim().to_string();
-            if text.is_empty() {
+            let images: Vec<String> = v["images"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).take(4).collect()).unwrap_or_default();
+            if text.is_empty() && images.is_empty() {
                 let _ = req.respond(json(400, serde_json::json!({ "error": "empty message" })));
                 return;
             }
-            let _ = app.emit("phone-send", serde_json::json!({ "chatId": v["chatId"], "text": text, "model": v["model"], "from": dev.name }));
+            let _ = app.emit(
+                "phone-send",
+                serde_json::json!({ "chatId": v["chatId"], "text": text, "model": v["model"], "images": images, "live": v["live"].as_bool().unwrap_or(false), "interrupt": v["interrupt"].as_bool().unwrap_or(false), "from": dev.name }),
+            );
             let _ = req.respond(json(200, serde_json::json!({ "ok": true })));
         }
+        (Method::Post, "/api/live") => {
+            // A Live call starting (or ending) on the phone: the PC makes room on the GPU and opens a chat for it.
+            let v = body_json(&mut req, 1 << 16);
+            let _ = app.emit("phone-live", serde_json::json!({ "on": v["on"].as_bool().unwrap_or(false) }));
+            let _ = req.respond(json(200, serde_json::json!({ "ok": true })));
+        }
+        (Method::Post, "/api/stt") => stt(req),
+        (Method::Post, "/api/tts") => tts(req),
         (Method::Post, "/api/stop") => {
             let _ = app.emit("phone-stop", ());
             let _ = req.respond(json(200, serde_json::json!({ "ok": true })));
@@ -305,6 +318,51 @@ fn api(app: &AppHandle, mut req: Request, path: &str, dev: &Device) {
             let _ = req.respond(json(404, serde_json::json!({ "error": "not found" })));
         }
     }
+}
+
+const VOICE_SERVER: &str = "http://127.0.0.1:8890";
+const KOKORO: &str = "http://127.0.0.1:8880";
+
+/// Speech to text: the phone's recording (a multipart form, as Whisper's API takes it) goes to the voice server as is.
+fn stt(mut req: Request) {
+    let ct = req.headers().iter().find(|h| h.field.equiv("Content-Type")).map(|h| h.value.as_str().to_string()).unwrap_or_default();
+    if !ct.starts_with("multipart/form-data") {
+        let _ = req.respond(json(400, serde_json::json!({ "error": "send the recording as a form" })));
+        return;
+    }
+    let mut body = Vec::new();
+    let _ = req.as_reader().take(25 << 20).read_to_end(&mut body);
+    let r = ureq::post(&format!("{VOICE_SERVER}/v1/audio/transcriptions")).timeout(Duration::from_secs(120)).set("Content-Type", &ct).send_bytes(&body);
+    let _ = match r {
+        Ok(r) => req.respond(json(200, r.into_string().ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()).unwrap_or(serde_json::json!({ "text": "" })))),
+        Err(ureq::Error::Status(code, r)) => req.respond(json(502, serde_json::json!({ "error": format!("the voice server answered {code}: {}", r.into_string().unwrap_or_default().chars().take(200).collect::<String>()) }))),
+        Err(_) => req.respond(json(503, serde_json::json!({ "error": "the voice server isn't running on the PC (start the services)" }))),
+    };
+}
+
+/// Text to speech with the PC's voice: Kokoro (MP3), or VoxCPM2 on the voice server for "vox:" voices (WAV).
+fn tts(mut req: Request) {
+    let v = body_json(&mut req, 1 << 16);
+    let text: String = v["input"].as_str().unwrap_or("").chars().take(2000).collect();
+    let voice = v["voice"].as_str().filter(|s| !s.is_empty()).unwrap_or("af_heart").to_string();
+    if text.trim().is_empty() {
+        let _ = req.respond(json(400, serde_json::json!({ "error": "nothing to say" })));
+        return;
+    }
+    let (url, body, engine) = match voice.strip_prefix("vox:") {
+        Some(name) => (format!("{VOICE_SERVER}/v1/audio/speech"), serde_json::json!({ "model": "voxcpm2", "input": text, "voice": name, "response_format": "wav" }), "The voice server"),
+        None => (format!("{KOKORO}/v1/audio/speech"), serde_json::json!({ "model": "kokoro", "input": text, "voice": voice, "response_format": "mp3", "speed": 1.0 }), "Kokoro"),
+    };
+    let _ = match ureq::post(&url).timeout(Duration::from_secs(180)).set("Content-Type", "application/json").send_string(&body.to_string()) {
+        Ok(r) => {
+            let ct = r.header("Content-Type").unwrap_or("audio/mpeg").to_string();
+            let mut buf = Vec::new();
+            let _ = r.into_reader().take(64 << 20).read_to_end(&mut buf);
+            req.respond(Response::from_data(buf).with_header(header("Content-Type", &ct)).with_header(header("Cache-Control", "no-store")))
+        }
+        Err(ureq::Error::Status(code, _)) => req.respond(json(502, serde_json::json!({ "error": format!("{engine} answered {code}") }))),
+        Err(_) => req.respond(json(503, serde_json::json!({ "error": format!("{engine} isn't running on the PC") }))),
+    };
 }
 
 /// The event stream: replies as they're written, and "saved" when a chat changes. A comment every 15 s keeps

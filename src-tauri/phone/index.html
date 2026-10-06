@@ -72,7 +72,42 @@
       .pair input { text-align: center; font: 28px var(--mono); letter-spacing: .3em; background: var(--panel-2); color: var(--fg); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
       .pair p { color: var(--muted); margin: 0; font-size: 13.5px; }
       .err-text { color: #ff8a8a; min-height: 1.4em; }
-      .toast { position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%); background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; font-size: 13px; max-width: 90vw; }
+      .msg .shots { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; margin-bottom: 4px; }
+      .msg .shots img { width: 96px; height: 96px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); }
+      .ai .tools { display: flex; gap: 6px; margin-top: 6px; }
+      .ai .say { background: none; border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; font-size: 12px; color: var(--muted); }
+      .media + .body, .caption + .body { margin-top: 8px; }
+      .attach-row { display: flex; gap: 8px; padding: 0 2px 8px; overflow-x: auto; }
+      .attach-row .a { position: relative; flex: none; }
+      .attach-row img { width: 64px; height: 64px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); display: block; }
+      .attach-row button { position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel-2); font-size: 12px; line-height: 1; padding: 0; }
+      .icon.on { background: var(--red); border-color: var(--red); color: #fff; }
+      .menu { position: fixed; left: 10px; bottom: calc(64px + env(safe-area-inset-bottom)); z-index: 12; background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 4px; display: flex; flex-direction: column; min-width: 190px; }
+      .menu button { text-align: left; background: none; border: 0; padding: 11px 12px; border-radius: 8px; }
+      .menu button:active { background: var(--panel); }
+      .sheet { position: fixed; inset: 0; z-index: 20; background: #000; display: flex; flex-direction: column; }
+      .sheet video, .sheet .view { flex: 1; min-height: 0; width: 100%; object-fit: contain; background: #000; }
+      .sheet .bar { display: flex; align-items: center; justify-content: space-around; gap: 10px; padding: 14px 14px calc(14px + env(safe-area-inset-bottom)); background: rgba(10, 7, 7, .92); }
+      .shutter { width: 70px; height: 70px; border-radius: 50%; border: 4px solid #fff; background: var(--red); padding: 0; }
+      .view { display: grid; place-items: center; overflow: auto; }
+      .view img, .view video { max-width: 100%; max-height: 100%; }
+      .call { position: fixed; inset: 0; z-index: 15; background: radial-gradient(120% 80% at 50% 30%, #2a1010 0%, var(--bg) 60%); display: flex; flex-direction: column; align-items: center; padding: calc(12px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom)); gap: 12px; }
+      .seg { display: flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+      .seg button { background: none; border: 0; padding: 8px 20px; font-size: 14px; color: var(--muted); }
+      .seg button.sel { background: var(--red); color: #fff; }
+      .call video { width: 100%; max-height: 38vh; object-fit: cover; border-radius: 16px; border: 1px solid var(--line); background: #000; }
+      .orb { width: 150px; height: 150px; border-radius: 50%; display: grid; place-items: center; background: radial-gradient(circle, rgba(214, 32, 43, .35), rgba(214, 32, 43, 0) 70%); transition: transform .08s linear; flex: none; }
+      .orb img { width: 96px; height: 96px; border-radius: 24px; }
+      .call.small .orb { width: 90px; height: 90px; }
+      .call.small .orb img { width: 56px; height: 56px; border-radius: 14px; }
+      .call-status { font: 13px var(--mono); color: var(--gold); text-align: center; min-height: 1.4em; }
+      .call-text { width: 100%; flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; font-size: 15px; }
+      .call-text .you { align-self: flex-end; }
+      .call-text .re { color: var(--fg); }
+      .call-bar { display: flex; gap: 12px; width: 100%; justify-content: center; }
+      .call-bar .btn { min-width: 84px; }
+      .call-bar .end { background: var(--red); border-color: var(--red); color: #fff; font-weight: 600; }
+      .toast { position: fixed; z-index: 30; left: 50%; bottom: 90px; transform: translateX(-50%); background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; font-size: 13px; max-width: 90vw; }
     </style>
   </head>
   <body>
@@ -89,22 +124,59 @@
       <button class="icon" id="menu" aria-label="Chats"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10" /></svg></button>
       <div class="brand"><b>Prestige</b><small id="who">by R.G. Studios</small></div>
       <span class="grow"></span>
+      <button class="icon" id="call" aria-label="Talk (voice and Live)" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4" /></svg></button>
       <select id="model" aria-label="Model"></select>
     </header>
     <main id="thread" hidden></main>
     <footer id="bottom" hidden>
+      <div class="attach-row" id="attach-row" hidden></div>
       <form class="composer" id="composer">
+        <button type="button" class="icon" id="attach" aria-label="Add a photo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></svg></button>
         <textarea id="text" rows="1" placeholder="Message Prestige…" enterkeyhint="send"></textarea>
+        <button type="button" class="icon" id="mic" aria-label="Dictate" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg></button>
         <button type="button" class="icon" id="stop" aria-label="Stop" hidden><svg viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="1" /></svg></button>
         <button type="submit" class="icon send" id="send" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h13M13 6l6 6-6 6" /></svg></button>
       </form>
-      <p class="hint" id="hint">Runs on your PC (shows there too) · /image, /research and /edit work here</p>
+      <p class="hint" id="hint">Runs on your PC (shows there too) · /image, /video, /research and /edit work here</p>
+      <input type="file" id="file" accept="image/*" multiple hidden />
     </footer>
+    <div class="menu" id="attach-menu" hidden>
+      <button type="button" id="take-photo">Take a photo</button>
+      <button type="button" id="pick-photo">Choose from gallery</button>
+    </div>
+    <section class="sheet" id="cam-sheet" hidden>
+      <video id="cam-video" playsinline muted autoplay></video>
+      <div class="bar">
+        <button class="btn" id="cam-close" type="button">Cancel</button>
+        <button class="shutter" id="cam-shoot" type="button" aria-label="Take the photo"></button>
+        <button class="btn" id="cam-flip" type="button">Flip</button>
+      </div>
+    </section>
+    <section class="sheet" id="viewer" hidden>
+      <div class="view" id="viewer-body"></div>
+      <div class="bar">
+        <button class="btn" id="viewer-close" type="button">Close</button>
+        <button class="btn primary" id="viewer-save" type="button">Save to phone</button>
+      </div>
+    </section>
+    <section class="call" id="call-ui" hidden>
+      <div class="seg" id="call-mode"><button type="button" data-mode="voice">Voice</button><button type="button" data-mode="live">Live</button></div>
+      <video id="call-cam" playsinline muted autoplay hidden></video>
+      <div class="orb" id="orb"><img src="/icon.png" alt="" /></div>
+      <div class="call-status" id="call-status"></div>
+      <div class="call-text" id="call-text"></div>
+      <div class="call-bar">
+        <button class="btn" id="call-flip" type="button" hidden>Flip</button>
+        <button class="btn" id="call-mute" type="button">Mute</button>
+        <button class="btn end" id="call-end" type="button">End</button>
+      </div>
+    </section>
     <div class="drawer" id="drawer" hidden>
       <div>
         <div style="display:flex;gap:8px"><button class="btn primary" id="new-chat" style="flex:1">New chat</button><button class="btn" id="close-drawer">Close</button></div>
         <div class="list" id="chats"></div>
         <span class="grow"></span>
+        <button class="btn" id="change-pc" hidden>Connect to another PC</button>
         <button class="btn" id="unpair">Unpair this phone</button>
       </div>
     </div>
@@ -178,6 +250,8 @@
         const m = location.hash.match(/code=(\d{6})/);
         if (m) $("#code").value = m[1];
         $("#code").focus();
+        // The app opens this page with the code from the QR it scanned: pair straight away.
+        if (m && window.PrestigeApp) $("#pair-btn").click();
       }
       function signOut() {
         token = "";
@@ -188,7 +262,7 @@
       $("#pair-btn").addEventListener("click", async () => {
         $("#pair-err").textContent = "";
         const code = $("#code").value.replace(/\D/g, "");
-        const name = /iPhone|iPad/.test(navigator.userAgent) ? "iPhone" : /Android/.test(navigator.userAgent) ? "Android phone" : "Browser";
+        const name = window.PrestigeApp ? window.PrestigeApp.deviceName() : /iPhone|iPad/.test(navigator.userAgent) ? "iPhone" : /Android/.test(navigator.userAgent) ? "Android phone" : "Browser";
         try {
           const r = await fetch("/api/pair", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, name }) });
           const j = await r.json();
@@ -214,17 +288,46 @@
         if (m.role === "user") {
           el.className = "msg you";
           el.textContent = m.content;
+          if (m.images?.length) {
+            const shots = document.createElement("div");
+            shots.className = "shots";
+            for (const b64 of m.images) {
+              const img = document.createElement("img");
+              img.src = `data:image/jpeg;base64,${b64}`;
+              img.alt = "";
+              shots.appendChild(img);
+            }
+            el.prepend(shots);
+          }
           return el;
         }
         el.className = `msg ai${m.error ? " err" : ""}`;
         el.innerHTML = `<div class="who">${esc(m.model || "Prestige")}</div>${m.note ? `<div class="chip">${esc(m.note)}</div>` : ""}<div class="body"></div>`;
         const body = el.querySelector(".body");
         if (m.render) {
+          // A finished picture or clip, in the reply that made it (with the model's words under it when a model made it).
           const paths = [m.render.path, ...(m.render.more || [])];
-          body.innerHTML = `<div class="media">${paths
-            .map((p) => (m.render.kind === "video" ? `<video controls playsinline preload="metadata" src="${esc(fileUrl(p))}"></video>` : `<a href="${esc(fileUrl(p))}" target="_blank"><img loading="lazy" alt="" src="${esc(fileUrl(p))}" /></a>`))
+          const media = document.createElement("div");
+          media.innerHTML = `<div class="media">${paths
+            .map((p) => (m.render.kind === "video" ? `<video controls playsinline preload="metadata" src="${esc(fileUrl(p))}"></video>` : `<img loading="lazy" alt="" data-path="${esc(p)}" src="${esc(fileUrl(p))}" />`))
             .join("")}</div><div class="caption">${esc(m.render.prompt || "")}</div>`;
+          media.querySelectorAll("img").forEach((img) => img.addEventListener("click", () => view(img.dataset.path, "image")));
+          media.querySelectorAll("video").forEach((v, i) => v.addEventListener("dblclick", () => view(paths[i], "video")));
+          el.insertBefore(media, body);
+          if (m.render.reply) body.innerHTML = md(m.content || "");
+          else body.remove();
         } else body.innerHTML = md(m.content || "");
+        if (!m.error && m.content && !(m.render && !m.render.reply)) {
+          const tools = document.createElement("div");
+          tools.className = "tools";
+          tools.innerHTML = `<button type="button" class="say">Read aloud</button>`;
+          tools.firstChild.addEventListener("click", () => {
+            speech.stop();
+            speech.add(m.content);
+            speech.end();
+          });
+          el.appendChild(tools);
+        }
         return el;
       }
 
@@ -284,6 +387,8 @@
           sel.innerHTML = (s.models || []).map((m) => `<option value="${esc(m.key)}">${esc(m.name)}</option>`).join("") || `<option value="">No models</option>`;
           if (cur) sel.value = cur;
           $("#who").textContent = s.character ? `talking to ${s.character}` : "by R.G. Studios";
+          pcVoice = s.voice || "af_heart";
+          liveAvailable = !!s.live;
           setBusy(!!s.busy);
         } catch {}
       }
@@ -298,6 +403,7 @@
           // whichever device it was typed on.
           if (awaiting || ev.chatId === chatId) {
             awaiting = false;
+            call.started();
             if (ev.chatId !== chatId) {
               chatId = ev.chatId;
               localStorage.setItem("prestige-chat", chatId);
@@ -314,6 +420,7 @@
             loadChat(chatId);
           }
         } else if (ev.type === "delta" && ev.chatId === chatId) {
+          call.delta(ev.text);
           if (!streaming) startStreaming();
           streaming.text += ev.text;
           streaming.el.querySelector(".body").innerHTML = md(streaming.text) + '<span class="caret"></span>';
@@ -322,6 +429,7 @@
           if (!streaming) startStreaming();
           if (!streaming.text) streaming.el.querySelector(".body").innerHTML = `<span class="status">${esc(ev.text)}</span>`;
         } else if (ev.type === "done") {
+          if (ev.chatId === chatId) call.done();
           setBusy(false);
           if (ev.chatId === chatId) {
             awaiting = false;
@@ -331,7 +439,17 @@
           }
         } else if (ev.type === "saved" && ev.chatId === chatId && !streaming) {
           loadChat(chatId);
+        } else if (ev.type === "live") {
+          // The PC opened a chat for the Live call: follow it.
+          if (ev.chatId && ev.chatId !== chatId) {
+            chatId = ev.chatId;
+            localStorage.setItem("prestige-chat", chatId);
+            chat = { id: chatId, title: "Live call", messages: [] };
+            render();
+          }
+          call.liveReady(ev.model);
         } else if (ev.type === "error") {
+          call.failed(ev.text);
           toast(ev.text);
           awaiting = false;
           if (!ev.busy) setBusy(false);
@@ -383,25 +501,36 @@
       }, 4000);
 
       let sentAt = 0;
-      async function send(text) {
+      /** Sends a message (with photos, or as a turn of a call) to the PC, which runs it in its own chat. */
+      async function send(text, extra = {}) {
         try {
           awaiting = true;
           sentAt = Date.now();
-          await api("/api/send", { method: "POST", body: JSON.stringify({ chatId, text, model: $("#model").value || null }) });
+          await api("/api/send", { method: "POST", body: JSON.stringify({ chatId, text, model: $("#model").value || null, ...extra }) });
           setBusy(true);
+          return true;
         } catch (e) {
           awaiting = false;
           toast(e.message);
+          return false;
         }
       }
 
-      $("#composer").addEventListener("submit", (e) => {
+      $("#composer").addEventListener("submit", async (e) => {
         e.preventDefault();
         const t = $("#text").value.trim();
-        if (!t || busy) return;
+        if ((!t && !shots.length) || busy) return;
+        const images = shots.slice();
         $("#text").value = "";
         $("#text").style.height = "";
-        send(t);
+        shots = [];
+        drawShots();
+        if (!(await send(t, images.length ? { images } : {}))) {
+          // Not sent: put it back.
+          $("#text").value = t;
+          shots = images;
+          drawShots();
+        }
       });
       $("#text").addEventListener("input", () => {
         const ta = $("#text");
@@ -447,6 +576,668 @@
         await api("/api/forget", { method: "POST" }).catch(() => {});
         signOut();
       });
+
+      // ---------- the Android app (PrestigeApp is its bridge; absent in a browser) ----------
+      const app = window.PrestigeApp || null;
+      // The camera and the microphone need a secure page: the app (it serves this page from the phone itself), or HTTPS.
+      const avOk = () => !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) && window.isSecureContext;
+      function micError(e) {
+        const n = e && e.name;
+        if (n === "NotAllowedError") return app ? "Allow the microphone for Prestige (Android Settings → Apps → Prestige → Permissions)." : "The browser blocked the microphone.";
+        if (n === "NotFoundError") return "No microphone found.";
+        return `Microphone: ${e && e.message ? e.message : e}`;
+      }
+
+      // ---------- speech out: the PC's voice (Kokoro, or VoxCPM2), sentence by sentence as a reply streams ----------
+      let pcVoice = "af_heart";
+      let liveAvailable = false;
+      let outCtx = null;
+      let outAnalyser = null;
+      function out() {
+        if (!outCtx) {
+          outCtx = new (window.AudioContext || window.webkitAudioContext)();
+          outAnalyser = outCtx.createAnalyser();
+          outAnalyser.fftSize = 512;
+          outAnalyser.connect(outCtx.destination);
+        }
+        if (outCtx.state === "suspended") outCtx.resume();
+        return outCtx;
+      }
+      function rms(buf) {
+        let s = 0;
+        for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i];
+        return Math.sqrt(s / buf.length);
+      }
+      function outLevel() {
+        if (!outAnalyser) return 0;
+        const b = new Float32Array(outAnalyser.fftSize);
+        outAnalyser.getFloatTimeDomainData(b);
+        return rms(b);
+      }
+
+      /** What a person would read aloud: no code, markdown, links or emoji. */
+      function speakable(t) {
+        return t
+          .replace(/`[^`]*`/g, " ")
+          .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+          .replace(/https?:\/\/\S+/g, "a link")
+          .replace(/[*_#>~|]/g, "")
+          .replace(/\p{Extended_Pictographic}/gu, "")
+          .replace(/\s+/g, " ")
+          .trim();
+      }
+
+      const speech = {
+        gen: 0,
+        pending: "",
+        inCode: false,
+        open: false, // a reply is still streaming in
+        chain: Promise.resolve(),
+        queue: [],
+        playing: false,
+        source: null,
+        warned: false,
+        onIdle: null,
+        get busy() {
+          return this.playing || this.queue.length > 0;
+        },
+        /** More of the reply: whole sentences are sent to the PC's voice as soon as they're complete. */
+        add(t) {
+          this.open = true;
+          this.pending += t;
+          const re = /[.!?…]+["')\]]*\s+|\n+/g;
+          let last = 0;
+          let m;
+          while ((m = re.exec(this.pending))) {
+            this.say(this.pending.slice(last, m.index + m[0].length));
+            last = m.index + m[0].length;
+          }
+          this.pending = this.pending.slice(last);
+        },
+        /** The reply is complete. */
+        end() {
+          this.open = false;
+          if (this.pending.trim()) this.say(this.pending);
+          this.pending = "";
+          this.inCode = false;
+          if (!this.busy) this.idle();
+        },
+        say(s) {
+          let keep = "";
+          s.split("```").forEach((part, i) => {
+            if (i > 0) this.inCode = !this.inCode;
+            if (!this.inCode) keep += part;
+          });
+          const text = speakable(keep);
+          if (!/[\p{L}\p{N}]/u.test(text)) return;
+          const gen = this.gen;
+          this.chain = this.chain.then(() => (gen === this.gen ? this.synth(text) : null)).catch((e) => {
+            if (!this.warned) toast(`Couldn't speak: ${e.message}`);
+            this.warned = true;
+            return null;
+          });
+          this.queue.push(this.chain);
+          this.pump();
+        },
+        async synth(text) {
+          const r = await fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ input: text, voice: pcVoice }) });
+          if (!r.ok) {
+            const j = await r.json().catch(() => ({}));
+            throw new Error(j.error || `HTTP ${r.status}`);
+          }
+          return out().decodeAudioData(await r.arrayBuffer());
+        },
+        async pump() {
+          if (this.playing) return;
+          this.playing = true;
+          const gen = this.gen;
+          while (this.queue.length && gen === this.gen) {
+            const buf = await this.queue[0];
+            if (gen !== this.gen) return;
+            this.queue.shift();
+            if (buf) await this.play(buf);
+          }
+          if (gen !== this.gen) return;
+          this.playing = false;
+          if (!this.open) this.idle();
+        },
+        play(buf) {
+          return new Promise((done) => {
+            const src = out().createBufferSource();
+            src.buffer = buf;
+            src.connect(outAnalyser);
+            src.onended = () => {
+              if (this.source === src) this.source = null;
+              done();
+            };
+            this.source = src;
+            src.start();
+          });
+        },
+        /** Silence, now (talking over Prestige, or another reply starting). */
+        stop() {
+          this.gen++;
+          Object.assign(this, { queue: [], pending: "", inCode: false, open: false, playing: false, warned: false, chain: Promise.resolve() });
+          try {
+            this.source?.stop();
+          } catch {}
+          this.source = null;
+        },
+        idle() {
+          if (this.onIdle) this.onIdle();
+        },
+      };
+
+      // ---------- the microphone: mono PCM, cut into utterances by a voice-activity detector in calls ----------
+      const mic = {
+        stream: null,
+        ctx: null,
+        node: null,
+        src: null,
+        rate: 16000,
+        onframe: null,
+        async open() {
+          if (this.stream) return;
+          this.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
+          const AC = window.AudioContext || window.webkitAudioContext;
+          try {
+            this.ctx = new AC({ sampleRate: 16000 }); // what Whisper wants: small uploads
+            this.src = this.ctx.createMediaStreamSource(this.stream);
+          } catch {
+            this.ctx?.close();
+            this.ctx = new AC();
+            this.src = this.ctx.createMediaStreamSource(this.stream);
+          }
+          this.rate = this.ctx.sampleRate;
+          this.node = this.ctx.createScriptProcessor(1024, 1, 1);
+          this.node.onaudioprocess = (e) => this.onframe && this.onframe(new Float32Array(e.inputBuffer.getChannelData(0)));
+          this.src.connect(this.node);
+          this.node.connect(this.ctx.destination);
+        },
+        close() {
+          this.stream?.getTracks().forEach((t) => t.stop());
+          this.node?.disconnect();
+          this.src?.disconnect();
+          this.ctx?.close().catch(() => {});
+          Object.assign(this, { stream: null, ctx: null, node: null, src: null, onframe: null });
+        },
+      };
+
+      /** PCM frames as a 16-bit WAV, at about 16 kHz. */
+      function wav(chunks, rate) {
+        const n = chunks.reduce((a, c) => a + c.length, 0);
+        const f = Math.max(1, Math.floor(rate / 16000));
+        const len = Math.floor(n / f);
+        const sr = Math.round(rate / f);
+        const v = new DataView(new ArrayBuffer(44 + len * 2));
+        const str = (o, s) => {
+          for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i));
+        };
+        str(0, "RIFF");
+        v.setUint32(4, 36 + len * 2, true);
+        str(8, "WAVE");
+        str(12, "fmt ");
+        v.setUint32(16, 16, true);
+        v.setUint16(20, 1, true);
+        v.setUint16(22, 1, true);
+        v.setUint32(24, sr, true);
+        v.setUint32(28, sr * 2, true);
+        v.setUint16(32, 2, true);
+        v.setUint16(34, 16, true);
+        str(36, "data");
+        v.setUint32(40, len * 2, true);
+        let o = 44;
+        let acc = 0;
+        let k = 0;
+        for (const c of chunks)
+          for (let i = 0; i < c.length; i++) {
+            acc += c[i];
+            if (++k === f) {
+              const x = Math.max(-1, Math.min(1, acc / f));
+              if (o < v.byteLength) v.setInt16(o, x < 0 ? x * 0x8000 : x * 0x7fff, true);
+              o += 2;
+              acc = 0;
+              k = 0;
+            }
+          }
+        return new Blob([v], { type: "audio/wav" });
+      }
+
+      /** Whisper on the PC (the voice server). */
+      async function transcribe(blob) {
+        const fd = new FormData();
+        fd.append("file", blob, "speech.wav");
+        fd.append("language", "en");
+        const r = await fetch("/api/stt", { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+        return String(j.text || "").trim();
+      }
+      // What Whisper hears in a cough, a door or silence.
+      const NOISE = /^(?:[\W_]*|you|thank you|thanks|thanks for watching|bye|uh+|um+|hmm+)[.!?]*$/i;
+
+      // ---------- dictation: the composer's mic ----------
+      let dictating = null;
+      $("#mic").addEventListener("click", async () => {
+        if (call.on) return;
+        if (dictating) {
+          const chunks = dictating;
+          dictating = null;
+          mic.close();
+          $("#mic").classList.remove("on");
+          if (chunks.length < 6) return;
+          $("#text").placeholder = "Transcribing…";
+          try {
+            const t = await transcribe(wav(chunks, mic.rate));
+            if (t && !NOISE.test(t)) {
+              const ta = $("#text");
+              ta.value = ta.value.trim() ? `${ta.value.trim()} ${t}` : t;
+              ta.dispatchEvent(new Event("input"));
+            }
+          } catch (e) {
+            toast(e.message);
+          } finally {
+            $("#text").placeholder = "Message Prestige…";
+          }
+          return;
+        }
+        try {
+          await mic.open();
+        } catch (e) {
+          toast(micError(e));
+          return;
+        }
+        dictating = [];
+        mic.onframe = (f) => dictating && dictating.length < 2000 && dictating.push(f);
+        $("#mic").classList.add("on");
+        toast("Listening. Tap the mic again when you're done.");
+      });
+
+      // ---------- photos: taken here or picked from the gallery, sent with the next message ----------
+      let shots = [];
+      function drawShots() {
+        const row = $("#attach-row");
+        row.hidden = !shots.length;
+        row.innerHTML = "";
+        shots.forEach((b64, i) => {
+          const d = document.createElement("div");
+          d.className = "a";
+          d.innerHTML = `<img alt="" /><button type="button" aria-label="Remove">✕</button>`;
+          d.querySelector("img").src = `data:image/jpeg;base64,${b64}`;
+          d.querySelector("button").addEventListener("click", () => {
+            shots.splice(i, 1);
+            drawShots();
+          });
+          row.appendChild(d);
+        });
+      }
+      /** A picture as a base64 JPEG, at most `max` pixels on its longer side. */
+      function jpeg(src, w, h, max = 1280, q = 0.85) {
+        const k = Math.min(1, max / Math.max(w, h));
+        const c = document.createElement("canvas");
+        c.width = Math.round(w * k);
+        c.height = Math.round(h * k);
+        c.getContext("2d").drawImage(src, 0, 0, c.width, c.height);
+        return c.toDataURL("image/jpeg", q).split(",")[1];
+      }
+      async function fileToJpeg(file) {
+        const bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
+        try {
+          return jpeg(bmp, bmp.width, bmp.height);
+        } finally {
+          bmp.close?.();
+        }
+      }
+      async function openCam(video, facing) {
+        const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+        video.srcObject = s;
+        await video.play().catch(() => {});
+        return s;
+      }
+      const stopStream = (s) => s && s.getTracks().forEach((t) => t.stop());
+
+      $("#attach").addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (shots.length >= 4) return toast("Up to 4 photos at a time.");
+        if (!avOk()) return $("#file").click();
+        $("#attach-menu").hidden = !$("#attach-menu").hidden;
+      });
+      document.addEventListener("click", (e) => {
+        if (!e.target.closest("#attach-menu, #attach")) $("#attach-menu").hidden = true;
+      });
+      $("#pick-photo").addEventListener("click", () => {
+        $("#attach-menu").hidden = true;
+        $("#file").click();
+      });
+      $("#file").addEventListener("change", async () => {
+        for (const f of [...$("#file").files].slice(0, 4 - shots.length)) {
+          try {
+            shots.push(await fileToJpeg(f));
+          } catch {
+            toast("Couldn't read that picture.");
+          }
+        }
+        $("#file").value = "";
+        drawShots();
+      });
+
+      let camFacing = "environment";
+      let camStream = null;
+      async function camSheet(on) {
+        $("#cam-sheet").hidden = !on;
+        stopStream(camStream);
+        camStream = null;
+        if (!on) return;
+        try {
+          camStream = await openCam($("#cam-video"), camFacing);
+        } catch (e) {
+          $("#cam-sheet").hidden = true;
+          toast(e && e.name === "NotAllowedError" ? "Allow the camera for Prestige (Android Settings → Apps → Prestige → Permissions)." : `Camera: ${e.message || e}`);
+        }
+      }
+      $("#take-photo").addEventListener("click", () => {
+        $("#attach-menu").hidden = true;
+        camSheet(true);
+      });
+      $("#cam-close").addEventListener("click", () => camSheet(false));
+      $("#cam-flip").addEventListener("click", () => {
+        camFacing = camFacing === "user" ? "environment" : "user";
+        camSheet(true);
+      });
+      $("#cam-shoot").addEventListener("click", () => {
+        const v = $("#cam-video");
+        if (!v.videoWidth) return;
+        shots.push(jpeg(v, v.videoWidth, v.videoHeight));
+        drawShots();
+        camSheet(false);
+      });
+
+      // ---------- a render, full screen (save it to the phone from here) ----------
+      let viewing = null;
+      function view(path, kind) {
+        viewing = { path, kind };
+        const b = $("#viewer-body");
+        b.innerHTML = kind === "video" ? `<video controls playsinline autoplay></video>` : `<img alt="" />`;
+        b.firstChild.src = fileUrl(path);
+        $("#viewer").hidden = false;
+      }
+      $("#viewer-close").addEventListener("click", () => {
+        $("#viewer").hidden = true;
+        $("#viewer-body").innerHTML = "";
+      });
+      $("#viewer-save").addEventListener("click", () => {
+        if (!viewing) return;
+        const name = viewing.path.split(/[\\/]/).pop();
+        const url = new URL(fileUrl(viewing.path), location.href).href;
+        if (app) app.save(url, name);
+        else {
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = name;
+          a.click();
+        }
+      });
+
+      // ---------- calls: Voice (the chat's model) and Live (the Live model, with the camera) ----------
+      const STATUS = {
+        starting: "Getting ready…",
+        listening: "Listening… just talk",
+        hearing: "Hearing you…",
+        transcribing: "Transcribing…",
+        thinking: "Thinking…",
+        speaking: "Speaking… talk to interrupt",
+      };
+      const call = {
+        on: false,
+        mode: "voice",
+        state: "off",
+        muted: false,
+        cut: false, // the reply being streamed was talked over: ignore the rest of it
+        talking: false,
+        floor: 0.01,
+        loud: 0,
+        quiet: 0,
+        pre: [],
+        frames: [],
+        micRms: 0,
+        cam: null,
+        facing: "user",
+        replyEl: null,
+        raf: 0,
+        wake: null,
+        liveTimer: 0,
+        // Hooks from the event stream.
+        started() {
+          if (!this.on) return;
+          this.cut = false;
+          this.replyEl = null;
+        },
+        delta(t) {
+          if (!this.on || this.cut) return;
+          if (!this.replyEl) this.replyEl = line("re", "");
+          this.replyEl.textContent += t;
+          this.replyEl.scrollIntoView({ block: "end" });
+          if (this.state === "thinking") setCallState("speaking");
+          speech.add(t);
+        },
+        done() {
+          if (!this.on || this.cut) return;
+          speech.end();
+        },
+        liveReady(model) {
+          if (!this.on || this.mode !== "live") return;
+          clearTimeout(this.liveTimer);
+          setCallState("listening");
+          $("#call-status").textContent = `Live with ${model} · ${STATUS.listening}`;
+        },
+        failed() {
+          if (this.on && (this.state === "thinking" || this.state === "starting")) setCallState("listening");
+        },
+      };
+
+      function line(cls, text) {
+        const box = $("#call-text");
+        const d = document.createElement("div");
+        d.className = cls;
+        d.textContent = text;
+        box.appendChild(d);
+        while (box.children.length > 8) box.firstChild.remove();
+        d.scrollIntoView({ block: "end" });
+        return d;
+      }
+
+      function setCallState(s) {
+        call.state = s;
+        $("#call-status").textContent = call.muted && s === "listening" ? "Muted" : STATUS[s] || "";
+      }
+
+      async function openCall(mode) {
+        if (!avOk()) return toast("Voice and Live need the Prestige app on your phone.");
+        out(); // audio starts from this tap
+        Object.assign(call, { on: true, muted: false, cut: true, talking: false, loud: 0, quiet: 0, pre: [], frames: [], floor: 0.01, replyEl: null });
+        $("#call-text").innerHTML = "";
+        $("#call-mute").textContent = "Mute";
+        $("#call-ui").hidden = false;
+        setCallState("starting");
+        try {
+          await mic.open();
+        } catch (e) {
+          $("#call-status").textContent = micError(e);
+          return;
+        }
+        if (!call.on) return mic.close();
+        mic.onframe = vad;
+        speech.onIdle = () => call.on && !call.talking && call.state !== "transcribing" && call.state !== "thinking" && setCallState("listening");
+        navigator.wakeLock?.request("screen").then((l) => (call.wake = l)).catch(() => {});
+        app?.keepAwake(true);
+        animateOrb();
+        await setMode(mode);
+      }
+
+      async function setMode(mode) {
+        if (mode === "live" && !liveAvailable) {
+          toast("Live needs Qwen3.5 2B or 4B on the PC. Add one from the model catalog there.");
+          mode = "voice";
+        }
+        const was = call.mode;
+        call.mode = mode;
+        document.querySelectorAll("#call-mode button").forEach((b) => b.classList.toggle("sel", b.dataset.mode === mode));
+        $("#call-ui").classList.toggle("small", mode === "live");
+        $("#call-flip").hidden = mode !== "live";
+        if (mode === "live") {
+          $("#call-cam").hidden = false;
+          try {
+            stopStream(call.cam);
+            call.cam = await openCam($("#call-cam"), call.facing);
+          } catch (e) {
+            toast(`Camera: ${e.message || e}. Live goes on without it.`);
+            $("#call-cam").hidden = true;
+          }
+          setCallState("starting");
+          $("#call-status").textContent = "Getting the PC ready for Live…";
+          // The PC makes room on the GPU and says "live" when the call's chat is open.
+          clearTimeout(call.liveTimer);
+          call.liveTimer = setTimeout(() => call.on && call.state === "starting" && setCallState("listening"), 20000);
+          api("/api/live", { method: "POST", body: JSON.stringify({ on: true }) }).catch((e) => {
+            toast(e.message);
+            setCallState("listening");
+          });
+        } else {
+          stopStream(call.cam);
+          call.cam = null;
+          $("#call-cam").hidden = true;
+          if (was === "live") api("/api/live", { method: "POST", body: JSON.stringify({ on: false }) }).catch(() => {});
+          setCallState("listening");
+        }
+      }
+
+      function endCall() {
+        if (!call.on) return;
+        call.on = false;
+        clearTimeout(call.liveTimer);
+        mic.close();
+        speech.stop();
+        speech.onIdle = null;
+        stopStream(call.cam);
+        call.cam = null;
+        if (call.mode === "live") api("/api/live", { method: "POST", body: JSON.stringify({ on: false }) }).catch(() => {});
+        call.wake?.release().catch(() => {});
+        call.wake = null;
+        app?.keepAwake(false);
+        cancelAnimationFrame(call.raf);
+        $("#call-ui").hidden = true;
+        if (chatId) loadChat(chatId);
+      }
+
+      /** Voice-activity detection on each ~64 ms of microphone audio. */
+      function vad(f) {
+        const r = rms(f);
+        call.micRms = r;
+        if (!call.on || call.muted || call.state === "starting" || call.state === "transcribing") {
+          call.talking = false;
+          call.loud = 0;
+          return;
+        }
+        const frameSecs = f.length / mic.rate;
+        // While Prestige speaks, only a clearly louder voice counts (echo cancellation takes most of the speaker out).
+        const over = speech.busy;
+        const thr = over ? Math.max(0.05, call.floor * 8) : Math.max(0.012, call.floor * 3.5);
+        if (!call.talking) {
+          if (r < thr) call.floor = call.floor * 0.98 + r * 0.02;
+          call.pre.push(f);
+          while (call.pre.length * frameSecs > 0.35) call.pre.shift(); // the first syllable, from before it was loud enough
+          call.loud = r > thr ? call.loud + 1 : 0;
+          if (call.loud * frameSecs >= (over ? 0.35 : 0.18)) {
+            call.talking = true;
+            call.frames = call.pre;
+            call.pre = [];
+            call.quiet = 0;
+            if (speech.busy) speech.stop(); // talked over: Prestige stops speaking at once
+            setCallState("hearing");
+          }
+          return;
+        }
+        call.frames.push(f);
+        call.quiet = r > thr * 0.7 ? 0 : call.quiet + 1;
+        const secs = call.frames.length * frameSecs;
+        if (call.quiet * frameSecs > (call.mode === "live" ? 0.7 : 0.9) || secs > 30) {
+          const frames = call.frames;
+          call.talking = false;
+          call.frames = [];
+          call.loud = 0;
+          utterance(frames, secs);
+        }
+      }
+
+      async function utterance(frames, secs) {
+        if (secs < 0.5) return setCallState("listening");
+        setCallState("transcribing");
+        let text = "";
+        try {
+          text = await transcribe(wav(frames, mic.rate));
+        } catch (e) {
+          if (call.on) {
+            toast(e.message);
+            setCallState("listening");
+          }
+          return;
+        }
+        if (!call.on) return;
+        if (!text || NOISE.test(text)) return setCallState("listening");
+        speech.stop();
+        call.cut = true; // what's left of an earlier reply is dropped; "started" opens the new one
+        line("you", text);
+        setCallState("thinking");
+        const extra = { interrupt: true };
+        if (call.mode === "live") {
+          extra.live = true;
+          const v = $("#call-cam");
+          if (call.cam && v.videoWidth) extra.images = [jpeg(v, v.videoWidth, v.videoHeight, 768, 0.8)];
+        }
+        if (!(await send(text, extra))) setCallState("listening");
+      }
+
+      function animateOrb() {
+        const orb = $("#orb");
+        const step = () => {
+          if (!call.on) return;
+          const lvl = Math.min(1, Math.max(outLevel() * 4, call.talking ? call.micRms * 6 : 0));
+          orb.style.transform = `scale(${(1 + lvl * 0.3).toFixed(3)})`;
+          call.raf = requestAnimationFrame(step);
+        };
+        call.raf = requestAnimationFrame(step);
+      }
+
+      $("#call").addEventListener("click", () => openCall("voice"));
+      $("#call-end").addEventListener("click", endCall);
+      $("#call-mode").addEventListener("click", (e) => {
+        const b = e.target.closest("button[data-mode]");
+        if (b && call.on && b.dataset.mode !== call.mode) setMode(b.dataset.mode);
+      });
+      $("#call-mute").addEventListener("click", () => {
+        call.muted = !call.muted;
+        $("#call-mute").textContent = call.muted ? "Unmute" : "Mute";
+        if (call.state === "listening" || call.state === "hearing") setCallState("listening");
+      });
+      $("#call-flip").addEventListener("click", async () => {
+        call.facing = call.facing === "user" ? "environment" : "user";
+        stopStream(call.cam);
+        try {
+          call.cam = await openCam($("#call-cam"), call.facing);
+        } catch (e) {
+          toast(`Camera: ${e.message || e}`);
+        }
+      });
+
+      // Voice, Live, dictation and the camera show where they can work.
+      if (avOk()) {
+        $("#call").hidden = false;
+        $("#mic").hidden = false;
+      } else $("#hint").textContent += " · voice, Live and the camera work in the Prestige Android app";
+      if (app) {
+        $("#change-pc").hidden = false;
+        $("#change-pc").addEventListener("click", () => app.setup());
+      }
 
       function start() {
         $("#pair").hidden = true;
