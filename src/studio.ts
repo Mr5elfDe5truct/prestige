@@ -39,7 +39,8 @@ import {
   type Quality,
   type SettingsKey,
 } from "./gensettings";
-import { CONSENT, bindRefChoices, hasFiles, imageIn, loadReference, onRefPrefsChange, refChoicesHtml, refPrefs, refPrompt, sceneOf, uploadReference, type RefKind, type Reference } from "./reference";
+import { CONSENT, bindRefChoices, hasFiles, imageIn, loadReference, onRefPrefsChange, refChoicesHtml, refPrefs, refPrompt, sceneOf, setRefPrefs, uploadReference, type RefKind, type Reference } from "./reference";
+import { characterById, characters, faceBlob, onCharactersChange } from "./characters";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
 const $$ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => Array.from(r.querySelectorAll(s)) as T[];
@@ -712,6 +713,13 @@ function initRefSlot() {
     if (f) setRef(f);
   });
   $("#ref-clear").addEventListener("click", () => setRef(null));
+  $("#ref-character").addEventListener("change", async (e) => {
+    const c = characterById((e.target as HTMLSelectElement).value);
+    if (!c?.face) return;
+    setRefPrefs({ kind: "character" });
+    await setRef(faceBlob(c));
+  });
+  onCharactersChange(() => renderCreate());
   bindRefChoices($("#ref-picks"));
   onRefPrefsChange(() => renderCreate());
   // Drop a picture anywhere on the create bar, or paste one while Studio is open.
@@ -770,6 +778,13 @@ function renderRefSlot(gm: GenMode, webcam: boolean) {
   $("#ref-slot").hidden = webcam || !!srcAsset || !usable;
   $("#ref-add").hidden = !!ref;
   $("#ref-set").hidden = !ref;
+  // Or one of the characters' faces.
+  const faces = characters().filter((c) => c.face);
+  $("#ref-char-wrap").hidden = !!ref || !faces.length;
+  if (!ref && faces.length) {
+    const sel = $<HTMLSelectElement>("#ref-character");
+    sel.innerHTML = `<option value="">Pick…</option>` + faces.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("");
+  }
   if (!ref) return;
   ($("#ref-img") as HTMLImageElement).src = ref.url;
   $("#ref-what").textContent =
@@ -1419,11 +1434,18 @@ export async function modelLabel(kind: MediaKind, withRef = false) {
 
 /** Makes an image (or as many as the settings ask for) or a video and resolves with the saved files. With a
  *  reference, the picture's character or item goes into the scene (for a video, into its first frame). */
-export async function renderMedia(kind: MediaKind, prompt: string, progress: (pct: number, label: string) => void, r?: Reference): Promise<Asset[]> {
+export async function renderMedia(
+  kind: MediaKind,
+  prompt: string,
+  progress: (pct: number, label: string) => void,
+  r?: Reference,
+  kindOverride?: RefKind,
+): Promise<Asset[]> {
   await ensureWorkflows();
   if (!r) return run(chatMode(kind), prompt, null, {}, progress);
-  // The same choices as Studio's reference slot: Auto / Character / Item, and for a video its first frame.
-  const refKind = refPrefs().kind;
+  // The same choices as Studio's reference slot: Auto / Character / Item, and for a video its first frame
+  // (a character's face is always a Character).
+  const refKind = kindOverride ?? refPrefs().kind;
   const gm = kind === "video" ? "refvideo" : refImageMode();
   for (const need of chained(gm) ? (["refvideo", refImageMode()] as GenMode[]) : [gm])
     if (!workflows[need]) throw new Error(`workflows\\${modeOf(need).file} wasn't found`);

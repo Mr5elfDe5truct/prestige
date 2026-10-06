@@ -721,3 +721,48 @@ dialog.knowledge.drop { outline: 2px dashed var(--gold); outline-offset: -8px; }
 .tool-steps.folded .tool-step { display: none; }
 .steps-toggle { font-family: var(--mono); font-size: 11.5px; padding: 2px 0; }
 .msg.ai .chip + .tool-steps { margin-top: 0; }
+/* ---------- 0.22: Characters ---------- */
+.persona-pick { position: relative; }
+.persona-btn { padding: 3px 12px 3px 4px; }
+.persona-btn .pf, .persona-menu .pf, .ch-list .pf { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; flex: none; display: inline-grid; place-items: center; }
+.pf-ini { background: color-mix(in srgb, var(--gold) 22%, var(--panel-2)); color: var(--gold); font: 600 11px var(--display); }
+.pf-mark { background: var(--panel); border: 1px solid var(--line); }
+.pf-mark svg { width: 18px; height: 18px; }
+.persona-btn .pf-slot { display: inline-flex; }
+.persona-menu button { grid-template-columns: auto 1fr; align-items: center; }
+.persona-menu button .pf { grid-row: span 2; }
+.persona-menu button .d { grid-column: 2; }
+.persona-menu button.more { grid-template-columns: 1fr; }
+.persona-menu button.more .d { grid-column: 1; }
+dialog.characters { width: min(820px, calc(100vw - 32px)); max-height: calc(100vh - 48px); display: none; }
+dialog.characters[open] { display: flex; flex-direction: column; gap: 12px; }
+.ch-body { display: grid; grid-template-columns: 200px 1fr; gap: 18px; min-height: 0; overflow: hidden; }
+.ch-side { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.ch-list { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+.ch-list button { display: flex; align-items: center; gap: 10px; border: 0; background: none; border-radius: 8px; padding: 6px 8px; text-align: left; }
+.ch-list button:hover, .ch-list button.sel { background: var(--panel-2); }
+.ch-list button.sel { box-shadow: inset 2px 0 0 var(--red); }
+.ch-list button span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ch-form { overflow-y: auto; padding-right: 4px; }
+.ch-empty { align-self: center; }
+.ch-top { display: flex; gap: 16px; align-items: flex-start; }
+.ch-face-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.ch-face { width: 112px; height: 112px; border-radius: 50%; border: 1px dashed var(--line); background: var(--panel-2); overflow: hidden; padding: 0; display: grid; place-items: center; color: var(--muted); font-size: 12px; }
+.ch-face:hover, .ch-face.drop { border-color: var(--gold); }
+.ch-face img { width: 100%; height: 100%; object-fit: cover; }
+.ch-fields { flex: 1; min-width: 0; }
+.ch-fields label:first-child { margin-top: 0; }
+.ch-voice-row { display: flex; gap: 8px; align-items: center; }
+.ch-voice-row select { flex: 1; min-width: 0; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font: 13px var(--body); padding: 8px; text-transform: none; letter-spacing: 0; }
+.ch-memory { display: flex; flex-direction: column; gap: 4px; max-height: 180px; overflow-y: auto; }
+.ch-fact { display: flex; gap: 8px; align-items: flex-start; justify-content: space-between; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font-size: 13px; }
+.ch-fact button { border: 0; background: none; color: var(--muted); padding: 0 2px; }
+.ch-fact button:hover { color: var(--red); }
+.ch-fact-row { display: flex; gap: 8px; margin-top: 8px; }
+.ch-fact-row input { flex: 1; }
+@media (max-width: 700px) { .ch-body { grid-template-columns: 1fr; } .ch-list { flex-direction: row; flex-wrap: wrap; } }
+.live-face { position: absolute; left: 50%; top: 50%; width: min(30%, 210px); aspect-ratio: 1; object-fit: cover; border-radius: 50%; transform: translate(-50%, -50%); border: 2px solid color-mix(in srgb, var(--gold) 60%, transparent); box-shadow: 0 0 calc(30px * var(--glow)) color-mix(in srgb, var(--red) calc(45% * var(--glow)), transparent); }
+.live-face:not([hidden]) ~ .live-self { z-index: 1; }
+#live.has-face .live-mark { display: none; }
+.ref-char { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.ref-char select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font: 12.5px var(--body); padding: 5px 8px; }.persona-menu { left: auto; right: 0; }
