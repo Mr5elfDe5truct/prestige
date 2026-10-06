@@ -1,0 +1,150 @@
+<!doctype html>
+<!-- Prestige for Android: connecting to the PC. Prestige by R.G. Studios · developed by Ryan B. Gyles. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Prestige</title>
+    <style>
+      :root { --bg: #0a0707; --panel: #120c0c; --panel-2: #1a1111; --line: #2c1c1c; --fg: #efe4d6; --muted: #9c8a7f; --red: #d6202b; --gold: #d9a441; color-scheme: dark; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, Roboto, sans-serif; }
+      main { width: min(92vw, 400px); margin: 0 auto; padding: 36px 0 24px; display: flex; flex-direction: column; gap: 14px; text-align: center; }
+      img.logo { width: 80px; height: 80px; border-radius: 18px; margin: 0 auto; }
+      h1 { font: 400 26px Georgia, serif; margin: 0; letter-spacing: .03em; }
+      small.by { font-size: 10px; letter-spacing: .2em; text-transform: uppercase; color: var(--muted); margin-top: -10px; }
+      p { color: var(--muted); margin: 0; font-size: 14px; }
+      b { color: var(--fg); }
+      .btn { font: inherit; border: 1px solid var(--line); background: var(--panel-2); color: var(--fg); border-radius: 10px; padding: 12px 14px; }
+      .btn.primary { background: var(--red); border-color: var(--red); color: #fff; font-weight: 600; }
+      input { font: 17px ui-monospace, monospace; text-align: center; background: var(--panel-2); color: var(--fg); border: 1px solid var(--line); border-radius: 10px; padding: 12px; width: 100%; }
+      .or { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
+      .or::before, .or::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
+      .err { color: #ff8a8a; min-height: 1.4em; font-size: 14px; }
+      .scan { position: fixed; inset: 0; background: #000; display: flex; flex-direction: column; z-index: 5; }
+      .scan video { flex: 1; min-height: 0; width: 100%; object-fit: cover; }
+      .scan .frame { position: absolute; left: 50%; top: 42%; width: 64vw; height: 64vw; transform: translate(-50%, -50%); border: 3px solid var(--gold); border-radius: 18px; box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .45); pointer-events: none; }
+      .scan .bar { padding: 16px; display: flex; flex-direction: column; gap: 8px; background: var(--bg); text-align: center; }
+      [hidden] { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img class="logo" src="/icon.png" alt="" />
+      <h1>Prestige</h1>
+      <small class="by">by R.G. Studios</small>
+      <p>On your PC, open Prestige and turn on <b>Settings → Phone access</b>. Then scan the QR code it shows, or type the address under it.</p>
+      <button class="btn primary" id="scan-btn" type="button">Scan the QR code</button>
+      <div class="or">or</div>
+      <input id="addr" placeholder="192.168.1.20:8765" inputmode="url" autocapitalize="off" autocomplete="off" spellcheck="false" />
+      <input id="code" placeholder="Pairing code (6 digits)" inputmode="numeric" maxlength="6" />
+      <button class="btn" id="go" type="button">Connect</button>
+      <div class="err" id="err"></div>
+      <p>Everything runs on your PC; this phone talks to it over your own Wi-Fi (or Tailscale, away from home).</p>
+    </main>
+    <section class="scan" id="scan" hidden>
+      <video id="video" playsinline muted autoplay></video>
+      <div class="frame"></div>
+      <div class="bar">
+        <p>Point the camera at the QR code in Prestige's Settings on the PC.</p>
+        <button class="btn" id="scan-close" type="button">Cancel</button>
+      </div>
+    </section>
+    <script>
+      "use strict";
+      const $ = (s) => document.querySelector(s);
+      const app = window.PrestigeApp;
+      $("#addr").value = app ? app.current() : "";
+      const why = new URLSearchParams(location.search).get("error");
+      if (why) $("#err").textContent = why;
+
+      /** "http://192.168.1.20:8765/#code=123456", or a bare "192.168.1.20:8765". */
+      function parse(text) {
+        const t = text.trim();
+        const code = (t.match(/code=(\d{6})/) || [])[1] || "";
+        const addr = t.replace(/^https?:\/\//i, "").split(/[/#?]/)[0];
+        return { addr, code };
+      }
+
+      function connect(addr, code) {
+        $("#err").textContent = "Connecting…";
+        // (The check blocks for up to 4 s; let the message show first.)
+        setTimeout(() => {
+          const err = app ? app.connect(addr) : "Open this in the Prestige app.";
+          $("#err").textContent = err;
+          if (!err) location.href = `http://127.0.0.1:18765/${code ? `#code=${code}` : ""}`;
+        }, 30);
+      }
+
+      $("#go").addEventListener("click", () => {
+        const p = parse($("#addr").value);
+        connect(p.addr, $("#code").value.replace(/\D/g, "") || p.code);
+      });
+
+      // ---------- scanning the QR code ----------
+      let stream = null;
+      let timer = 0;
+      let detector = null;
+      let jsqr = null;
+      function stop() {
+        clearInterval(timer);
+        stream?.getTracks().forEach((t) => t.stop());
+        stream = null;
+        $("#scan").hidden = true;
+      }
+      async function read(video) {
+        if (detector) {
+          const codes = await detector.detect(video).catch(() => []);
+          return codes[0]?.rawValue || "";
+        }
+        const c = document.createElement("canvas");
+        const k = Math.min(1, 800 / Math.max(video.videoWidth, video.videoHeight));
+        c.width = Math.round(video.videoWidth * k);
+        c.height = Math.round(video.videoHeight * k);
+        const g = c.getContext("2d", { willReadFrequently: true });
+        g.drawImage(video, 0, 0, c.width, c.height);
+        const img = g.getImageData(0, 0, c.width, c.height);
+        return jsqr(img.data, img.width, img.height, { inversionAttempts: "dontInvert" })?.data || "";
+      }
+      $("#scan-btn").addEventListener("click", async () => {
+        $("#err").textContent = "";
+        try {
+          if ("BarcodeDetector" in window && (await BarcodeDetector.getSupportedFormats()).includes("qr_code")) detector = new BarcodeDetector({ formats: ["qr_code"] });
+        } catch {}
+        if (!detector && !jsqr) {
+          await new Promise((ok, fail) => {
+            const s = document.createElement("script");
+            s.src = "/jsQR.js";
+            s.onload = ok;
+            s.onerror = fail;
+            document.head.appendChild(s);
+          }).catch(() => {});
+          jsqr = window.jsQR;
+        }
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+        } catch (e) {
+          $("#err").textContent = e.name === "NotAllowedError" ? "Allow the camera for Prestige to scan the code, or type the address instead." : `Camera: ${e.message}`;
+          return;
+        }
+        const video = $("#video");
+        video.srcObject = stream;
+        $("#scan").hidden = false;
+        let busy = false;
+        timer = setInterval(async () => {
+          if (busy || !video.videoWidth) return;
+          busy = true;
+          const text = await read(video).catch(() => "");
+          busy = false;
+          if (!/^https?:\/\/[^/]+/i.test(text)) return;
+          stop();
+          const p = parse(text);
+          $("#addr").value = p.addr;
+          $("#code").value = p.code;
+          connect(p.addr, p.code);
+        }, 250);
+      });
+      $("#scan-close").addEventListener("click", stop);
+    </script>
+  </body>
+</html>
