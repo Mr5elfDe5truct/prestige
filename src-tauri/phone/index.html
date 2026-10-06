@@ -242,17 +242,38 @@
         return h < 5 ? "Good evening" : h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
       }
 
+      /** Opens a chat (or, with null, a new one). A fetch that fails keeps what's shown: the chat may not be saved yet. */
       async function loadChat(id) {
         chatId = id;
         if (id) localStorage.setItem("prestige-chat", id);
         else localStorage.removeItem("prestige-chat");
-        try {
-          chat = id ? await api(`/api/chat?id=${encodeURIComponent(id)}`) : null;
-        } catch {
+        if (!id) {
           chat = null;
-          chatId = null;
+          render();
+          return;
         }
-        render();
+        try {
+          const c = await api(`/api/chat?id=${encodeURIComponent(id)}`);
+          if (id !== chatId) return; // another chat was opened meanwhile
+          // Only redraw when something changed, so a check doesn't jump the page around.
+          const changed = !chat || chat.id !== c.id || chat.updated !== c.updated || (chat.messages || []).length !== (c.messages || []).length;
+          chat = c;
+          // Its reply is already saved (its "started" came while the phone was asleep): no longer waiting.
+          const msgs = c.messages || [];
+          if (awaiting && msgs.length && msgs[msgs.length - 1].role === "assistant" && c.updated > sentAt) awaiting = false;
+          if (changed) render();
+        } catch {
+          if (!chat) render();
+        }
+      }
+
+      /** The reply bubble that streams in (made by "started", or by the first word if "started" went missing). */
+      function startStreaming(who, status) {
+        streaming = { text: "", el: document.createElement("div") };
+        streaming.el.className = "msg ai";
+        streaming.el.innerHTML = `<div class="who">${esc(who || "Prestige")}</div><div class="body"><span class="status">${esc(status || "Thinking…")}</span></div>`;
+        $("#thread").appendChild(streaming.el);
+        $("#thread").scrollTop = $("#thread").scrollHeight;
       }
 
       async function loadState() {
@@ -267,54 +288,105 @@
         } catch {}
       }
 
+      let lastEvent = 0; // when the stream last said anything (it pings every 10 s)
+
+      function onEvent(ev) {
+        lastEvent = Date.now();
+        if (ev.type === "started") {
+          setBusy(true);
+          // The reply to what this phone just sent (a new chat gets its id here), or one in the chat that's open,
+          // whichever device it was typed on.
+          if (awaiting || ev.chatId === chatId) {
+            awaiting = false;
+            if (ev.chatId !== chatId) {
+              chatId = ev.chatId;
+              localStorage.setItem("prestige-chat", chatId);
+              chat = { id: chatId, title: ev.title || "", messages: [] };
+            }
+            // The message it answers, shown straight away (the fetch below brings the rest).
+            const msgs = chat?.messages || [];
+            const last = msgs[msgs.length - 1];
+            if (ev.text && !(last && last.role === "user" && last.content === ev.text)) msgs.push({ role: "user", content: ev.text });
+            if (chat) chat.messages = msgs;
+            streaming = null;
+            render();
+            startStreaming(ev.who);
+            loadChat(chatId);
+          }
+        } else if (ev.type === "delta" && ev.chatId === chatId) {
+          if (!streaming) startStreaming();
+          streaming.text += ev.text;
+          streaming.el.querySelector(".body").innerHTML = md(streaming.text) + '<span class="caret"></span>';
+          $("#thread").scrollTop = $("#thread").scrollHeight;
+        } else if (ev.type === "status" && ev.chatId === chatId) {
+          if (!streaming) startStreaming();
+          if (!streaming.text) streaming.el.querySelector(".body").innerHTML = `<span class="status">${esc(ev.text)}</span>`;
+        } else if (ev.type === "done") {
+          setBusy(false);
+          if (ev.chatId === chatId) {
+            awaiting = false;
+            streaming = null;
+            chat = chat ? { ...chat, updated: -1 } : chat; // make sure the saved reply replaces the streamed one
+            loadChat(chatId);
+          }
+        } else if (ev.type === "saved" && ev.chatId === chatId && !streaming) {
+          loadChat(chatId);
+        } else if (ev.type === "error") {
+          toast(ev.text);
+          awaiting = false;
+          if (!ev.busy) setBusy(false);
+        } else if (ev.type === "state") loadState();
+      }
+
       function connect() {
         es?.close();
+        lastEvent = Date.now();
         es = new EventSource(`/api/events?t=${encodeURIComponent(token)}`);
+        es.onopen = () => (lastEvent = Date.now());
         es.onmessage = (e) => {
-          let ev;
           try {
-            ev = JSON.parse(e.data);
-          } catch {
-            return;
-          }
-          if (ev.type === "started") {
-            setBusy(true);
-            // The reply to what this phone just sent (a new chat gets its id here).
-            if (awaiting) chatId = ev.chatId;
-            awaiting = false;
-            if (ev.chatId !== chatId) return;
-            localStorage.setItem("prestige-chat", chatId);
-            streaming = { text: "", el: document.createElement("div") };
-            streaming.el.className = "msg ai";
-            streaming.el.innerHTML = `<div class="who">${esc(ev.who || "Prestige")}</div><div class="body"><span class="status">${esc(ev.status || "Thinking…")}</span></div>`;
-            loadChat(chatId);
-          } else if (ev.type === "delta" && streaming && ev.chatId === chatId) {
-            streaming.text += ev.text;
-            streaming.el.querySelector(".body").innerHTML = md(streaming.text) + '<span class="caret"></span>';
-            $("#thread").scrollTop = $("#thread").scrollHeight;
-          } else if (ev.type === "status" && streaming && ev.chatId === chatId && !streaming.text) {
-            streaming.el.querySelector(".body").innerHTML = `<span class="status">${esc(ev.text)}</span>`;
-          } else if (ev.type === "done") {
-            setBusy(false);
-            streaming = null;
-            if (ev.chatId === chatId) loadChat(chatId);
-          } else if (ev.type === "saved" && ev.chatId === chatId && !streaming) {
-            loadChat(chatId);
-          } else if (ev.type === "error") {
-            toast(ev.text);
-            awaiting = false;
-            if (!ev.busy) setBusy(false);
-          } else if (ev.type === "state") loadState();
+            onEvent(JSON.parse(e.data));
+          } catch {}
         };
         es.onerror = () => {
-          // The browser reconnects by itself; check we're still paired.
+          // The browser retries by itself (every 3 s); check we're still paired.
           api("/api/state").catch(() => {});
         };
       }
 
+      /** Back from sleep, another app or a network change: reconnect if the stream went quiet, and catch up. */
+      function catchUp() {
+        if (!token) return;
+        if (!es || es.readyState === 2 || Date.now() - lastEvent > 25000) connect();
+        loadState();
+        if (chatId && !streaming) loadChat(chatId);
+      }
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) catchUp();
+      });
+      window.addEventListener("online", catchUp);
+      window.addEventListener("pageshow", (e) => e.persisted && catchUp());
+      // A watchdog for streams that die silently, and a fallback while a reply runs: look at the saved chat every few
+      // seconds, so the page never needs a manual refresh.
+      setInterval(() => {
+        if (!token || document.hidden) return;
+        if (Date.now() - lastEvent > 25000) catchUp();
+        else if (awaiting && !chatId && Date.now() - sentAt > 6000) {
+          // Sent in a new chat but "started" never came: the PC says which chat it's in.
+          api("/api/state").then((s) => {
+            if (awaiting && s.chatId) {
+              awaiting = false;
+              loadChat(s.chatId);
+            }
+          }).catch(() => {});
+        } else if ((busy || awaiting) && chatId && !streaming) loadChat(chatId);
+      }, 4000);
+
+      let sentAt = 0;
       async function send(text) {
         try {
           awaiting = true;
+          sentAt = Date.now();
           await api("/api/send", { method: "POST", body: JSON.stringify({ chatId, text, model: $("#model").value || null }) });
           setBusy(true);
         } catch (e) {

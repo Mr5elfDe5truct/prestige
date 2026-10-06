@@ -43,7 +43,7 @@ import {
   activeCharacter, characterById, characterMemory, characterPrompt, faceScene, initCharacters, remember, renderPicker, setCharacterVoice, voiceOf, wantsFace,
 } from "./characters";
 import type { RefKind } from "./reference";
-import { initPhone, phonePush, phoneState, refreshPhone } from "./phone";
+import { initPhone, phoneOn, phonePush, phoneState, refreshPhone } from "./phone";
 import { listen } from "@tauri-apps/api/event";
 
 const inTauri = "__TAURI_INTERNALS__" in window;
@@ -989,6 +989,9 @@ async function makeMedia(text: string, kind: MediaKind, prompt: string, hooks?: 
   const reply: StoredMessage = { role: "assistant", content: "", model: label };
   const bubble = addAiBubble(label);
   const body = $(".msg-body", bubble);
+  const replyChat = chat.id;
+  phoneReplyStart(label, text);
+  let lastStatus = 0;
   body.innerHTML = `<div class="render-progress"><div class="progress"><i></i></div><span class="status-line">Starting…</span></div>`;
   scrollDown(true);
   busy = new AbortController();
@@ -1001,6 +1004,11 @@ async function makeMedia(text: string, kind: MediaKind, prompt: string, hooks?: 
       ($(".progress", body) as HTMLElement | null)?.style.setProperty("--v", String(pct));
       const l = $(".status-line", body);
       if (l) l.textContent = label;
+      // Phones see the render's progress too (at most every 2 s).
+      if (Date.now() - lastStatus > 2000) {
+        lastStatus = Date.now();
+        phonePush({ type: "status", chatId: replyChat, text: `${label} (${Math.round(pct)}%)` });
+      }
     };
     // /edit changes the picture itself; otherwise it's a new picture (with the reference's subject in it, if any).
     const got = edit && ref ? await editMedia(prompt, ref, progress) : await renderMedia(kind, prompt, progress, ref, refKind);
@@ -1028,7 +1036,9 @@ async function makeMedia(text: string, kind: MediaKind, prompt: string, hooks?: 
     busy = null;
     setBusyUi(false);
     scrollDown();
-    persist().catch((e) => toast(`Couldn't save this chat: ${e}`, "warn"));
+    persist()
+      .catch((e) => toast(`Couldn't save this chat: ${e}`, "warn"))
+      .finally(() => phoneReplyEnd(replyChat));
     if (hooks) {
       hooks.onDelta?.(reply.render ? `Here's your ${what}.` : `I couldn't make that ${what}.`);
       hooks.onDone?.(!!reply.render);
@@ -1051,6 +1061,8 @@ async function runResearch(text: string, question: string, hooks?: ReplyHooks) {
   const reply: StoredMessage = { role: "assistant", content: "", model: model.name, tools: [] };
   const bubble = addAiBubble(model.name, () => reply.content);
   const body = $(".msg-body", bubble);
+  const replyChat = chat.id;
+  phoneReplyStart(model.name, text);
   body.innerHTML = `<span class="status-line">Starting deep research…</span>`;
   scrollDown(true);
   busy = new AbortController();
@@ -1082,6 +1094,7 @@ async function runResearch(text: string, question: string, hooks?: ReplyHooks) {
         },
         status: (s) => {
           if (!reply.content) body.innerHTML = `<span class="status-line">${escapeHtml(s)}</span>`;
+          phonePush({ type: "status", chatId: replyChat, text: s });
         },
         thinking: (t) => {
           thinking += t;
@@ -1090,6 +1103,7 @@ async function runResearch(text: string, question: string, hooks?: ReplyHooks) {
         token: (t) => {
           reply.content += t;
           hooks?.onDelta?.(t);
+          phoneDelta(replyChat, t);
           if (!pending) {
             pending = true;
             requestAnimationFrame(() => {
@@ -1132,7 +1146,9 @@ async function runResearch(text: string, question: string, hooks?: ReplyHooks) {
     bubble.dataset.i = String(chat.messages.length - 1);
     if (!reply.error) reactButton(bubble, reply);
     scrollDown();
-    persist().catch((e) => toast(`Couldn't save this chat: ${e}`, "warn"));
+    persist()
+      .catch((e) => toast(`Couldn't save this chat: ${e}`, "warn"))
+      .finally(() => phoneReplyEnd(replyChat));
     hooks?.onDone?.(!reply.error);
   }
 }
@@ -1256,6 +1272,8 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
   const reply: StoredMessage = { role: "assistant", content: "", model: who };
   const bubble = addAiBubble(who, () => reply.content);
   const body = $(".msg-body", bubble);
+  const replyChat = chat.id;
+  phoneReplyStart(who, text);
   // "Speak replies" reads typed chats aloud too (voice chats already speak through their own hooks).
   const speakIt = !!settings.speakReplies && !opts.hooks;
   if (speakIt) stopSpeaking();
@@ -1395,6 +1413,7 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
       (t) => {
         reply.content += t;
         opts.hooks?.onDelta?.(t);
+        phoneDelta(replyChat, t);
         if (speakIt) {
           if (speakingBubble !== bubble) markSpeaking(bubble);
           speakDelta(t);
@@ -1492,7 +1511,9 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     $("#stop").hidden = true;
     ($("#send") as HTMLButtonElement).disabled = false;
     scrollDown();
-    persist().catch((e) => toast(`Couldn't save this chat: ${e}`, "warn"));
+    persist()
+      .catch((e) => toast(`Couldn't save this chat: ${e}`, "warn"))
+      .finally(() => phoneReplyEnd(replyChat));
     opts.hooks?.onDone?.(!reply.error && !reply.content.endsWith("*(stopped)*"));
   }
 }
@@ -1511,6 +1532,26 @@ function choosePersona(id: string | undefined, quiet = false) {
 }
 
 // ---------- phone access ----------
+/** A reply is starting in this chat: it's saved first (with the user's message), so a phone can open it straight away,
+ *  then phones are told, with the message, so they can show it before they've fetched anything. Every reply does this,
+ *  typed here or on a phone. */
+function phoneReplyStart(who: string, text: string) {
+  if (!phoneOn() || !inTauri) return;
+  const id = chat.id;
+  chat.updated = Date.now();
+  invoke("save_chat", { id, chat })
+    .catch(() => {})
+    .finally(() => {
+      phonePush({ type: "started", chatId: id, who, text, title: chat.title });
+      syncPhone();
+    });
+}
+const phoneDelta = (id: string, text: string) => phonePush({ type: "delta", chatId: id, text });
+const phoneReplyEnd = (id: string) => {
+  phonePush({ type: "done", chatId: id });
+  syncPhone();
+};
+
 /** A message from a paired phone (phone.rs): it runs in the app's own chat, so everything works from the phone, and the
  *  reply streams back to it. A phone message for another chat opens that chat here first; no chat id starts a new one. */
 async function fromPhone(p: { chatId?: string | null; text: string; model?: string | null }) {
@@ -1531,18 +1572,9 @@ async function fromPhone(p: { chatId?: string | null; text: string; model?: stri
   go("chat");
   renderChat();
   renderHistory();
-  const who = activeCharacter()?.name ?? current?.name ?? "Prestige";
-  phonePush({ type: "started", chatId: chat.id, who });
-  const id = chat.id;
-  send(p.text, {
-    hooks: {
-      onDelta: (t) => phonePush({ type: "delta", chatId: id, text: t }),
-      onDone: () => {
-        phonePush({ type: "done", chatId: id });
-        syncPhone();
-      },
-    },
-  });
+  // The reply streams to phones like every reply (phoneReplyStart / phoneDelta / phoneReplyEnd); this only refreshes
+  // the phone's header afterwards. The hooks also keep the reply from being read aloud on the PC.
+  send(p.text, { hooks: { onDone: () => syncPhone() } });
 }
 
 /** A voice picked on the Voice screen or in a call: the character's new voice while talking to one, else Prestige's. */
