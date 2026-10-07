@@ -1,5 +1,6 @@
-// Generation settings for images and video, shared by Studio and chat: shape and size, quality (steps),
-// how many, seed, for video the resolution, length and frame rate, and for a long video its shots and models. The defaults are what the reference
+// Generation settings for images, video and songs, shared by Studio and chat: shape and size, quality (steps),
+// how many, seed, for video the resolution, length and frame rate, for a long video its shots and models, and for a
+// song its length, tempo, key and language. The defaults are what the reference
 // RTX 3060 12 GB renders comfortably; studio.ts turns them into workflow inputs and warns when a pick is
 // likely to run past the VRAM of ComfyUI's card.
 
@@ -30,11 +31,20 @@ export interface LongSettings {
   high: string | null; // the high- and low-noise models (null = the workflow's own), from ComfyUI's model folders
   low: string | null;
 }
+export interface MusicSettings {
+  seconds: number; // the song's length
+  bpm: number;
+  key: string; // "C major", "A minor"…
+  meter: string; // beats per bar: "4" (4/4), "3" (3/4), "6" (6/8), "2" (2/4)
+  language: string; // the lyrics' language, as ACE-Step names it (en, es, ja…)
+  seed: number | null;
+}
 export interface GenSettings {
   image: ImageSettings; // Qwen-Image-2.1 and its turbo, Z-Image-Turbo; edits use its quality and seed
   video: VideoSettings; // LTX text-to-video
   animate: VideoSettings; // Wan 2.2 image-to-video
   long: LongSettings; // Wan 2.2 SVI long video: several shots from one picture
+  music: MusicSettings; // ACE-Step 1.5 songs
 }
 export type SettingsKey = keyof GenSettings;
 
@@ -43,6 +53,7 @@ export const DEFAULTS: GenSettings = {
   video: { res: "768x512", seconds: 4, fps: 24, quality: "standard", seed: null },
   animate: { res: "auto", seconds: 5, fps: 16, quality: "standard", seed: null },
   long: { size: 640, frames: 49, shots: 4, quality: "standard", seed: null, high: null, low: null },
+  music: { seconds: 120, bpm: 120, key: "C major", meter: "4", language: "en", seed: null },
 };
 
 export const ASPECTS: [Aspect, string][] = [
@@ -91,6 +102,40 @@ export const sviSeconds = (frames: number, shots: number) => Math.round(((frames
 export const LTX_SECONDS = [2, 3, 4, 5, 6, 8, 10];
 export const WAN_SECONDS = [2, 3, 4, 5, 6, 8];
 export const LTX_FPS = [24, 25, 30];
+
+// ACE-Step 1.5 songs: length, tempo, key, meter and the lyrics' language (the codes its text encoder takes).
+export const SONG_SECONDS = [30, 60, 90, 120, 150, 180, 240];
+export const SONG_BPMS = [70, 80, 90, 100, 110, 120, 128, 140, 160, 174];
+export const SONG_KEYS = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"].flatMap((r) => [`${r} major`, `${r} minor`]);
+export const SONG_METERS: [string, string][] = [
+  ["4", "4/4"],
+  ["3", "3/4 (waltz)"],
+  ["6", "6/8"],
+  ["2", "2/4"],
+];
+export const SONG_LANGUAGES: [string, string][] = [
+  ["en", "English"],
+  ["es", "Spanish"],
+  ["fr", "French"],
+  ["de", "German"],
+  ["it", "Italian"],
+  ["pt", "Portuguese"],
+  ["nl", "Dutch"],
+  ["sv", "Swedish"],
+  ["pl", "Polish"],
+  ["ru", "Russian"],
+  ["uk", "Ukrainian"],
+  ["tr", "Turkish"],
+  ["ar", "Arabic"],
+  ["hi", "Hindi"],
+  ["ja", "Japanese"],
+  ["ko", "Korean"],
+  ["zh", "Chinese"],
+  ["yue", "Cantonese"],
+  ["vi", "Vietnamese"],
+  ["th", "Thai"],
+  ["id", "Indonesian"],
+];
 
 /** Width and height for an image setting, multiples of 16. */
 export function imageDims(aspect: Aspect, size: ImgSize): [number, number] {
@@ -165,6 +210,13 @@ function load(): GenSettings {
     video: sane(DEFAULTS.video, s.video, { quality: isQuality, seconds: (v) => v > 0, fps: (v) => v > 0 }),
     animate: sane(DEFAULTS.animate, s.animate, { quality: isQuality, seconds: (v) => v > 0 }),
     long: sane(DEFAULTS.long, s.long, { quality: isQuality, size: (v) => v > 0, frames: (v) => v > 0, shots: (v) => v >= 1 }),
+    music: sane(DEFAULTS.music, s.music, {
+      seconds: (v) => v > 0,
+      bpm: (v) => v >= 30 && v <= 300,
+      key: (v) => SONG_KEYS.includes(v),
+      meter: (v) => SONG_METERS.some(([m]) => m === v),
+      language: (v) => SONG_LANGUAGES.some(([c]) => c === v),
+    }),
   };
 }
 

@@ -15,8 +15,10 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { initSystem, onGpus, showSystem, unloadAll } from "./system";
 import { ollamaCtx, onPlanChange, readGpus, refreshPlan, shortName, type Gpu } from "./gpus";
 import {
-  allowRenders, cancelRender, chatSettings, editLabel, editMedia, initStudio, modelLabel, openRender, renderMedia, renderMenu, showStudio, type MediaKind,
+  allowRenders, cancelRender, chatSettings, editLabel, editMedia, initStudio, modelLabel, openRender, renderMedia, renderMenu, renderSong, showStudio, songSeconds,
+  type MediaKind,
 } from "./studio";
+import { SONG_CMD, writeSong } from "./songwriter";
 import { onSettingsChange } from "./gensettings";
 import { CONSENT, bindRefChoices, hasFiles, imageIn, imageToBase64, onRefPrefsChange, refChoicesHtml, referenceFromBase64 } from "./reference";
 import { initVoice, showVoice } from "./voice";
@@ -40,6 +42,8 @@ import {
 } from "./knowledge";
 import { RESEARCH_CMD, deepResearch } from "./research";
 import { TRANSCRIBE_CMD, clock, isMedia, summaryPrompt, transcribeMedia, transcriptMd, type MediaSource } from "./transcribe";
+import { initMissions } from "./missions";
+import { DO_CMD, brains, describe as describeAct, doItForMe } from "./computer";
 import {
   activeCharacter, characterById, characterMemory, characterPrompt, faceScene, initCharacters, remember, renderPicker, setCharacterVoice, voiceOf, wantsFace,
 } from "./characters";
@@ -89,7 +93,8 @@ interface StoredMessage {
   tools?: ToolStep[]; // tools the model used for this reply
   // An image (or several, or a video) made from chat. "more" holds the other images of a batch.
   // reply: the model made it with a tool, so its content is the reply to show under it (not a note for later turns).
-  render?: { path: string; prompt: string; seconds?: number; more?: string[]; kind?: MediaKind; reply?: boolean };
+  // A song (kind "audio") has its title; prompt is its style.
+  render?: { path: string; prompt: string; seconds?: number; more?: string[]; kind?: MediaKind; reply?: boolean; title?: string };
   react?: string; // an emote reaction: yours on a reply, Prestige's on your message
   sources?: Source[]; // passages from Knowledge this reply was given (shown under it, cited in it)
 }
@@ -124,6 +129,7 @@ interface Settings {
   phone?: boolean; // phone access is on (phone.rs)
   phonePort?: number; // its port, 8765 unless set
   liveStt?: "phonon"; // Live calls listen with Phonon-2 (CPU, :8891) instead of Whisper
+  computerModel?: string; // the model that drives the PC for /do (its key); undefined = the best one there
 }
 
 let settings: Settings = {};
@@ -456,7 +462,15 @@ function renderFigure(bubble: HTMLElement, r: NonNullable<StoredMessage["render"
     const fig = document.createElement("figure");
     fig.className = "chat-render";
     fig.dataset.path = path;
-    if (r.kind === "video") {
+    if (r.kind === "audio") {
+      // A song: its title and a player; right-click for the rest (save, copy, open in folder…).
+      fig.classList.add("song");
+      fig.innerHTML = `<span class="song-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 18V5l11-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="17" cy="16" r="3" /></svg><b></b></span><audio controls preload="metadata"></audio>`;
+      $("b", fig).textContent = r.title || "Song";
+      const au = $("audio", fig) as HTMLAudioElement;
+      if (inTauri) allowRenders().then(() => (au.src = convertFileSrc(path)));
+      au.addEventListener("error", () => fig.classList.add("missing"), { once: true });
+    } else if (r.kind === "video") {
       // Plays inline; right-click for the rest.
       fig.innerHTML = `<video controls loop playsinline preload="metadata"></video>`;
       const v = $("video", fig) as HTMLVideoElement;
@@ -675,6 +689,20 @@ async function persist() {
   await renderHistory();
 }
 
+/** Opens a saved chat (from Past chats, or a mission's result); false when a reply is still running. */
+async function openSavedChat(id: string): Promise<boolean> {
+  if (busy) {
+    toast("Wait for the reply to finish first.");
+    return false;
+  }
+  chat = await invoke<Chat>("load_chat", { id });
+  // Carry on with whoever the chat was with.
+  if ((chat.character ?? undefined) !== settings.character && (!chat.character || characterById(chat.character))) choosePersona(chat.character, true);
+  renderChat();
+  renderHistory();
+  return true;
+}
+
 async function renderHistory() {
   const list = $("#history-list");
   if (!inTauri) {
@@ -708,12 +736,7 @@ async function renderHistory() {
       $(".open", row).appendChild(s);
     }
     $(".open", row).addEventListener("click", async () => {
-      if (busy) return toast("Wait for the reply to finish first.");
-      chat = await invoke<Chat>("load_chat", { id: it.id });
-      // Carry on with whoever the chat was with.
-      if ((chat.character ?? undefined) !== settings.character && (!chat.character || characterById(chat.character))) choosePersona(chat.character, true);
-      renderChat();
-      renderHistory();
+      if (!(await openSavedChat(it.id))) return;
       $("#history").hidden = true;
       // Jump to the message that matched.
       if (it.index != null) {
@@ -826,7 +849,7 @@ async function toolSource(path: string, images?: string[]): Promise<string | und
     }
   }
   if (images?.length) return images[0];
-  const lastPic = [...chat.messages].reverse().find((m) => m.render && m.render.kind !== "video");
+  const lastPic = [...chat.messages].reverse().find((m) => m.render && (m.render.kind ?? "image") === "image");
   if (lastPic?.render) return load(lastPic.render.path).catch(() => undefined);
   return undefined;
 }
@@ -1055,6 +1078,18 @@ const IMAGE_ASK = new RegExp(
   "i",
 );
 
+// "/song a sea shanty about debugging" (or /music), or "write me a song about…" / "make a lo-fi track for…".
+const SONG_ASK = new RegExp(
+  String.raw`${ASK_LEAD}(?:(?:write|make|compose|generate|create|produce|sing)\s+(?:me\s+|us\s+)?|(?:i(?:'d|\s+would)?\s+(?:like|want|need)|give\s+me|can\s+i\s+(?:get|have|hear))\s+)(?:an?\s+|another\s+)?(?:[\w'-]+\s+){0,3}?(?:song|tune|track|jingle|anthem|ballad|lullaby)(?=\s+(?:about|for|of|called|named|that|where|with|in)\b|\s*[,.!?:]|\s*$)`,
+  "i",
+);
+
+/** What a song request asks for ("" for a bare /song), or null when it isn't one. A plain ask keeps its wording. */
+function songRequest(text: string): string | null {
+  if (SONG_CMD.test(text)) return text.replace(SONG_CMD, "").trim();
+  return SONG_ASK.test(text) ? text.trim() : null;
+}
+
 /** The prompt in an image or video request ("" for a bare /image or /video), or null when it isn't one. */
 function mediaRequest(text: string): { kind: MediaKind; prompt: string } | null {
   const v = text.match(VIDEO_CMD) ?? text.match(VIDEO_ASK);
@@ -1135,6 +1170,96 @@ async function makeMedia(text: string, kind: MediaKind, prompt: string, hooks?: 
       .finally(() => phoneReplyEnd(replyChat));
     if (hooks) {
       hooks.onDelta?.(reply.render ? `Here's your ${what}.` : `I couldn't make that ${what}.`);
+      hooks.onDone?.(!!reply.render);
+    }
+  }
+}
+
+/** Lyrics as Markdown: each sung line on its own line, the [Verse] / [Chorus] tags in italics. */
+const lyricsMd = (lyrics: string) =>
+  lyrics
+    .split("\n")
+    .map((l) => l.trim())
+    .map((l) => (/^\[.+\]$/.test(l) ? `*${l}*` : l.replace(/([*_`])/g, "\\$1")))
+    .join("  \n")
+    .replace(/(  \n){2,}/g, "\n\n");
+
+/** /song: the chat model writes the song (title, style, tempo, key, lyrics; songwriter.ts), then ACE-Step sings it. The
+ *  song plays in the chat with its lyrics under it, and is saved with the other renders. */
+async function makeSong(text: string, request: string, hooks?: ReplyHooks) {
+  if (!inTauri) {
+    toast("Songs are made in the desktop app.");
+    return hooks?.onDone?.(false);
+  }
+  const model = current;
+  if (!model) {
+    toast("No model is available to write the song. Start the services first.", "warn");
+    return hooks?.onDone?.(false);
+  }
+  if (chat.messages.length === 0) chat.title = text.replace(/\s+/g, " ").slice(0, 60);
+  // The conversation so far, so "a song about that" knows what "that" is.
+  const before = chat.messages.filter((m) => !m.error && !m.render).slice(-6);
+  chat.messages.push({ role: "user", content: text });
+  renderChat();
+  const label = await modelLabel("audio");
+  const reply: StoredMessage = { role: "assistant", content: "", model: label };
+  const bubble = addAiBubble(label, () => reply.content);
+  const body = $(".msg-body", bubble);
+  const replyChat = chat.id;
+  phoneReplyStart(label, text);
+  let lastStatus = 0;
+  body.innerHTML = `<div class="render-progress"><div class="progress"><i></i></div><span class="status-line">Starting…</span></div>`;
+  const progress = (pct: number, label: string) => {
+    ($(".progress", body) as HTMLElement | null)?.style.setProperty("--v", String(pct));
+    const l = $(".status-line", body);
+    if (l) l.textContent = label;
+    if (Date.now() - lastStatus > 2000) {
+      lastStatus = Date.now();
+      phonePush({ type: "status", chatId: replyChat, text: `${label} (${Math.round(pct)}%)` });
+    }
+  };
+  scrollDown(true);
+  busy = new AbortController();
+  busy.signal.addEventListener("abort", () => cancelRender(), { once: true });
+  setBusyUi(true);
+  const t0 = Date.now();
+  try {
+    const context = before.length ? `Conversation so far:\n${before.map((m) => `${m.role}: ${m.content.slice(0, 800)}`).join("\n")}\n\nWrite this song: ` : "";
+    progress(1, `${model.name} is writing the song…`);
+    const song = await writeSong(model, context + request, songSeconds(), busy.signal, (n) => progress(1, `${model.name} is writing the song… ${n} characters`));
+    // The lyrics show while ACE-Step sings them.
+    reply.content = `**${song.title}**\n\n${song.lyrics ? lyricsMd(song.lyrics) : "*Instrumental*"}`;
+    const lyr = document.createElement("div");
+    lyr.className = "song-draft";
+    renderBody(lyr, reply.content);
+    body.appendChild(lyr);
+    scrollDown();
+    const got = await renderSong(song.style, song.lyrics, progress, { bpm: song.bpm, key: song.key, language: song.language });
+    reply.render = { path: got[0].path, prompt: song.style, seconds: Math.round((Date.now() - t0) / 1000), kind: "audio", reply: true, title: song.title };
+    renderFigure(bubble, reply.render);
+    renderBody(body, reply.content);
+    const au = bubble.querySelector<HTMLAudioElement>(".chat-render audio");
+    au?.addEventListener("loadedmetadata", () => scrollDown(), { once: true });
+  } catch (e) {
+    if (busy?.signal.aborted) reply.content = reply.content ? `${reply.content}\n\n*(stopped)*` : "*(stopped)*";
+    else {
+      reply.error = true;
+      reply.content = `Couldn't make the song: ${errMsg(e)}`;
+      bubble.classList.add("error");
+    }
+    body.innerHTML = md(reply.content);
+  } finally {
+    chat.messages.push(reply);
+    bubble.dataset.i = String(chat.messages.length - 1);
+    if (!reply.error) reactButton(bubble, reply);
+    busy = null;
+    setBusyUi(false);
+    scrollDown();
+    persist()
+      .catch((e) => toast(`Couldn't save this chat: ${e}`, "warn"))
+      .finally(() => phoneReplyEnd(replyChat));
+    if (hooks) {
+      hooks.onDelta?.(reply.render ? "Here's your song." : "I couldn't make that song.");
       hooks.onDone?.(!!reply.render);
     }
   }
@@ -1355,6 +1480,100 @@ async function pickAndTranscribe(hooks?: ReplyHooks) {
   return runTranscribe({ path, name: path.split(/[\\/]/).pop() ?? path }, hooks);
 }
 
+/** /do: a vision model works through the task on this PC (computer.ts). A card first says what will happen and which
+ *  model drives; Start shrinks Prestige to the step-by-step panel. Afterwards every step and the model's summary are
+ *  posted in this reply. */
+async function runComputer(text: string, task: string, hooks?: ReplyHooks) {
+  if (!inTauri) {
+    toast("Computer use runs in the desktop app.");
+    return hooks?.onDone?.(false);
+  }
+  const canSee = (m: ModelInfo) => !!m.inputModalities?.includes("image") || VISION.test(m.id);
+  const list = brains(models, canSee);
+  if (!list.length) {
+    toast("No model that can see the screen is available. Start the services, or get Qwen3.8 27B or Nex-N2.5-mini from the catalog.", "warn");
+    return hooks?.onDone?.(false);
+  }
+  if (chat.messages.length === 0) chat.title = `Do: ${task.replace(/\s+/g, " ").slice(0, 54)}`;
+  chat.messages.push({ role: "user", content: text });
+  renderChat();
+  const reply: StoredMessage = { role: "assistant", content: "", model: "Computer use", tools: [] };
+  const bubble = addAiBubble("Computer use");
+  const body = $(".msg-body", bubble);
+  const replyChat = chat.id;
+  const pick = list.find((m) => m.key === settings.computerModel) ?? list[0];
+  body.innerHTML = `<div class="cu-card">
+      <p><b>Do it for me:</b> <span class="cu-card-task"></span></p>
+      <p class="credit">The model looks at your screen and uses the mouse and keyboard, one step at a time. Prestige shrinks to a
+      panel in the corner where you approve each step (or turn that off) and can stop it any time. It won't type passwords,
+      pay for anything or send messages; it stops and tells you instead.</p>
+      <label class="field">Model<select class="cu-card-model"></select></label>
+      <div class="acts"><button type="button" class="btn" data-a="no">Cancel</button><button type="button" class="btn primary" data-a="yes">Start</button></div>
+    </div>`;
+  $(".cu-card-task", body).textContent = task;
+  const sel = $(".cu-card-model", body) as HTMLSelectElement;
+  sel.innerHTML = list.map((m) => `<option value="${escapeHtml(m.key)}"${m.key === pick.key ? " selected" : ""}>${escapeHtml(m.name)}</option>`).join("");
+  scrollDown(true);
+  busy = new AbortController();
+  setBusyUi(true);
+  const go = await new Promise<boolean>((resolve) => {
+    body.querySelectorAll<HTMLButtonElement>("[data-a]").forEach((b) => b.addEventListener("click", () => resolve(b.dataset.a === "yes"), { once: true }));
+    busy!.signal.addEventListener("abort", () => resolve(false), { once: true });
+  });
+  const model = list.find((m) => m.key === sel.value) ?? pick;
+  try {
+    if (!go) {
+      reply.content = "*(not started)*";
+      return;
+    }
+    if (model.key !== settings.computerModel) {
+      settings.computerModel = model.key;
+      saveSettings().catch(() => {});
+    }
+    reply.model = `Computer use · ${model.name}`;
+    $(".msg-who", bubble).textContent = reply.model;
+    body.innerHTML = `<span class="status-line">Working on it in the panel…</span>`;
+    phonePush({ type: "status", chatId: replyChat, text: `Computer use: ${task}` });
+    const r = await doItForMe(task, model);
+    for (const s of r.steps) {
+      const step: ToolStep = {
+        name: "computer",
+        args: { action: describeAct(s.act) },
+        ok: s.state === "done",
+        denied: s.state === "skipped",
+        ms: s.ms,
+        result: [s.thought, s.state === "skipped" ? "(you skipped this step)" : "", s.note ? `Failed: ${s.note}` : ""].filter(Boolean).join("\n"),
+      };
+      reply.tools!.push(step);
+      renderToolStep(bubble, step);
+    }
+    const head = { done: "Done.", failed: "It stopped before finishing.", stopped: "You stopped it.", limit: "It ran out of steps." }[r.status];
+    reply.content = r.status === "done" || r.status === "failed" ? r.summary : `${head} ${r.summary === "Stopped." ? "" : r.summary}`.trim();
+    reply.note = `computer use · ${r.steps.length} step${r.steps.length === 1 ? "" : "s"} · ${r.status} · ${r.seconds < 90 ? `${r.seconds} s` : `${Math.round(r.seconds / 60)} min`}`;
+    if (r.status === "failed") bubble.classList.add("warn");
+  } catch (e) {
+    reply.error = true;
+    reply.content = `Computer use didn't run: ${errMsg(e)}`;
+    bubble.classList.add("error");
+  } finally {
+    busy = null;
+    setBusyUi(false);
+    renderBody(body, reply.content);
+    if (reply.note) {
+      const chip = document.createElement("div");
+      chip.className = "chip";
+      chip.textContent = reply.note;
+      bubble.insertBefore(chip, $(".tool-steps", bubble) ?? body);
+    }
+    chat.messages.push(reply);
+    bubble.dataset.i = String(chat.messages.length - 1);
+    if (!reply.error) reactButton(bubble, reply);
+    scrollDown();
+    persist().catch((e) => toast(`Couldn't save this chat: ${e}`, "warn"));
+    hooks?.onDone?.(!reply.error);
+  }
+}
+
 /** A finished research report's steps (often 15 or more) fold into one line, a click away. */
 function foldSteps(bubble: HTMLElement) {
   const box = bubble.querySelector<HTMLElement>(".tool-steps");
@@ -1386,7 +1605,7 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     const instruction = text.replace(EDIT_CMD, "").trim();
     let src = attachments[0];
     if (!src) {
-      const last = [...chat.messages].reverse().find((m) => m.render && m.render.kind !== "video");
+      const last = [...chat.messages].reverse().find((m) => m.render && (m.render.kind ?? "image") === "image");
       if (last?.render && inTauri) {
         try {
           await allowRenders();
@@ -1415,6 +1634,25 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     return runResearch(text, question, opts.hooks);
   }
   if (!live && TRANSCRIBE_CMD.test(text)) return pickAndTranscribe(opts.hooks);
+  // "/do open Notepad and write a haiku": a vision model does it on this PC (asks first; not from Live calls).
+  if (!live && DO_CMD.test(text)) {
+    const task = text.replace(DO_CMD, "").trim();
+    if (!task) {
+      toast("Say what to do after /do, e.g. /do open Notepad and type a shopping list");
+      opts.hooks?.onDone?.(false);
+      return;
+    }
+    return runComputer(text, task, opts.hooks);
+  }
+  // "/song …" or "write me a song about…": the chat model writes it and ACE-Step sings it. (Not with pictures attached,
+  // unless asked for with /song: those messages are about the pictures.)
+  const songAsk = live || (!SONG_CMD.test(text) && (opts.images?.length || attachments.length)) ? null : songRequest(text);
+  if (songAsk === "") {
+    toast("Say what the song is about after /song, e.g. /song an upbeat pop song about Monday mornings");
+    opts.hooks?.onDone?.(false);
+    return;
+  }
+  if (songAsk) return makeSong(text, songAsk, opts.hooks);
   // With pictures attached, /image or /video uses the first as a reference image (Live and the camera ask don't make media).
   // "Draw me a chart of…" or "make a snake game" is for the Canvas, unless it asks for a picture or a clip.
   const forCanvas = CANVAS_CMD.test(text) || (wantsCanvas(text) && !/\b(image|picture|photo|illustration|painting|wallpaper|video|clip)s?\b/i.test(text));
@@ -2070,6 +2308,14 @@ function wire() {
     ta.focus();
     ta.setSelectionRange(ta.value.length, ta.value.length);
   });
+  // Do it for me: starts the message with /do, so what's typed becomes the task.
+  $("#composer-do").addEventListener("click", () => {
+    const v = ta.value.replace(DO_CMD, "");
+    ta.value = `/do ${v}`;
+    autosize();
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+  });
   // Research button: starts the message with /research, so what's typed becomes the question.
   $("#composer-research").addEventListener("click", () => {
     const v = ta.value.replace(RESEARCH_CMD, "");
@@ -2293,6 +2539,20 @@ async function main() {
     onChange: () => renderChatFiles(),
   });
   $("#kb-btn").addEventListener("click", () => openKnowledge());
+  if (inTauri)
+    initMissions({
+      toast,
+      models: () => models,
+      current: () => current,
+      system: () => systemBase(),
+      toolsHint: TOOLS_HINT,
+      busy: () => !!busy,
+      saved: () => renderHistory().catch(() => {}),
+      openChat: (id) => {
+        go("chat");
+        openSavedChat(id).catch((e) => toast(`Couldn't open it: ${errMsg(e)}`, "warn"));
+      },
+    });
   initCatalog({
     toast,
     root: () => settings.stackRoot ?? null,
@@ -2304,6 +2564,11 @@ async function main() {
     freeGpu: () => unloadAll(undefined, "comfyui"),
     cameraPane: (on: boolean) => showCameraPane(on),
     show: () => go("studio"),
+    // Music mode's "Write lyrics": the chat model picked in Chat writes them for the style typed in Studio.
+    writeLyrics: async (style, seconds, signal) => {
+      if (!current) throw new Error("no chat model is available (start the services first)");
+      return (await writeSong(current, style, seconds, signal)).lyrics;
+    },
   });
   onSpeakingChange((on) => {
     if (!on) markSpeaking(null);
