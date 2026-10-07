@@ -8,6 +8,7 @@ mod knowledge;
 mod models;
 mod phone;
 mod toolstore;
+mod vram;
 mod transcribe;
 mod studio;
 
@@ -144,6 +145,18 @@ fn gpu_stats() -> Result<Vec<GpuStats>, String> {
         return Err("nvidia-smi returned nothing".into());
     }
     Ok(gpus)
+}
+
+/// What each process holds in each card's VRAM, measured (Windows' GPU counters; nvidia-smi can't say per process on
+/// Windows), largest first, with nvidia-smi's card numbers. Empty when the counters aren't there.
+#[tauri::command]
+async fn gpu_procs() -> Result<Vec<vram::ProcVram>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let cards: Vec<(u32, String, f64)> = gpu_stats()?.into_iter().map(|g| (g.index, g.name, g.mem_total)).collect();
+        Ok(vram::per_process(&cards))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Which card each workstation service runs on: data\runtime\gpu.json, written by start-all.ps1 on every start.
@@ -463,6 +476,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             gpu_stats,
             gpu_plan,
+            gpu_procs,
             stack_info,
             start_services,
             set_updating,

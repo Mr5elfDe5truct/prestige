@@ -54,6 +54,87 @@ export async function readGpus(): Promise<Gpu[]> {
 
 export const allGpus = () => gpus;
 
+// ---------- who holds the VRAM, measured ----------
+// nvidia-smi can't say per process on Windows, so gpu_procs (vram.rs) reads Windows' own GPU counters: each process's
+// dedicated memory on each card. Here each process becomes something a person recognises.
+
+/** What a process is, for the VRAM bars and warnings. `service`: one of the Workstation's, which Prestige can unload. */
+export interface Holder {
+  gpu: number;
+  pid: number;
+  label: string; // "llama.cpp", "ComfyUI", "Windows desktop", "chrome"…
+  service?: Service | "kokoro" | "phonon";
+  model?: boolean; // llama.cpp's process for a model (not the router itself)
+  mib: number;
+}
+
+interface ProcVram {
+  gpu: number;
+  pid: number;
+  path: string;
+  name: string;
+  parent: number;
+  parent_path: string;
+  mib: number;
+}
+
+const has = (p: ProcVram, re: RegExp) => re.test(p.path) || re.test(p.parent_path);
+
+/** A process's label and service, from its path (or its parent's: a venv's python.exe starts the real interpreter). */
+export function classify(p: ProcVram): Holder {
+  const base = { gpu: p.gpu, pid: p.pid, mib: p.mib };
+  const exe = (p.name || p.path.split("\\").pop() || `pid ${p.pid}`).replace(/\.exe$/i, "");
+  if (/\\Programs\\Ollama\\|\\ollama(\.exe)?$/i.test(p.path) || /\\Programs\\Ollama\\/i.test(p.parent_path)) return { ...base, label: "Ollama", service: "ollama" };
+  if (/llama-server/i.test(exe)) return { ...base, label: "llama.cpp", service: "llama", model: /llama-server\.exe$/i.test(p.parent_path) };
+  if (has(p, /Comfy-Desktop|\\apps\\ComfyUI\\|\\envs\\comfyui\\/i)) return { ...base, label: "ComfyUI", service: "comfyui" };
+  if (has(p, /\\envs\\voice\\/i)) return { ...base, label: "Voice server", service: "voice" };
+  if (has(p, /\\envs\\open-webui\\/i)) return { ...base, label: "Open WebUI", service: "openwebui" };
+  if (has(p, /\\envs\\kokoro\\/i)) return { ...base, label: "Kokoro", service: "kokoro" };
+  if (has(p, /\\envs\\transcribe\\/i)) return { ...base, label: "Phonon", service: "phonon" };
+  if (/^(dwm|csrss|explorer|ShellExperienceHost|StartMenuExperienceHost|SearchHost|TextInputHost|ShellHost|ApplicationFrameHost|LockApp|SystemSettings)$/i.test(exe))
+    return { ...base, label: "Windows desktop" };
+  if (/^msedgewebview2$/i.test(exe)) return { ...base, label: "Web views (Prestige and other apps)" };
+  return { ...base, label: exe };
+}
+
+let holders: Holder[] = [];
+let holdersAt = 0;
+
+/** Each process's VRAM on each card, measured now (cached for 2 s; the counters take ~0.4 s to read). */
+export async function readHolders(force = false): Promise<Holder[]> {
+  if (!inTauri) return holders;
+  if (!force && Date.now() - holdersAt < 2000) return holders;
+  try {
+    holders = (await invoke<ProcVram[]>("gpu_procs")).map(classify);
+    holdersAt = Date.now();
+  } catch {
+    /* no counters: callers fall back to nvidia-smi's totals */
+  }
+  return holders;
+}
+
+export const lastHolders = () => holders;
+
+/** On one card: the VRAM the Workstation's services hold (which Prestige can free) and what everything else holds,
+ *  grouped by name, largest first. MiB. */
+export function heldOn(index: number): { services: number; others: number; byLabel: [string, number][] } {
+  const here = holders.filter((h) => h.gpu === index);
+  const services = here.filter((h) => h.service).reduce((s, h) => s + h.mib, 0);
+  const groups = new Map<string, number>();
+  for (const h of here) if (!h.service) groups.set(h.label, (groups.get(h.label) ?? 0) + h.mib);
+  return { services, others: here.filter((h) => !h.service).reduce((s, h) => s + h.mib, 0), byLabel: [...groups].sort((a, b) => b[1] - a[1]) };
+}
+
+/** "Chrome 1.2 GB, a game 3.0 GB": the biggest non-Workstation users of a card, for warnings. */
+export function othersText(index: number, minMiB = 300): string {
+  const { byLabel } = heldOn(index);
+  return byLabel
+    .filter(([l, m]) => m >= minMiB && l !== "Windows desktop")
+    .slice(0, 3)
+    .map(([l, m]) => `${l} ${(m / 1024).toFixed(1)} GB`)
+    .join(", ");
+}
+
 /** Re-reads data\runtime\gpu.json; tells listeners when the plan changed (after start-all.ps1 ran). */
 export async function refreshPlan(root: string | null) {
   if (!inTauri) return;

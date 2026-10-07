@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { errMsg, http, lastModels, ping, OLLAMA, LLAMA } from "./backends";
 import { bestFor, capsFor, chipsHtml } from "./caps";
 import {
-  cardsFor, cardsText, freeGB, gpuPlan, ollamaCtx, onPlanChange, servicesOn, sharesCard, shortName, vramGB,
+  cardsFor, cardsText, freeGB, gpuPlan, heldOn, lastHolders, ollamaCtx, onPlanChange, othersText, readHolders, servicesOn, sharesCard, shortName, vramGB,
   SERVICE_NAMES, type Gpu, type Service,
 } from "./gpus";
 
@@ -19,7 +19,8 @@ interface Row {
   diskGB: number;
   needGB: number; // estimated VRAM when loaded
   loaded: boolean;
-  vramGB?: number; // measured (Ollama) or estimated (llama.cpp)
+  vramGB?: number; // measured: Ollama's report, or llama.cpp's process from Windows' GPU counters (else estimated)
+  measured?: boolean;
   loading?: boolean;
   sleeping?: boolean; // llama.cpp: idle past --sleep-idle-seconds, woken by the next request
   args?: string[]; // llama.cpp router command line (for capability detection)
@@ -27,6 +28,24 @@ interface Row {
 }
 
 const serviceOf = (r: Row): Service => (r.backend === "llama" ? "llama" : "ollama");
+
+// What each model took the last time it was in VRAM (measured), so "will it fit" checks use that instead of a guess.
+const SEEN_KEY = "prestige.vramSeen";
+let seenGB: Record<string, number> = (() => {
+  try {
+    return JSON.parse(localStorage.getItem(SEEN_KEY) || "{}");
+  } catch {
+    return {};
+  }
+})();
+const seen = (key: string): number | undefined => seenGB[key];
+function remember(r: Row) {
+  if (!r.vramGB || r.vramGB < 0.2 || Math.abs((seenGB[r.key] ?? 0) - r.vramGB) < 0.05) return;
+  seenGB = { ...seenGB, [r.key]: Math.round(r.vramGB * 100) / 100 };
+  try {
+    localStorage.setItem(SEEN_KEY, JSON.stringify(seenGB));
+  } catch {}
+}
 
 interface Deps {
   toast: (msg: string, kind?: string) => void;
@@ -151,6 +170,8 @@ export function onGpus(list: Gpu[]) {
     if (!rows.some((r) => r.loaded || r.loading) && g.mem_used < 3 * GB) baselineMiB.set(g.index, g.mem_used);
   }
   if (!visible) return;
+  // Who holds what, for the bars below (cached 2 s, so this reads the counters every other second).
+  void readHolders();
 
   const key = list.map((g) => `${g.index}:${g.mem_total}`).join() + JSON.stringify(gpuPlan()?.services ?? null);
   if (key !== builtFor) {
@@ -229,9 +250,10 @@ async function refreshModels() {
         name: info.name,
         role: info.role,
         diskGB: disk,
-        needGB: disk + ollamaOverhead(),
+        needGB: seen(`ollama:${m.name}`) ?? disk + ollamaOverhead(),
         loaded: running.has(m.name),
         vramGB: running.get(m.name),
+        measured: running.has(m.name),
       });
     }
   } else notes.push("Ollama isn't answering");
@@ -255,7 +277,7 @@ async function refreshModels() {
         role: info.role,
         diskGB: disk,
         // The 10.8 GB measurement is for the 12 GB preset; elsewhere llama.cpp's --fit fills the card(s) to ~1 GB short.
-        needGB: (!gpuPlan()?.llamaFit && known) || Math.min(disk + 1.5, vramGB("llama") - 1),
+        needGB: seen(`llama:${m.id}`) ?? ((!gpuPlan()?.llamaFit && known) || Math.min(disk + 1.5, vramGB("llama") - 1)),
         loaded: m.status?.value === "loaded",
         loading: m.status?.value === "loading",
         sleeping: m.status?.value === "sleeping",
@@ -264,12 +286,24 @@ async function refreshModels() {
     });
   } else notes.push("llama.cpp isn't answering");
 
-  // Ollama's models sit on its (first) card. llama.cpp can't report per-model VRAM on Windows, so on each of its cards
-  // attribute what's in use beyond the desktop and Ollama's share there.
+  // Ollama's models sit on its (first) card, at the size Ollama reports. llama.cpp's model is measured: Windows' GPU
+  // counters give its model process's VRAM on each card (gpus.ts). Without the counters, on each of its cards what's in
+  // use beyond the desktop and Ollama's share is put down to it, as before.
   const ollamaCard = cardsFor("ollama")[0]?.index;
   for (const r of next) if (r.backend === "ollama" && r.vramGB && ollamaCard != null) r.cards = new Map([[ollamaCard, r.vramGB]]);
   const llamaLoaded = next.filter((r) => r.backend === "llama" && r.loaded);
-  if (llamaLoaded.length) {
+  const held = await readHolders();
+  const llamaProcs = held.filter((h) => h.service === "llama" && h.model);
+  if (llamaLoaded.length && llamaProcs.length) {
+    const per = new Map<number, number>();
+    for (const h of llamaProcs) per.set(h.gpu, (per.get(h.gpu) ?? 0) + h.mib / GB / llamaLoaded.length);
+    for (const r of llamaLoaded) {
+      r.cards = per;
+      r.vramGB = [...per.values()].reduce((s, v) => s + v, 0);
+      r.measured = true;
+      remember(r);
+    }
+  } else if (llamaLoaded.length) {
     const ollamaGB = next.filter((r) => r.backend === "ollama" && r.loaded).reduce((s, r) => s + (r.vramGB ?? 0), 0);
     const per = new Map<number, number>();
     for (const g of cardsFor("llama")) {
@@ -280,6 +314,7 @@ async function refreshModels() {
       r.vramGB = [...per.values()].reduce((s, v) => s + v, 0);
     }
   }
+  for (const r of next) if (r.backend === "ollama" && r.loaded) remember(r);
   // Keep "Loading…" on rows we're working on.
   for (const r of next) if (rows.find((o) => o.key === r.key)?.loading && !r.loaded) r.loading = true;
   next.sort((a, b) => deps.nameFor(a.id).order - deps.nameFor(b.id).order || a.name.localeCompare(b.name));
@@ -298,7 +333,7 @@ function renderRows() {
     const state = r.loading ? "Loading…" : r.loaded ? "In VRAM" : r.sleeping ? "Asleep" : "On disk";
     const size =
       r.loaded && r.vramGB
-        ? `${r.backend === "llama" ? "~" : ""}${r.vramGB.toFixed(1)} GB in VRAM`
+        ? `${r.measured ? "" : "~"}${r.vramGB.toFixed(1)} GB in VRAM`
         : `${r.diskGB.toFixed(1)} GB on disk`;
     el.innerHTML = `<span class="n"></span><button class="btn"></button><span class="meta"></span><span class="caps"></span>`;
     // Models hidden from the chat menu (UI-TARS) still get their capabilities shown here.
@@ -387,9 +422,15 @@ async function load(r: Row) {
     if (r.needGB > room) {
       // Only what shares this model's card(s) is in the way.
       const others = rows.filter((o) => o.loaded && o.key !== r.key && sharesCard(svc, serviceOf(o)));
+      await readHolders(true);
+      const apps = cardsFor(svc).map((g) => othersText(g.index)).filter(Boolean).join(", ");
+      const comfy = cardsFor(svc).reduce((s, g) => s + lastHolders().filter((h) => h.gpu === g.index && h.service === "comfyui").reduce((t, h) => t + h.mib, 0), 0);
       $("#fit-text").textContent =
-        `${r.name} needs about ${r.needGB.toFixed(1)} GB of VRAM and only ${room.toFixed(1)} GB of ${cardsText(svc)} is free.` +
+        `${r.name} needs ${seen(r.key) != null ? "" : "about "}${r.needGB.toFixed(1)} GB of VRAM` +
+        `${seen(r.key) != null ? " (measured last time it loaded)" : ""} and only ${room.toFixed(1)} GB of ${cardsText(svc)} is free.` +
         (others.length ? ` Loaded now: ${others.map((o) => o.name).join(", ")}.` : "") +
+        (comfy >= 300 ? ` ComfyUI holds ${(comfy / GB).toFixed(1)} GB.` : "") +
+        (apps ? ` Other programs using it: ${apps}.` : "") +
         " Loading it anyway may spill into system RAM and run slowly, or fail.";
       const dlg = $("#fit") as HTMLDialogElement;
       dlg.returnValue = "";
@@ -435,7 +476,8 @@ async function load(r: Row) {
 }
 
 // ---------- VRAM stack, RAM, services ----------
-/** One bar per card: the desktop, each loaded model on that card, and what's free. */
+/** One bar per card: each loaded model, the other Workstation services, the desktop and other apps by name (all
+ *  measured per process, gpus.ts), and what's free. */
 function renderStack() {
   if (!visible || !lastGpus.length) return;
   const box = $("#vram-cards");
@@ -459,7 +501,6 @@ function renderStack() {
 
     const here = rows.filter((r) => r.loaded && (r.cards?.get(g.index) ?? 0) > 0);
     const modelMiB = here.reduce((s, r) => s + r.cards!.get(g.index)! * GB, 0);
-    const other = Math.max(0, g.mem_used - modelMiB);
     const seg = (cls: string, mib: number, label: string) => {
       if (mib <= 0) return;
       const s = document.createElement("div");
@@ -472,8 +513,29 @@ function renderStack() {
       l.append(`${label} ${(mib / GB).toFixed(1)} GB`);
       legend.appendChild(l);
     };
-    seg("sys", other, "Desktop & other apps");
-    here.forEach((r) => seg(`s${rows.indexOf(r) % 5}`, r.cards!.get(g.index)! * GB, r.name + (r.backend === "llama" ? " (est.)" : "")));
+    here.forEach((r) => seg(`s${rows.indexOf(r) % 5}`, r.cards!.get(g.index)! * GB, r.name + (r.measured ? "" : " (est.)")));
+    const held = lastHolders().filter((h) => h.gpu === g.index);
+    let shown = modelMiB;
+    if (held.length) {
+      // The other Workstation services (ComfyUI, the voice server…). Ollama's runner and llama.cpp's model process are
+      // already in the models above.
+      const svc = new Map<string, number>();
+      for (const h of held) {
+        if (!h.service || h.service === "ollama" || (h.service === "llama" && h.model && here.some((r) => r.backend === "llama"))) continue;
+        svc.set(h.label, (svc.get(h.label) ?? 0) + h.mib);
+      }
+      // A service holding only its CUDA context (a few dozen MiB) isn't worth a segment.
+      [...svc].filter(([, mib]) => mib >= 100).sort((a, b) => b[1] - a[1]).forEach(([label, mib], i) => {
+        seg(`v${i % 3}`, mib, label);
+        shown += mib;
+      });
+      // Then the desktop and other programs by name; small ones go into the rest.
+      for (const [label, mib] of heldOn(g.index).byLabel.filter(([, m]) => m >= 150).slice(0, 4)) {
+        seg("sys", mib, label);
+        shown += mib;
+      }
+    }
+    seg("sys2", g.mem_used - shown, held.length ? "Other apps & driver" : "Desktop & other apps");
     const free = document.createElement("span");
     free.textContent = `Free ${((total - g.mem_used) / GB).toFixed(1)} of ${(total / GB).toFixed(0)} GB`;
     legend.appendChild(free);
