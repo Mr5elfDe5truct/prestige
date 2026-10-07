@@ -47,6 +47,9 @@
       .media { display: grid; gap: 6px; }
       .media img, .media video { width: 100%; border-radius: 10px; border: 1px solid var(--line); display: block; }
       .caption { font-size: 12px; color: var(--muted); margin-top: 4px; }
+      .media .song { color: var(--gold, #d9a441); font-size: 14px; }
+      .media audio { width: 100%; }
+      .media .save-song { justify-self: start; background: none; border: 0; padding: 0; color: var(--muted); font-size: 12px; text-decoration: underline; }
       .chip { display: inline-block; font: 11px var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; margin-bottom: 6px; }
       .status { font: 12px var(--mono); color: var(--muted); }
       .caret { display: inline-block; width: 7px; height: 1em; background: var(--red); vertical-align: -2px; margin-left: 2px; animation: blink .8s steps(2) infinite; }
@@ -309,9 +312,16 @@
           const paths = [m.render.path, ...(m.render.more || [])];
           const media = document.createElement("div");
           media.innerHTML = `<div class="media">${paths
-            .map((p) => (m.render.kind === "video" ? `<video controls playsinline preload="metadata" src="${esc(fileUrl(p))}"></video>` : `<img loading="lazy" alt="" data-path="${esc(p)}" src="${esc(fileUrl(p))}" />`))
+            .map((p) =>
+              m.render.kind === "audio"
+                ? `<b class="song">♪ ${esc(m.render.title || "Song")}</b><audio controls preload="metadata" src="${esc(fileUrl(p))}"></audio><button type="button" class="linkish save-song" data-path="${esc(p)}">Save to phone</button>`
+                : m.render.kind === "video"
+                  ? `<video controls playsinline preload="metadata" src="${esc(fileUrl(p))}"></video>`
+                  : `<img loading="lazy" alt="" data-path="${esc(p)}" src="${esc(fileUrl(p))}" />`,
+            )
             .join("")}</div><div class="caption">${esc(m.render.prompt || "")}</div>`;
           media.querySelectorAll("img").forEach((img) => img.addEventListener("click", () => view(img.dataset.path, "image")));
+          media.querySelectorAll(".save-song").forEach((b) => b.addEventListener("click", () => saveRender(b.dataset.path)));
           media.querySelectorAll("video").forEach((v, i) => v.addEventListener("dblclick", () => view(paths[i], "video")));
           el.insertBefore(media, body);
           if (m.render.reply) body.innerHTML = md(m.content || "");
@@ -966,9 +976,12 @@
         $("#viewer-body").innerHTML = "";
       });
       $("#viewer-save").addEventListener("click", () => {
-        if (!viewing) return;
-        const name = viewing.path.split(/[\\/]/).pop();
-        const url = new URL(fileUrl(viewing.path), location.href).href;
+        if (viewing) saveRender(viewing.path);
+      });
+      /** Saves a render (picture, clip or song) to the phone: through the app, or as a browser download. */
+      function saveRender(path) {
+        const name = path.split(/[\\/]/).pop();
+        const url = new URL(fileUrl(path), location.href).href;
         if (app) app.save(url, name);
         else {
           const a = document.createElement("a");
@@ -976,7 +989,7 @@
           a.download = name;
           a.click();
         }
-      });
+      }
 
       // ---------- calls: Voice (the chat's model) and Live (the Live model, with the camera) ----------
       const STATUS = {
