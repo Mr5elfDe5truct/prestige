@@ -1096,7 +1096,7 @@ async function toModel(a: Source, from = "Studio", progress?: (pct: number, labe
 
 function makeModel(a: Asset) {
   closeLightbox();
-  deps.toast("Making a 3D model: about 5 minutes. It opens in the 3D viewer when it's done (the render queue shows how far it is).");
+  deps.toast("Making a 3D model: 3 to 8 minutes, longer for detailed subjects. It opens in the 3D viewer when it's done (the render queue shows how far it is).");
   toModel(a)
     .then((got) => got[0] && deps.openModel(got[0].path, got[0].name))
     .catch((e) => errMsg(e) !== "stopped" && deps.toast(`Couldn't make the 3D model: ${errMsg(e)}`, "warn"));
@@ -1735,10 +1735,16 @@ function onComfy(msg: any) {
     case "execution_interrupted":
       finish(false, "stopped");
       break;
-    case "execution_error":
-      if (!waiter) deps.toast(`The render failed: ${d.exception_message ?? "ComfyUI reported an error"}`, "warn");
-      finish(false, d.exception_message ?? "ComfyUI reported an error");
+    case "execution_error": {
+      // PyTorch's out-of-memory message runs to a dozen lines of allocator stats; the first line says enough.
+      const raw = String(d.exception_message ?? "").trim();
+      const msg = /out of memory|OutOfMemory/i.test(raw)
+        ? "the GPU ran out of memory. Close other programs using it, or try a smaller size."
+        : raw.split("\n")[0] || "ComfyUI reported an error";
+      if (!waiter) deps.toast(`The render failed: ${msg}`, "warn");
+      finish(false, msg);
       break;
+    }
   }
 }
 
