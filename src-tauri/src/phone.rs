@@ -426,6 +426,10 @@ fn serve_file(app: &AppHandle, req: Request) {
         "mp4" => "video/mp4",
         "webm" => "video/webm",
         "mov" => "video/quicktime",
+        "mp3" => "audio/mpeg",
+        "flac" => "audio/flac",
+        "opus" | "ogg" => "audio/ogg",
+        "wav" => "audio/wav",
         _ => "application/octet-stream",
     };
     let range = req
