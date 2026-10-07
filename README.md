@@ -69,7 +69,7 @@ Everything below was made on the reference PC (RTX 3060 12 GB) from inside the a
 | 🏷️ | **Know your models** | Every model shows what it can do (🔧 tools, 👁 vision, 🧠 thinking, 💻 code, 🔓 uncensored) and whether it fits in VRAM, detected automatically for anything you add |
 | 🛒 | **Model catalog** | 29 models checked to run on a 12 GB card, with what each is good at, including Qwen3.8 27B Uncensored (the strongest reasoner here, ~30 tok/s fully on the GPU). One click downloads into the workstation and it's ready to pick |
 | 🧠 | **Shared long-term memory** | The same memory as Open WebUI, so every model in both apps knows you. Say *"remember that …"* |
-| 📊 | **System dashboard** | Live GPU load, VRAM, temperature and power for every card, Load/Unload for every model, a what's-in-VRAM bar per card, RAM and service status, and a warning before a model won't fit on the card it would load on |
+| 📊 | **System dashboard** | Live GPU load, VRAM, temperature and power for every card, Load/Unload for every model, a what's-in-VRAM bar per card measured per program from Windows' own GPU counters (each model, ComfyUI, the voice server, the desktop, a browser or game by name), RAM and service status, and a warning before a model won't fit, using what that model actually took the last time it loaded and naming the other programs in the way |
 | 🖼️ | **Studio** | A gallery of your real ComfyUI renders, with prompts read from the files, plus image generation (Qwen-Image-2.1, its turbo, or Z-Image-Turbo) and LTX-2.5 text-to-video with sound, with live progress |
 | 🧍 | **Reference image** | Put a character or an item from your own picture into a new scene: pick, drop or paste it into Studio's **Reference image** slot (or attach it in chat with the paperclip, paste or drop, then `/image` or `/video`) and describe the scene. Qwen-Image-2.1 keeps the subject's look (about 2 min at 1024²); for a video it makes that first frame at the clip's shape and LTX-2.5 animates it with sound (6–15 min for 4 s at 768×512: the low end when the models are still cached in RAM, the high end when both load from disk), or LTX animates your picture as it is. Mark it **Character** or **Item** for a closer match; these choices and the video's first frame are shared by Studio and chat (they show under the attached picture). Only use photos of real people with their permission |
 | ✏️ | **Edit** | Change any image by instruction with Qwen-Image-2.1 ("make it night", "swap the car for a horse"): in Studio, or type `/edit make it night` in chat to edit the attached picture (or the last one made in that chat) |
@@ -134,7 +134,7 @@ transcript that's just its own words is ignored.
   With several cards Prestige shows meters for each, and checks every fit against the card the model will load on (the
   workstation decides which service runs where; see its
   [GPU guide](https://github.com/Mr5elfDe5truct/custom-ai-workstation/blob/main/docs/GPUS.md)). Smaller cards work too:
-  fit chips, context sizes and Studio's warnings follow the VRAM that's there.
+  fit chips, context sizes and Studio's warnings follow the VRAM that's there, less what other programs hold on the card.
 - **Windows 11** (WebView2 is built in). Linux and macOS are the next goal.
 
 ## 🚀 Install

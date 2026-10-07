@@ -10,7 +10,7 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { errMsg, http } from "./backends";
-import { cardsText, comfyCards, shortName, vramGB } from "./gpus";
+import { cardsText, comfyCards, heldOn, othersText, readHolders, shortName, vramGB } from "./gpus";
 import {
   ASPECTS,
   LTX_FPS,
@@ -311,12 +311,35 @@ const LTX_DRAFT_FIXED_MIB = 2526;
 /** GB of the LTX-2.5 diffusion model that stays on ComfyUI's main card for this render (the rest streams from RAM). */
 function ltxRoom(w: number, h: number, frames: number, draft: boolean): { room: number; mainGB: number } {
   const { main, parts } = comfyCards();
-  const mainGB = main ? main.mem_total / 1024 : 12;
+  const mainGB = main ? main.mem_total / 1024 - takenGB(main.index) : 12;
   // w × h is the size the last pass renders at. A draft is the first pass alone (half size, no upscaler), which left
   // 9.8 GB for the model at every length measured: ~2.5 GB fixed.
   const fixed = draft ? LTX_DRAFT_FIXED_MIB : LTX_FIXED_MIB - (parts.includes("upscaler") ? LTX_UPSCALER_MIB : 0);
   const room = mainGB - (fixed + LTX_FRAME_MIB * frames * ((w * h) / LTX_FRAME)) / 1024;
   return { room, mainGB };
+}
+// The limits were measured with the Windows desktop on the card (~1 GB). Other programs beyond that (a browser, a game)
+// take VRAM ComfyUI can't free, measured per process (gpus.ts), so they come off the card's size.
+const DESKTOP_MIB = 1024;
+const othersGB = (index: number) => Math.max(0, heldOn(index).others - DESKTOP_MIB) / 1024;
+let rechecking = false;
+function takenGB(index: number): number {
+  const gb = othersGB(index);
+  // The counters are read in the background (cached 2 s); when a fresh reading moves the number, the warnings redraw.
+  if (!rechecking) {
+    rechecking = true;
+    readHolders().then(() => {
+      rechecking = false;
+      if (Math.abs(othersGB(index) - gb) >= 0.25) renderCreate();
+    });
+  }
+  return gb;
+}
+/** " Chrome 1.2 GB and … are using 2.0 GB of it." when other programs take a noticeable share of ComfyUI's card. */
+function takenText(index: number): string {
+  const gb = takenGB(index);
+  const who = othersText(index);
+  return gb >= 0.5 && who ? ` Other programs are using ${gb.toFixed(1)} GB of it (${who}); closing them gives ComfyUI more room.` : "";
 }
 const WAN_BASE = 832 * 480 * 81;
 const MP = 1024 * 1024;
@@ -389,25 +412,25 @@ function plan(gm: GenMode, src: Source | null = srcAsset, o?: Override): Plan {
     const kept = Math.max(0, Math.min(LTX_MODEL_GB, room));
     const cards = `${kept.toFixed(1)} of the model's ${LTX_MODEL_GB} GB on ${where}, the rest streamed from RAM` + (auxText ? ` · ${auxText}` : "");
     const warn =
-      room < 1.5
-        ? `Likely more than ${where}'s ${Math.round(mainGB)} GB can take: it may fail with out of memory. Try a smaller size or a shorter length.`
+      (room < 1.5
+        ? `Likely more than ${where} can take: it may fail with out of memory. Try a smaller size or a shorter length.`
         : room < 3
           ? `Heavy for ${where}: only ${room.toFixed(1)} GB is left for the model, so most of it streams from system RAM and the render is slower.`
-          : "";
+          : "") + (room < 3 && main ? takenText(main.index) : "");
     return { ...p, warn, cards };
   }
   // Videos hold every frame in VRAM at once, so they reach the limit sooner than images. The limits were set on a
   // 12 GB card; they scale with ComfyUI's main card (a second card only takes the parts that can move).
-  const mainGB = main ? main.mem_total / 1024 : vramGB("comfyui");
+  const mainGB = main ? main.mem_total / 1024 - takenGB(main.index) : vramGB("comfyui");
   const scale = mainGB / 12;
   const [soft, hard] = (m.family === "image" || m.family === "edit" ? [2.2, 3.5] : [1.35, 2.2]).map((x) => x * scale);
-  const card = main ? `the ${shortName(main)}'s ${Math.round(mainGB)} GB` : cardsText("comfyui");
+  const card = main ? `the ${shortName(main)}'s ${Math.round(main.mem_total / 1024)} GB` : cardsText("comfyui");
   const warn =
-    p.load > hard
+    (p.load > hard
       ? `Likely more than ${card} of VRAM: it may fail with out of memory. Try a smaller size, a shorter length or fewer images.`
       : p.load > soft
         ? `Heavy for ${card}: ComfyUI may spill into system RAM and render much slower.`
-        : "";
+        : "") + (p.load > soft && main ? takenText(main.index) : "");
   // The LTX upscaler is the only part other models don't use; the VAEs and text encoders follow them anywhere.
   const moved = parts.filter((x) => x !== "upscaler");
   const cards = aux && moved.length ? `the diffusion model on the ${shortName(main!)}, ${moved.map((x) => (x === "vae" ? "the VAE" : "the text encoder")).join(" and ")} on the ${shortName(aux)}` : undefined;
@@ -598,8 +621,15 @@ export function initStudio(d: Deps) {
   listen<any>("comfy", (e) => onComfy(e.payload));
 }
 
+let holdersTimer: number | undefined;
 export async function showStudio(on: boolean) {
+  clearInterval(holdersTimer);
   if (!on) return;
+  // While Studio is open, a program starting or closing on ComfyUI's card updates the warnings (takenGB redraws).
+  holdersTimer = window.setInterval(() => {
+    const main = comfyCards().main;
+    if (main) takenGB(main.index);
+  }, 3000);
   if (mode === "webcam") deps.cameraPane(true);
   await ensureWorkflows();
   await refresh();

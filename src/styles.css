@@ -245,7 +245,8 @@ body.busy .hud .eye-glow, .splash .eye-glow { animation: eye 1s ease-in-out infi
 .mrow .btn { grid-row: 1 / span 2; grid-column: 2; min-width: 78px; }
 .vram-stack { display: flex; height: 16px; border-radius: 4px; overflow: hidden; background: var(--panel-2); border: 1px solid var(--line); }
 .vram-stack .seg { height: 100%; border-right: 1px solid var(--bg); transition: width .4s; }
-.seg.sys { background: #3a2e2a; }
+.seg.sys { background: #3a2e2a; } .seg.sys2 { background: #2a2320; }
+.seg.v0 { background: #3f6f8a; } .seg.v1 { background: #4f8a5e; } .seg.v2 { background: #6b6f8a; }
 .seg.s0 { background: var(--red); } .seg.s1 { background: var(--gold); } .seg.s2 { background: #a3562a; } .seg.s3 { background: #e0cfa8; } .seg.s4 { background: #6f2a7a; }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--muted); }
 .legend.spread { justify-content: space-between; }
