@@ -8,6 +8,7 @@ mod knowledge;
 mod models;
 mod phone;
 mod toolstore;
+mod transcribe;
 mod studio;
 
 use serde::Serialize;
@@ -515,6 +516,9 @@ pub fn run() {
             toolstore::tools_extra_set,
             toolstore::tools_setup,
             toolstore::tools_open_link,
+            transcribe::transcribe_file,
+            transcribe::transcribe_bytes,
+            transcribe::pick_media,
             computer::cu_screenshot,
             computer::cu_act,
             computer::cu_panel

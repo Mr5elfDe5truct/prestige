@@ -498,6 +498,7 @@ const SERVICES: [string, string, string][] = [
   ["ComfyUI", ":8188", "http://127.0.0.1:8188/system_stats"],
   ["Kokoro voice", ":8880", "http://127.0.0.1:8880/v1/models"],
   ["Voice server · Whisper, VoxCPM2", ":8890", "http://127.0.0.1:8890/health"],
+  ["Phonon server · Transcribe", ":8891", "http://127.0.0.1:8891/health"],
 ];
 
 async function refreshServices() {

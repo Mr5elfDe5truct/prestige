@@ -41,6 +41,7 @@ import {
   addDropped, addFiles, citeLabel, docById, hasDocs, initKnowledge, knowledgeFor, openKnowledge, openSource, readyDocs, type KbDoc, type Source,
 } from "./knowledge";
 import { RESEARCH_CMD, deepResearch } from "./research";
+import { TRANSCRIBE_CMD, clock, isMedia, summaryPrompt, transcribeMedia, transcriptMd, type MediaSource } from "./transcribe";
 import { initMissions } from "./missions";
 import { DO_CMD, brains, describe as describeAct, doItForMe } from "./computer";
 import {
@@ -127,6 +128,7 @@ interface Settings {
   character?: string; // the character being talked to (characters.ts); undefined = Prestige itself
   phone?: boolean; // phone access is on (phone.rs)
   phonePort?: number; // its port, 8765 unless set
+  liveStt?: "phonon"; // Live calls listen with Phonon-2 (CPU, :8891) instead of Whisper
   computerModel?: string; // the model that drives the PC for /do (its key); undefined = the best one there
 }
 
@@ -1370,6 +1372,114 @@ async function runResearch(text: string, question: string, hooks?: ReplyHooks) {
   }
 }
 
+/** Transcribe (transcribe.ts): a recording or video in, the words with who said them out, then a summary by the chat
+ *  model. The reply is the summary with the full transcript folded under it, so later questions can use both. */
+async function runTranscribe(src: MediaSource, hooks?: ReplyHooks) {
+  if (!inTauri) {
+    toast("Transcribe runs in the desktop app.");
+    return hooks?.onDone?.(false);
+  }
+  if (busy) {
+    toast("Wait for the reply to finish first.");
+    return hooks?.onDone?.(false);
+  }
+  const name = "file" in src ? src.file.name : src.name;
+  if (chat.messages.length === 0) chat.title = `Transcript: ${name}`.slice(0, 60);
+  chat.messages.push({ role: "user", content: `🎧 Transcribe ${name}` });
+  renderChat();
+  const reply: StoredMessage = { role: "assistant", content: "", model: "Transcribe · Phonon-2" };
+  const bubble = addAiBubble(reply.model!, () => reply.content);
+  const body = $(".msg-body", bubble);
+  const replyChat = chat.id;
+  phoneReplyStart(reply.model!, name);
+  body.innerHTML = `<div class="render-progress"><div class="progress"><i></i></div><span class="status-line">Starting…</span></div>`;
+  const progress = (pct: number, what: string) => {
+    ($(".progress", body) as HTMLElement | null)?.style.setProperty("--v", String(pct));
+    const l = $(".status-line", body);
+    if (l) l.textContent = what;
+  };
+  scrollDown(true);
+  busy = new AbortController();
+  setBusyUi(true);
+  try {
+    const t = await transcribeMedia(src, settings.stackRoot ?? null, (pct, what) => progress(pct * 0.8, what));
+    if (!t.turns.length) throw new Error("no speech was found in it");
+    const facts = [
+      clock(t.duration),
+      t.speakers ? `${t.speakers} speaker${t.speakers === 1 ? "" : "s"}` : "speakers not told apart",
+      `transcribed in ${Math.round(t.seconds.total)} s`,
+    ].join(" · ");
+    reply.note = `transcript · ${facts}`;
+    if (t.engines.speakers_error) toast(`Couldn't tell the speakers apart (${t.engines.speakers_error.slice(0, 120)}); the words are all there.`, "warn");
+    const folded = `<details><summary>Transcript · ${facts}</summary>\n\n${transcriptMd(t)}\n\n</details>`;
+    let summary = "";
+    const model = current;
+    const compose = () => (summary ? `${summary.replace(/<think>[\s\S]*?<\/think>/g, "").trim()}\n\n${folded}` : folded);
+    if (model) {
+      progress(82, `${model.name} is writing a summary…`);
+      reply.model = `Transcribe · Phonon-2 · ${model.name}`;
+      $(".msg-who", bubble).textContent = reply.model;
+      try {
+        await streamChat(
+          model,
+          [
+            { role: "system", content: systemBase() },
+            { role: "user", content: summaryPrompt(name, t) },
+          ],
+          {
+            onToken: (x) => {
+              summary += x;
+              renderBody(body, compose(), true);
+              scrollDown();
+            },
+            onThinking: () => {},
+            onStats: () => {},
+          },
+          busy.signal,
+          undefined,
+          { think: false },
+        );
+      } catch (e) {
+        if (!busy.signal.aborted) toast(`The transcript is here, but the summary failed: ${errMsg(e)}`, "warn");
+      }
+    }
+    reply.content = compose();
+  } catch (e) {
+    reply.error = true;
+    reply.content = `Couldn't transcribe ${name}: ${errMsg(e)}`;
+    bubble.classList.add("error");
+  } finally {
+    busy = null;
+    setBusyUi(false);
+    renderBody(body, reply.content);
+    if (reply.note) {
+      const chip = document.createElement("div");
+      chip.className = "chip";
+      chip.textContent = reply.note;
+      bubble.insertBefore(chip, body);
+    }
+    chat.messages.push(reply);
+    bubble.dataset.i = String(chat.messages.length - 1);
+    if (!reply.error) reactButton(bubble, reply);
+    scrollDown();
+    persist()
+      .catch((e) => toast(`Couldn't save this chat: ${e}`, "warn"))
+      .finally(() => phoneReplyEnd(replyChat));
+    hooks?.onDone?.(!reply.error);
+  }
+}
+
+/** /transcribe: the file picker, then Transcribe. */
+async function pickAndTranscribe(hooks?: ReplyHooks) {
+  if (!inTauri) return hooks?.onDone?.(false);
+  const path = await invoke<string | null>("pick_media").catch((e) => {
+    toast(errMsg(e), "warn");
+    return null;
+  });
+  if (!path) return hooks?.onDone?.(false);
+  return runTranscribe({ path, name: path.split(/[\\/]/).pop() ?? path }, hooks);
+}
+
 /** /do: a vision model works through the task on this PC (computer.ts). A card first says what will happen and which
  *  model drives; Start shrinks Prestige to the step-by-step panel. Afterwards every step and the model's summary are
  *  posted in this reply. */
@@ -1523,6 +1633,7 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     }
     return runResearch(text, question, opts.hooks);
   }
+  if (!live && TRANSCRIBE_CMD.test(text)) return pickAndTranscribe(opts.hooks);
   // "/do open Notepad and write a haiku": a vision model does it on this PC (asks first; not from Live calls).
   if (!live && DO_CMD.test(text)) {
     const task = text.replace(DO_CMD, "").trim();
@@ -2143,8 +2254,14 @@ function wire() {
   attachIn.addEventListener("change", async () => {
     const files = Array.from(attachIn.files ?? []);
     attachIn.value = "";
+    // A recording or video is transcribed (one at a time).
+    const media = files.filter(isMedia);
+    if (media.length) {
+      if (media.length > 1) toast("Transcribing the first one; add the others when it's done.");
+      runTranscribe({ file: media[0] });
+    }
     for (const f of files) if (f.type.startsWith("image/")) attachImage(f);
-    const docs = files.filter((f) => !f.type.startsWith("image/"));
+    const docs = files.filter((f) => !f.type.startsWith("image/") && !isMedia(f));
     if (docs.length) attachDocs(await addFiles(docs.map((file) => ({ file }))));
   });
   ta.addEventListener("paste", (e) => {
@@ -2168,6 +2285,13 @@ function wire() {
   });
   chatScreen.addEventListener("drop", async (e) => {
     chatScreen.classList.remove("drop");
+    // A dropped recording or video is transcribed.
+    const rec = Array.from(e.dataTransfer?.files ?? []).find(isMedia);
+    if (rec) {
+      e.preventDefault();
+      runTranscribe({ file: rec });
+      return;
+    }
     const f = imageIn(e.dataTransfer);
     const docs = hasDocs(e.dataTransfer);
     if (!f && !docs) return;
@@ -2294,6 +2418,7 @@ function wire() {
     const info = inTauri ? await invoke<{ root: string }>("stack_info", { root: settings.stackRoot ?? null }) : { root: "" };
     rootInput.value = info.root;
     keepInput.checked = !!settings.keepRunning;
+    ($("#live-phonon") as HTMLInputElement).checked = settings.liveStt === "phonon";
     $("#settings-test").textContent = "";
     openAppearance(settings.look);
     refreshPhone().catch(() => {});
@@ -2334,6 +2459,7 @@ function wire() {
     settings.owuiUrl = url && url !== DEFAULT_OWUI ? url : undefined;
     settings.stackRoot = rootInput.value.trim() || undefined;
     settings.keepRunning = keepInput.checked || undefined;
+    settings.liveStt = ($("#live-phonon") as HTMLInputElement).checked ? "phonon" : undefined;
     await saveSettings();
     if (inTauri) {
       const info = await invoke<{ startScript: boolean }>("stack_info", { root: settings.stackRoot ?? null });
@@ -2466,6 +2592,7 @@ async function main() {
     toast,
     memCfg,
     liveModels,
+    phonon: () => settings.liveStt === "phonon",
     beginChat: beginLiveChat,
     send: (text, images, model, hooks) => {
       send(text, { images, hooks, live: model });
