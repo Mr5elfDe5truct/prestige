@@ -41,6 +41,7 @@ import {
   addDropped, addFiles, citeLabel, docById, hasDocs, initKnowledge, knowledgeFor, openKnowledge, openSource, readyDocs, type KbDoc, type Source,
 } from "./knowledge";
 import { RESEARCH_CMD, deepResearch } from "./research";
+import { initMissions } from "./missions";
 import { DO_CMD, brains, describe as describeAct, doItForMe } from "./computer";
 import {
   activeCharacter, characterById, characterMemory, characterPrompt, faceScene, initCharacters, remember, renderPicker, setCharacterVoice, voiceOf, wantsFace,
@@ -686,6 +687,20 @@ async function persist() {
   await renderHistory();
 }
 
+/** Opens a saved chat (from Past chats, or a mission's result); false when a reply is still running. */
+async function openSavedChat(id: string): Promise<boolean> {
+  if (busy) {
+    toast("Wait for the reply to finish first.");
+    return false;
+  }
+  chat = await invoke<Chat>("load_chat", { id });
+  // Carry on with whoever the chat was with.
+  if ((chat.character ?? undefined) !== settings.character && (!chat.character || characterById(chat.character))) choosePersona(chat.character, true);
+  renderChat();
+  renderHistory();
+  return true;
+}
+
 async function renderHistory() {
   const list = $("#history-list");
   if (!inTauri) {
@@ -719,12 +734,7 @@ async function renderHistory() {
       $(".open", row).appendChild(s);
     }
     $(".open", row).addEventListener("click", async () => {
-      if (busy) return toast("Wait for the reply to finish first.");
-      chat = await invoke<Chat>("load_chat", { id: it.id });
-      // Carry on with whoever the chat was with.
-      if ((chat.character ?? undefined) !== settings.character && (!chat.character || characterById(chat.character))) choosePersona(chat.character, true);
-      renderChat();
-      renderHistory();
+      if (!(await openSavedChat(it.id))) return;
       $("#history").hidden = true;
       // Jump to the message that matched.
       if (it.index != null) {
@@ -2403,6 +2413,20 @@ async function main() {
     onChange: () => renderChatFiles(),
   });
   $("#kb-btn").addEventListener("click", () => openKnowledge());
+  if (inTauri)
+    initMissions({
+      toast,
+      models: () => models,
+      current: () => current,
+      system: () => systemBase(),
+      toolsHint: TOOLS_HINT,
+      busy: () => !!busy,
+      saved: () => renderHistory().catch(() => {}),
+      openChat: (id) => {
+        go("chat");
+        openSavedChat(id).catch((e) => toast(`Couldn't open it: ${errMsg(e)}`, "warn"));
+      },
+    });
   initCatalog({
     toast,
     root: () => settings.stackRoot ?? null,

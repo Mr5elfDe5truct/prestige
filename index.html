@@ -38,6 +38,9 @@
         <button class="icon-btn ghost kb-btn" id="kb-btn" aria-label="Knowledge: chat with your files" title="Knowledge: chat with your files (PDFs, Word documents, notes, folders)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h13v15H6a2 2 0 0 0-2 2z" /><path d="M4 20a2 2 0 0 0 2 2h13v-4" /><path d="M9 8h6M9 11h4" /></svg><span class="count" id="kb-count-badge"></span>
         </button>
+        <button class="icon-btn ghost kb-btn" id="missions-btn" aria-label="Missions: scheduled jobs" title="Missions: jobs Prestige runs on a schedule while it's open, like a morning briefing">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="13" r="8" /><path d="M12 9v4l2.5 2.5M9 2h6M12 2v3" /></svg><span class="count" id="missions-count"></span>
+        </button>
         <span class="grow"></span>
         <!-- GPU, VRAM and temperature meters, one GPU/VRAM pair per card (main.ts) -->
         <div class="hud-gpus" id="hud-gpus">
@@ -364,6 +367,34 @@
       <div class="kb-list-head"><span class="eyebrow">Your files</span><span class="credit" id="kb-count"></span></div>
       <div class="kb-list" id="kb-list"></div>
       <p class="credit">Reads PDF (text, not scans), Word (.docx), text, Markdown, HTML, CSV, JSON and code. Files added from a folder or the picker are read where they are; dropped files are copied into Prestige's app data folder. Removing a file here never deletes your original.</p>
+    </dialog>
+
+    <!-- Missions: scheduled jobs while Prestige is open (missions.ts) -->
+    <dialog class="sheet knowledge missions" id="missions">
+      <div class="kb-head">
+        <div>
+          <h2>Missions</h2>
+          <p class="muted">Jobs Prestige runs on a schedule while it's open: a prompt for a chat model with read-only tools, or a Deep Research question. Each result is saved as a chat and Windows tells you when it's ready. Tools that would ask "Allow?" are declined, since nobody's there to answer.</p>
+        </div>
+        <button class="btn" id="missions-close" type="button">Close</button>
+      </div>
+      <div class="ms-list" id="missions-list"></div>
+      <button class="btn" id="missions-new" type="button">New mission…</button>
+      <div class="ms-templates" id="missions-templates"></div>
+      <form class="ms-form" id="ms-form" hidden>
+        <label class="field">Name<input id="ms-name" maxlength="80" placeholder="Morning briefing" /></label>
+        <label class="field">What to do<textarea id="ms-prompt" rows="5"></textarea></label>
+        <div class="ms-grid">
+          <label class="field">How<select id="ms-how"><option value="chat">Chat with tools</option><option value="research">Deep Research</option></select></label>
+          <label class="field">Model<select id="ms-model"></select></label>
+          <label class="field">When<select id="ms-kind"><option value="daily">At a time of day</option><option value="every">Every few hours</option></select></label>
+          <label class="field" id="ms-every">Every<span class="ms-hours"><input id="ms-hours" type="number" min="1" max="168" value="6" /> hours</span></label>
+        </div>
+        <div class="ms-daily" id="ms-daily"><label class="field">Time<input id="ms-time" type="time" value="08:00" /></label><div class="ms-days" id="ms-days"></div></div>
+        <div id="ms-groups-wrap"><span class="eyebrow">Tools it may use (only read-only ones run)</span><div class="ms-groups" id="ms-groups"></div></div>
+        <label class="check"><input id="ms-catchup" type="checkbox" /> Catch up: if Prestige was closed at its time, run it once when Prestige opens</label>
+        <div class="acts"><button type="button" class="btn" id="ms-cancel">Cancel</button><button type="submit" class="btn primary">Save mission</button></div>
+      </form>
     </dialog>
 
     <!-- Characters: personas with a personality, voice, face and memory (characters.ts) -->
