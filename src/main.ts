@@ -15,8 +15,10 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { initSystem, onGpus, showSystem, unloadAll } from "./system";
 import { ollamaCtx, onPlanChange, readGpus, refreshPlan, shortName, type Gpu } from "./gpus";
 import {
-  allowRenders, cancelRender, chatSettings, editLabel, editMedia, initStudio, modelLabel, openRender, renderMedia, renderMenu, showStudio, type MediaKind,
+  allowRenders, cancelRender, chatSettings, editLabel, editMedia, initStudio, modelLabel, openRender, renderMedia, renderMenu, renderSong, showStudio, songSeconds,
+  type MediaKind,
 } from "./studio";
+import { SONG_CMD, writeSong } from "./songwriter";
 import { onSettingsChange } from "./gensettings";
 import { CONSENT, bindRefChoices, hasFiles, imageIn, imageToBase64, onRefPrefsChange, refChoicesHtml, referenceFromBase64 } from "./reference";
 import { initVoice, showVoice } from "./voice";
@@ -88,7 +90,8 @@ interface StoredMessage {
   tools?: ToolStep[]; // tools the model used for this reply
   // An image (or several, or a video) made from chat. "more" holds the other images of a batch.
   // reply: the model made it with a tool, so its content is the reply to show under it (not a note for later turns).
-  render?: { path: string; prompt: string; seconds?: number; more?: string[]; kind?: MediaKind; reply?: boolean };
+  // A song (kind "audio") has its title; prompt is its style.
+  render?: { path: string; prompt: string; seconds?: number; more?: string[]; kind?: MediaKind; reply?: boolean; title?: string };
   react?: string; // an emote reaction: yours on a reply, Prestige's on your message
   sources?: Source[]; // passages from Knowledge this reply was given (shown under it, cited in it)
 }
@@ -454,7 +457,15 @@ function renderFigure(bubble: HTMLElement, r: NonNullable<StoredMessage["render"
     const fig = document.createElement("figure");
     fig.className = "chat-render";
     fig.dataset.path = path;
-    if (r.kind === "video") {
+    if (r.kind === "audio") {
+      // A song: its title and a player; right-click for the rest (save, copy, open in folder…).
+      fig.classList.add("song");
+      fig.innerHTML = `<span class="song-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 18V5l11-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="17" cy="16" r="3" /></svg><b></b></span><audio controls preload="metadata"></audio>`;
+      $("b", fig).textContent = r.title || "Song";
+      const au = $("audio", fig) as HTMLAudioElement;
+      if (inTauri) allowRenders().then(() => (au.src = convertFileSrc(path)));
+      au.addEventListener("error", () => fig.classList.add("missing"), { once: true });
+    } else if (r.kind === "video") {
       // Plays inline; right-click for the rest.
       fig.innerHTML = `<video controls loop playsinline preload="metadata"></video>`;
       const v = $("video", fig) as HTMLVideoElement;
@@ -824,7 +835,7 @@ async function toolSource(path: string, images?: string[]): Promise<string | und
     }
   }
   if (images?.length) return images[0];
-  const lastPic = [...chat.messages].reverse().find((m) => m.render && m.render.kind !== "video");
+  const lastPic = [...chat.messages].reverse().find((m) => m.render && (m.render.kind ?? "image") === "image");
   if (lastPic?.render) return load(lastPic.render.path).catch(() => undefined);
   return undefined;
 }
@@ -1053,6 +1064,18 @@ const IMAGE_ASK = new RegExp(
   "i",
 );
 
+// "/song a sea shanty about debugging" (or /music), or "write me a song about…" / "make a lo-fi track for…".
+const SONG_ASK = new RegExp(
+  String.raw`${ASK_LEAD}(?:(?:write|make|compose|generate|create|produce|sing)\s+(?:me\s+|us\s+)?|(?:i(?:'d|\s+would)?\s+(?:like|want|need)|give\s+me|can\s+i\s+(?:get|have|hear))\s+)(?:an?\s+|another\s+)?(?:[\w'-]+\s+){0,3}?(?:song|tune|track|jingle|anthem|ballad|lullaby)(?=\s+(?:about|for|of|called|named|that|where|with|in)\b|\s*[,.!?:]|\s*$)`,
+  "i",
+);
+
+/** What a song request asks for ("" for a bare /song), or null when it isn't one. A plain ask keeps its wording. */
+function songRequest(text: string): string | null {
+  if (SONG_CMD.test(text)) return text.replace(SONG_CMD, "").trim();
+  return SONG_ASK.test(text) ? text.trim() : null;
+}
+
 /** The prompt in an image or video request ("" for a bare /image or /video), or null when it isn't one. */
 function mediaRequest(text: string): { kind: MediaKind; prompt: string } | null {
   const v = text.match(VIDEO_CMD) ?? text.match(VIDEO_ASK);
@@ -1133,6 +1156,96 @@ async function makeMedia(text: string, kind: MediaKind, prompt: string, hooks?: 
       .finally(() => phoneReplyEnd(replyChat));
     if (hooks) {
       hooks.onDelta?.(reply.render ? `Here's your ${what}.` : `I couldn't make that ${what}.`);
+      hooks.onDone?.(!!reply.render);
+    }
+  }
+}
+
+/** Lyrics as Markdown: each sung line on its own line, the [Verse] / [Chorus] tags in italics. */
+const lyricsMd = (lyrics: string) =>
+  lyrics
+    .split("\n")
+    .map((l) => l.trim())
+    .map((l) => (/^\[.+\]$/.test(l) ? `*${l}*` : l.replace(/([*_`])/g, "\\$1")))
+    .join("  \n")
+    .replace(/(  \n){2,}/g, "\n\n");
+
+/** /song: the chat model writes the song (title, style, tempo, key, lyrics; songwriter.ts), then ACE-Step sings it. The
+ *  song plays in the chat with its lyrics under it, and is saved with the other renders. */
+async function makeSong(text: string, request: string, hooks?: ReplyHooks) {
+  if (!inTauri) {
+    toast("Songs are made in the desktop app.");
+    return hooks?.onDone?.(false);
+  }
+  const model = current;
+  if (!model) {
+    toast("No model is available to write the song. Start the services first.", "warn");
+    return hooks?.onDone?.(false);
+  }
+  if (chat.messages.length === 0) chat.title = text.replace(/\s+/g, " ").slice(0, 60);
+  // The conversation so far, so "a song about that" knows what "that" is.
+  const before = chat.messages.filter((m) => !m.error && !m.render).slice(-6);
+  chat.messages.push({ role: "user", content: text });
+  renderChat();
+  const label = await modelLabel("audio");
+  const reply: StoredMessage = { role: "assistant", content: "", model: label };
+  const bubble = addAiBubble(label, () => reply.content);
+  const body = $(".msg-body", bubble);
+  const replyChat = chat.id;
+  phoneReplyStart(label, text);
+  let lastStatus = 0;
+  body.innerHTML = `<div class="render-progress"><div class="progress"><i></i></div><span class="status-line">Starting…</span></div>`;
+  const progress = (pct: number, label: string) => {
+    ($(".progress", body) as HTMLElement | null)?.style.setProperty("--v", String(pct));
+    const l = $(".status-line", body);
+    if (l) l.textContent = label;
+    if (Date.now() - lastStatus > 2000) {
+      lastStatus = Date.now();
+      phonePush({ type: "status", chatId: replyChat, text: `${label} (${Math.round(pct)}%)` });
+    }
+  };
+  scrollDown(true);
+  busy = new AbortController();
+  busy.signal.addEventListener("abort", () => cancelRender(), { once: true });
+  setBusyUi(true);
+  const t0 = Date.now();
+  try {
+    const context = before.length ? `Conversation so far:\n${before.map((m) => `${m.role}: ${m.content.slice(0, 800)}`).join("\n")}\n\nWrite this song: ` : "";
+    progress(1, `${model.name} is writing the song…`);
+    const song = await writeSong(model, context + request, songSeconds(), busy.signal, (n) => progress(1, `${model.name} is writing the song… ${n} characters`));
+    // The lyrics show while ACE-Step sings them.
+    reply.content = `**${song.title}**\n\n${song.lyrics ? lyricsMd(song.lyrics) : "*Instrumental*"}`;
+    const lyr = document.createElement("div");
+    lyr.className = "song-draft";
+    renderBody(lyr, reply.content);
+    body.appendChild(lyr);
+    scrollDown();
+    const got = await renderSong(song.style, song.lyrics, progress, { bpm: song.bpm, key: song.key, language: song.language });
+    reply.render = { path: got[0].path, prompt: song.style, seconds: Math.round((Date.now() - t0) / 1000), kind: "audio", reply: true, title: song.title };
+    renderFigure(bubble, reply.render);
+    renderBody(body, reply.content);
+    const au = bubble.querySelector<HTMLAudioElement>(".chat-render audio");
+    au?.addEventListener("loadedmetadata", () => scrollDown(), { once: true });
+  } catch (e) {
+    if (busy?.signal.aborted) reply.content = reply.content ? `${reply.content}\n\n*(stopped)*` : "*(stopped)*";
+    else {
+      reply.error = true;
+      reply.content = `Couldn't make the song: ${errMsg(e)}`;
+      bubble.classList.add("error");
+    }
+    body.innerHTML = md(reply.content);
+  } finally {
+    chat.messages.push(reply);
+    bubble.dataset.i = String(chat.messages.length - 1);
+    if (!reply.error) reactButton(bubble, reply);
+    busy = null;
+    setBusyUi(false);
+    scrollDown();
+    persist()
+      .catch((e) => toast(`Couldn't save this chat: ${e}`, "warn"))
+      .finally(() => phoneReplyEnd(replyChat));
+    if (hooks) {
+      hooks.onDelta?.(reply.render ? "Here's your song." : "I couldn't make that song.");
       hooks.onDone?.(!!reply.render);
     }
   }
@@ -1276,7 +1389,7 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     const instruction = text.replace(EDIT_CMD, "").trim();
     let src = attachments[0];
     if (!src) {
-      const last = [...chat.messages].reverse().find((m) => m.render && m.render.kind !== "video");
+      const last = [...chat.messages].reverse().find((m) => m.render && (m.render.kind ?? "image") === "image");
       if (last?.render && inTauri) {
         try {
           await allowRenders();
@@ -1304,6 +1417,15 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     }
     return runResearch(text, question, opts.hooks);
   }
+  // "/song …" or "write me a song about…": the chat model writes it and ACE-Step sings it. (Not with pictures attached,
+  // unless asked for with /song: those messages are about the pictures.)
+  const songAsk = live || (!SONG_CMD.test(text) && (opts.images?.length || attachments.length)) ? null : songRequest(text);
+  if (songAsk === "") {
+    toast("Say what the song is about after /song, e.g. /song an upbeat pop song about Monday mornings");
+    opts.hooks?.onDone?.(false);
+    return;
+  }
+  if (songAsk) return makeSong(text, songAsk, opts.hooks);
   // With pictures attached, /image or /video uses the first as a reference image (Live and the camera ask don't make media).
   // "Draw me a chart of…" or "make a snake game" is for the Canvas, unless it asks for a picture or a clip.
   const forCanvas = CANVAS_CMD.test(text) || (wantsCanvas(text) && !/\b(image|picture|photo|illustration|painting|wallpaper|video|clip)s?\b/i.test(text));
@@ -2178,6 +2300,11 @@ async function main() {
     freeGpu: () => unloadAll(undefined, "comfyui"),
     cameraPane: (on: boolean) => showCameraPane(on),
     show: () => go("studio"),
+    // Music mode's "Write lyrics": the chat model picked in Chat writes them for the style typed in Studio.
+    writeLyrics: async (style, seconds, signal) => {
+      if (!current) throw new Error("no chat model is available (start the services first)");
+      return (await writeSong(current, style, seconds, signal)).lyrics;
+    },
   });
   onSpeakingChange((on) => {
     if (!on) markSpeaking(null);
