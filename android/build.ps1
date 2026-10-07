@@ -3,10 +3,17 @@
 #
 #   powershell -ExecutionPolicy Bypass -File android\build.ps1
 #
-# Needs a JDK (17 or newer) and the Android SDK with platforms;android-35 and build-tools;35.0.0. The signing key is
-# made on the first build in %USERPROFILE%\.prestige (keep a copy: updates to the app must be signed with the same key).
+# Needs a JDK (17 or newer) and the Android SDK with platforms;android-35 and build-tools;35.0.0. The SDK is found at
+# ANDROID_HOME, ANDROID_SDK_ROOT, %LOCALAPPDATA%\Android\Sdk or %USERPROFILE%\Android\Sdk (an SDK installed from inside a
+# packaged app such as Claude lands in that app's private copy of AppData, which other programs can't see, so keep it in
+# the last one). The signing key is made on the first build in %USERPROFILE%\.prestige (keep a copy: updates to the app
+# must be signed with the same key).
 param(
-    [string]$Sdk = $(if ($env:ANDROID_HOME) { $env:ANDROID_HOME } else { "$env:LOCALAPPDATA\Android\Sdk" }),
+    [string]$Sdk = $(
+        $found = @($env:ANDROID_HOME, $env:ANDROID_SDK_ROOT, "$env:LOCALAPPDATA\Android\Sdk", "$env:USERPROFILE\Android\Sdk") |
+            Where-Object { $_ -and (Test-Path "$_\platforms\android-35\android.jar") } | Select-Object -First 1
+        if ($found) { $found } else { "$env:LOCALAPPDATA\Android\Sdk" }
+    ),
     [string]$Jdk = $env:JAVA_HOME,
     [string]$KeyDir = "$env:USERPROFILE\.prestige"
 )
@@ -23,7 +30,9 @@ if (-not $Jdk) {
 if (-not $Jdk -or -not (Test-Path "$Jdk\bin\javac.exe")) { throw "No JDK found. Set JAVA_HOME or pass -Jdk." }
 $bt = Get-ChildItem "$Sdk\build-tools" -Directory -ErrorAction SilentlyContinue | Sort-Object { [version]($_.Name -replace '-.*', '') } -Descending | Select-Object -First 1 -ExpandProperty FullName
 $jar = "$Sdk\platforms\android-35\android.jar"
-if (-not $bt -or -not (Test-Path $jar)) { throw "The Android SDK isn't complete at $Sdk (needs platforms;android-35 and build-tools)." }
+if (-not $bt -or -not (Test-Path $jar)) {
+    throw "The Android SDK isn't complete at $Sdk (needs platforms;android-35 and build-tools). Set ANDROID_HOME, pass -Sdk, or put it in $env:USERPROFILE\Android\Sdk."
+}
 $env:JAVA_HOME = $Jdk
 $env:PATH = "$Jdk\bin;$env:PATH"
 
