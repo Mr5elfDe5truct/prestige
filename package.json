@@ -1,7 +1,7 @@
 {
   "name": "prestige",
   "private": true,
-  "version": "0.31.0",
+  "version": "0.32.0",
   "description": "Prestige by R.G. Studios: a local AI desktop app.",
   "author": "Ryan B. Gyles",
   "license": "MIT",
@@ -23,10 +23,12 @@
     "@tauri-apps/plugin-process": "^2.4.0",
     "@tauri-apps/plugin-updater": "^2.13.1",
     "dompurify": "^3.1.0",
-    "marked": "^14.0.0"
+    "marked": "^14.0.0",
+    "three": "^0.180.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",
+    "@types/three": "^0.180.0",
     "typescript": "^5.5.0",
     "vite": "^6.0.0"
   }

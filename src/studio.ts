@@ -58,7 +58,7 @@ const COMFY = "http://127.0.0.1:8188";
 interface Asset {
   path: string;
   name: string;
-  kind: "image" | "video" | "audio";
+  kind: "image" | "video" | "audio" | "model"; // model: a .glb from Picture to 3D
   mtime: number;
   size: number;
   prompt?: string | null; // for a song, its style
@@ -70,12 +70,12 @@ interface Asset {
   duration?: number | null; // a song's length in seconds
 }
 
-type GenMode = "image" | "fast" | "edit" | "inpaint" | "video" | "animate" | "long" | "ref" | "reffast" | "refvideo" | "song";
+type GenMode = "image" | "fast" | "edit" | "inpaint" | "video" | "animate" | "long" | "ref" | "reffast" | "refvideo" | "song" | "model3d";
 
 // How a workflow takes the generation settings: an image model with a latent size and batch, an edit
 // (size follows the picture), LTX with a 2× upscale pass ("ltx") or without ("ltx1"), Wan's two samplers,
-// Wan 2.2 SVI's chained shots ("svi"), or an ACE-Step song ("song").
-type Family = "image" | "edit" | "ltx" | "ltx1" | "wan" | "svi" | "song";
+// Wan 2.2 SVI's chained shots ("svi"), an ACE-Step song ("song"), or Pixal3D turning a picture into a textured 3D model ("model3d").
+type Family = "image" | "edit" | "ltx" | "ltx1" | "wan" | "svi" | "song" | "model3d";
 
 interface Mode {
   file: string;
@@ -249,6 +249,18 @@ const MODES: Record<GenMode, Mode> = {
     latent: "6",
     secs: 10,
   },
+  // Picture to 3D: Pixal3D (int8) through ComfyUI's native nodes, the picture's background removed by BiRefNet and its
+  // field of view from MoGe; a textured .glb comes out (workflows\pixal3d-image-to-3d.api.json).
+  model3d: {
+    file: "pixal3d-image-to-3d.api.json",
+    label: "Pixal3D",
+    family: "model3d",
+    promptNode: "",
+    seed: ["3", "seed"],
+    secs: 300,
+    note: "textured 3D model",
+    imageNode: "122",
+  },
 };
 
 /* ACE-Step 1.5 turbo on an RTX 3060 12 GB (ComfyUI's log and nvidia-smi): its 1.7B language model writes the audio codes
@@ -264,6 +276,32 @@ const SONG_STEPS: Record<string, string> = {
   KSampler: "Rendering the audio",
   VAEDecodeAudioTiled: "Decoding the audio",
   SaveAudioMP3: "Saving the MP3",
+};
+
+// Pixal3D's samplers, in order (structure, shape, upsampled shape, texture): each gets its own seed.
+const MODEL3D_SAMPLERS = ["3", "18", "23", "12"];
+/** What a 3D render's progress line says for each of its steps. */
+const MODEL3D_STEPS: Record<string, string> = {
+  RemoveBackground: "Cutting out the subject",
+  Pixal3DConditioning: "Reading the picture",
+  ImageCropToMask: "Framing the subject",
+  Trellis2ShapeStage: "Shaping the model",
+  Trellis2UpsampleStage: "Refining the shape",
+  Trellis2TextureStage: "Painting the texture",
+  MeshSmoothNormals: "Smoothing the surface",
+  MoGeInference: "Estimating the camera",
+  KSampler: "Shaping the model",
+  VaeDecodeStructureTrellis2: "Decoding the structure",
+  VaeDecodeShapeTrellis: "Decoding the shape",
+  VaeDecodeTextureTrellis: "Decoding the texture",
+  RemeshMesh: "Remeshing",
+  DecimateMesh: "Simplifying the mesh",
+  UnwrapMesh: "Unwrapping the UVs",
+  BakeTextureFromVoxel: "Baking the texture",
+  BakeNormalMapFromMesh: "Baking the normal map",
+  BakeAmbientOcclusion: "Baking ambient occlusion",
+  ApplyTextureToMesh: "Texturing the mesh",
+  Save3DAdvanced: "Saving the .glb",
 };
 
 // The SVI workflow's nodes: each shot's prompt and noise, the merge after each shot, and the settings.
@@ -371,6 +409,8 @@ function sviDims(size: number, srcW?: number | null, srcH?: number | null): [num
 function plan(gm: GenMode, src: Source | null = srcAsset, o?: Override, song?: Partial<MusicSettings>): Plan {
   const m = modeOf(gm);
   let p: Omit<Plan, "warn">;
+  // Picture to 3D: one model per picture; its time and VRAM were measured (see MODES.model3d).
+  if (m.family === "model3d") return { w: 0, h: 0, count: 1, load: 0, secs: m.secs, warn: "" };
   if (m.family === "song") {
     // Measured (see SONG_FIXED_SECS): the same ~5.3 GB at every length, so only a small card gets a warning.
     const s = { ...settings().music, ...song };
@@ -504,6 +544,9 @@ function apply(m: Mode, g: any, p: Plan, seed: number) {
       set(g, "12", { steps: n, start_at_step: n / 2, end_at_step: n, noise_seed: seed });
       break;
     }
+    case "model3d":
+      MODEL3D_SAMPLERS.forEach((id, i) => set(g, id, { seed: seed + i }));
+      break;
     case "svi": {
       const s = settings().long;
       set(g, SVI.size, { value: s.size });
@@ -558,6 +601,8 @@ interface Deps {
   cameraPane: (on: boolean) => void;
   /** Switches to the Studio screen (from the lightbox when it was opened in chat). */
   show: () => void;
+  /** Opens a 3D model (.glb) in the Canvas's 3D viewer. */
+  openModel: (path: string, name: string) => void;
   /** Lyrics for a song in this style from the chat model, about `seconds` long (Music mode's "Write lyrics"). */
   writeLyrics: (style: string, seconds: number, signal: AbortSignal) => Promise<string>;
 }
@@ -1113,11 +1158,17 @@ function render() {
   for (const a of list) {
     const fig = document.createElement("button");
     const song = a.kind === "audio";
-    fig.className = "thumb" + (song ? " song" : " pending") + (fresh.has(a.name) ? " fresh" : "");
+    const model = a.kind === "model";
+    fig.className = "thumb" + (song ? " song" : model ? " model" : " pending") + (fresh.has(a.name) ? " fresh" : "");
     fig.dataset.path = a.path;
-    // A song has no picture: a note and the first lines of its lyrics instead.
-    const pic = song ? `<span class="song-art" aria-hidden="true">${NOTE_SVG}</span><span class="song-lines"></span>` : "";
-    fig.innerHTML = `<div class="pic">${pic}<span class="badge ${a.kind === "video" ? "vid" : song ? "song" : ""}">${song ? "SONG" : a.kind.toUpperCase()}</span></div><figcaption><span class="p"></span><span class="m"></span></figcaption>`;
+    // A song has no picture: a note and the first lines of its lyrics instead. A 3D model gets a cube, and a click opens
+    // it in the 3D viewer.
+    const pic = song
+      ? `<span class="song-art" aria-hidden="true">${NOTE_SVG}</span><span class="song-lines"></span>`
+      : model
+        ? `<span class="model-art" aria-hidden="true">${CUBE_SVG}</span>`
+        : "";
+    fig.innerHTML = `<div class="pic">${pic}<span class="badge ${a.kind === "video" ? "vid" : song ? "song" : model ? "m3d" : ""}">${song ? "SONG" : model ? "3D" : a.kind.toUpperCase()}</span></div><figcaption><span class="p"></span><span class="m"></span></figcaption>`;
     $(".p", fig).textContent = a.prompt || a.name;
     $(".p", fig).title = a.prompt || a.name;
     $(".m", fig).textContent = [a.model, a.duration ? songLength(Math.round(a.duration)) : "", age(a.mtime)].filter(Boolean).join(" · ");
@@ -1144,11 +1195,29 @@ function render() {
         }
       });
     }
-    fig.addEventListener("click", () => openLightbox(a));
+    fig.addEventListener("click", () => (model ? deps.openModel(a.path, a.name) : openLightbox(a)));
     fig.addEventListener("contextmenu", (e) => showMenu(e, a));
     g.appendChild(fig);
-    if (!song) io.observe(fig);
+    if (!song && !model) io.observe(fig);
   }
+}
+
+const CUBE_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2l9 5v10l-9 5-9-5V7z" /><path d="M3 7l9 5 9-5M12 12v10" /></svg>`;
+
+/** Picture to 3D: queues Pixal3D on a picture (a render, or a reference picture from chat); the .glb opens in the 3D
+ *  viewer when it's done. */
+async function toModel(a: Source, from = "Studio", progress?: (pct: number, label: string) => void): Promise<Asset[]> {
+  await ensureWorkflows();
+  if (!workflows.model3d) throw new Error(`workflows\\${MODES.model3d.file} wasn't found (update the Workstation and add the 3d pack)`);
+  return run("model3d", "name" in a ? `3D model of ${a.name}` : "3D model of the picture", a, {}, progress, { from });
+}
+
+function makeModel(a: Asset) {
+  closeLightbox();
+  deps.toast("Making a 3D model: 3 to 8 minutes, longer for detailed subjects. It opens in the 3D viewer when it's done (the render queue shows how far it is).");
+  toModel(a)
+    .then((got) => got[0] && deps.openModel(got[0].path, got[0].name))
+    .catch((e) => errMsg(e) !== "stopped" && deps.toast(`Couldn't make the 3D model: ${errMsg(e)}`, "warn"));
 }
 
 const NOTE_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 18V5l11-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="17" cy="16" r="3" /></svg>`;
@@ -1349,8 +1418,10 @@ function showMenu(e: MouseEvent, a: Asset) {
   e.stopPropagation();
   closeMenu();
   const image = a.kind === "image";
+  const model = a.kind === "model";
   const list: MenuItem[] = [
-    { label: image ? "Open" : "Play", run: () => fileAction("open_render", a, {}), key: "in default app" },
+    ...(model ? [{ label: "Open in 3D viewer", run: () => deps.openModel(a.path, a.name) }] : []),
+    { label: image ? "Open" : model ? "Open in default app" : "Play", run: () => fileAction("open_render", a, {}), key: model ? "3D Viewer, Blender…" : "in default app" },
     { label: "Show info", run: () => openLightbox(a) },
     { label: "Open in folder", run: () => revealFile(a) },
     "-",
@@ -1358,6 +1429,7 @@ function showMenu(e: MouseEvent, a: Asset) {
     ...(image && workflows.inpaint ? [{ label: "Paint to change…", run: () => paintToChange(a) }] : []),
     ...(image && (workflows.animate || workflows.long) ? [{ label: "Animate (image → video)…", run: () => startFrom(a, "video") }] : []),
     ...(image && (workflows.ref || workflows.reffast) ? [{ label: "Use as reference image", run: () => useAsReference(a) }] : []),
+    ...(image && workflows.model3d ? [{ label: "Make a 3D model", run: () => makeModel(a), key: "Pixal3D" }] : []),
     ...(a.prompt ? [{ label: a.kind === "audio" ? "Reuse style and lyrics" : "Reuse prompt", run: () => reusePrompt(a) }] : []),
     ...(a.seed != null ? [{ label: "Reuse seed", run: () => reuseSeed(a), key: String(a.seed) }] : []),
     "-",
@@ -1567,7 +1639,7 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
   if (!wf) throw new Error(`workflows\\${MODES[gm].file} wasn't found`);
   const m = modeOf(gm);
   const graph = structuredClone(wf);
-  graph[m.promptNode].inputs[m.promptKey ?? "text"] = gm === "ref" || gm === "reffast" ? refPrompt(opts.kind ?? "auto", prompt) : prompt;
+  if (m.promptNode) graph[m.promptNode].inputs[m.promptKey ?? "text"] = gm === "ref" || gm === "reffast" ? refPrompt(opts.kind ?? "auto", prompt) : prompt;
   const seed = takeSeed(settingsKey(gm));
   const p = plan(gm, src, opts.override, opts.song);
   if (m.family === "svi") shotPrompts(prompt, p.shots!).forEach((t, i) => (graph[SVI.shots[i].prompt].inputs.text = t));
@@ -1578,7 +1650,8 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
     inpaintGraph(graph, opts.mask);
   }
   const nodes: Record<string, string> = {};
-  for (const [id, n] of Object.entries<any>(graph)) nodes[id] = (m.family === "song" && SONG_STEPS[n.class_type]) || n.class_type;
+  for (const [id, n] of Object.entries<any>(graph))
+    nodes[id] = (m.family === "song" && SONG_STEPS[n.class_type]) || (m.family === "model3d" && MODEL3D_STEPS[n.class_type]) || n.class_type;
   return { graph, nodes, seed, count: p.count, label: modeOf(gm).label };
 }
 
@@ -1812,10 +1885,16 @@ function onComfy(msg: any) {
     case "execution_interrupted":
       finish(false, "stopped");
       break;
-    case "execution_error":
-      if (!waiter) deps.toast(`The render failed: ${d.exception_message ?? "ComfyUI reported an error"}`, "warn");
-      finish(false, d.exception_message ?? "ComfyUI reported an error");
+    case "execution_error": {
+      // PyTorch's out-of-memory message runs to a dozen lines of allocator stats; the first line says enough.
+      const raw = String(d.exception_message ?? "").trim();
+      const msg = /out of memory|OutOfMemory/i.test(raw)
+        ? "the GPU ran out of memory. Close other programs using it, or try a smaller size."
+        : raw.split("\n")[0] || "ComfyUI reported an error";
+      if (!waiter) deps.toast(`The render failed: ${msg}`, "warn");
+      finish(false, msg);
       break;
+    }
   }
 }
 
@@ -1897,6 +1976,11 @@ export async function editMedia(prompt: string, r: Reference, progress: (pct: nu
 
 /** The label for chat's edits. */
 export const editLabel = () => MODES.edit.label;
+
+/** Chat's /3d: a textured 3D model of the picture with Pixal3D. Resolves with the saved .glb. */
+export async function renderModel(r: Reference, progress: (pct: number, label: string) => void): Promise<Asset[]> {
+  return toModel(r, "chat", progress);
+}
 
 /** Chat's /song: a song in this style with these lyrics (empty: an instrumental). `song` sets its tempo, key or
  *  language for this one song; its length is the saved setting. Resolves with the saved file. */

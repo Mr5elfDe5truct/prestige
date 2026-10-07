@@ -18,6 +18,7 @@ use std::os::windows::process::CommandExt;
 
 const IMAGE_EXT: &[&str] = &["png", "jpg", "jpeg", "webp", "gif"];
 const VIDEO_EXT: &[&str] = &["mp4", "webm", "mov"];
+const MODEL_EXT: &[&str] = &["glb"]; // Picture to 3D (Pixal3D)
 const AUDIO_EXT: &[&str] = &["mp3", "flac", "opus", "ogg", "wav"];
 const THUMB_SIZE: u32 = 360;
 
@@ -38,7 +39,7 @@ pub struct Asset {
 }
 
 fn is_media(x: &str) -> bool {
-    IMAGE_EXT.contains(&x) || VIDEO_EXT.contains(&x) || AUDIO_EXT.contains(&x)
+    IMAGE_EXT.contains(&x) || VIDEO_EXT.contains(&x) || AUDIO_EXT.contains(&x) || MODEL_EXT.contains(&x)
 }
 
 /// Metadata is cached per file (path + mtime) so the gallery doesn't re-read every file each refresh.
@@ -182,6 +183,8 @@ fn build_asset(p: &Path, mtime: f64, size: u64) -> Asset {
         "video"
     } else if AUDIO_EXT.contains(&x.as_str()) {
         "audio"
+    } else if MODEL_EXT.contains(&x.as_str()) {
+        "model"
     } else {
         "image"
     };
@@ -414,6 +417,8 @@ pub async fn save_render_as(app: AppHandle, root: Option<String>, path: String) 
         ("Video", "Videos")
     } else if AUDIO_EXT.contains(&x.as_str()) {
         ("Song", "Music")
+    } else if MODEL_EXT.contains(&x.as_str()) {
+        ("3D model", "Pictures")
     } else {
         ("Image", "Pictures")
     };
