@@ -8,7 +8,7 @@ import workletUrl from "./mic-worklet.js?url&no-inline";
 import markSvg from "./assets/rg-mark.svg?raw";
 import { errMsg, freeLlamaVram, http, OLLAMA, type ModelInfo } from "./backends";
 import { freeGB, readGpus, sharesCard } from "./gpus";
-import { audio, isVox, listVoices, outputLevel, transcribe, DEFAULT_VOICE, VOICE_SERVER } from "./speech";
+import { audio, isVox, listVoices, outputLevel, transcribe, DEFAULT_VOICE, PHONON_SERVER, VOICE_SERVER } from "./speech";
 import { LiveSpeaker } from "./livespeech";
 import { addStache } from "./talk";
 import { themeRgb } from "./theme";
@@ -56,6 +56,8 @@ interface Deps {
   openCatalog: () => void;
   /** The call ended; show the chat it was saved to. */
   ended: () => void;
+  /** Listen with Phonon-2 on the CPU (the Workstation's Phonon server) instead of Whisper on the GPU. */
+  phonon: () => boolean;
 }
 
 type State = "off" | "starting" | "listening" | "hearing" | "transcribing" | "thinking" | "speaking" | "error";
@@ -263,7 +265,8 @@ async function prepareGpu() {
   // (VoxCPM2 too, when a Kokoro voice is speaking: then the better Live model fits.)
   await Promise.all([freeLlamaVram(["ollama", "voice"]), unloadOllama(() => true), comfy, isVox(speaker.voice) ? null : unloadVox()]);
   // The voice first: VoxCPM2 needs ~6 GB in one piece, and the Live model is picked to fit what's left.
-  setStatus(isVox(speaker.voice) ? "Loading Whisper and VoxCPM2…" : "Loading Whisper…");
+  const ear = deps.phonon() ? "" : "Whisper";
+  setStatus(isVox(speaker.voice) ? `Loading ${ear ? `${ear} and ` : ""}VoxCPM2…` : ear ? `Loading ${ear}…` : "Getting ready…");
   let free: number | null = null;
   try {
     free = await warmVoice();
@@ -272,8 +275,9 @@ async function prepareGpu() {
     // Without the voice pack, speech-to-text falls back to Open WebUI's Whisper.
   }
   if (state === "off") return;
-  // The voice server reports its own card. When Ollama is on another one, it's that card's room that counts.
-  if (!sharesCard("voice", "ollama")) {
+  // The voice server reports its own card. When Ollama is on another one (or the voice server loaded nothing, with
+  // Phonon-2 listening and a Kokoro voice), it's that card's room that counts.
+  if (free == null || !sharesCard("voice", "ollama")) {
     await readGpus().catch(() => []);
     const gib = freeGB("ollama");
     free = gib == null ? null : gib * 1.073741824; // GiB to the 10^9-byte GB the Live model sizes use
@@ -330,10 +334,13 @@ async function unloadOllama(which: (name: string) => boolean) {
 /** Loads (or keeps warm) Whisper, and VoxCPM2 with the voice when it's the one speaking. Returns free VRAM in GB. */
 async function warmVoice(): Promise<number | null> {
   const vox = isVox(speaker.voice);
+  // With Phonon-2 listening, Whisper stays out of VRAM.
+  const models = [...(deps.phonon() ? [] : ["stt"]), ...(vox ? ["tts"] : [])];
+  if (!models.length) return null;
   const r = await http(`${VOICE_SERVER}/v1/audio/load`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ models: vox ? ["stt", "tts"] : ["stt"], voice: vox ? speaker.voice.slice(4) : "" }),
+    body: JSON.stringify({ models, voice: vox ? speaker.voice.slice(4) : "" }),
   });
   const j = (await r.json().catch(() => ({}))) as any;
   if (!r.ok) throw new Error(j.detail ?? `the voice server answered ${r.status}`);
@@ -605,8 +612,20 @@ function isEcho(heard: string, said: string) {
   return h.filter((x) => s.has(x)).length / h.length >= 0.6;
 }
 
-/** Whisper turbo on the voice server (greedy decoding: quicker on short turns), else Open WebUI's Whisper. */
+/** Phonon-2 on the Phonon server when picked in Settings (~0.3 s for a 3 s turn on the CPU), else Whisper turbo on the
+ *  voice server (greedy decoding: quicker on short turns), else Open WebUI's Whisper. */
 async function stt(wav: Blob): Promise<string> {
+  if (deps.phonon()) {
+    const pf = new FormData();
+    pf.append("file", new File([wav], "speech.wav", { type: "audio/wav" }));
+    pf.append("model", "phonon-2");
+    try {
+      const r = await http(`${PHONON_SERVER}/v1/audio/transcriptions`, { method: "POST", body: pf });
+      if (r.ok) return String((await r.json()).text ?? "").trim();
+    } catch {
+      /* no Phonon server: Whisper below */
+    }
+  }
   const fd = new FormData();
   fd.append("file", new File([wav], "speech.wav", { type: "audio/wav" }));
   fd.append("language", "en");

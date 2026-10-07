@@ -97,6 +97,10 @@ export const CATALOG: Entry[] = [
   { name: "GLM-4.7 Flash", maker: "Z.ai", sizeGB: 18.31, license: "MIT", caps: ["tools", "thinking"],
     gguf: { id: "glm-4.7-flash", repo: "unsloth/GLM-4.7-Flash-GGUF", file: "GLM-4.7-Flash-Q4_K_M.gguf", nCpuMoe: 30 },
     about: "Z.ai's fast mixture-of-experts model: strong at agents, coding and tool use." },
+  { name: "Nex-N2.5-mini", maker: "Nex-AGI", sizeGB: 21.63, license: "Apache 2.0", caps: ["vision", "tools", "thinking"],
+    gguf: { id: "nex-n2.5-mini", repo: "bartowski/nex-agi_Nex-N2.5-mini-GGUF", file: "nex-agi_Nex-N2.5-mini-Q4_K_M.gguf",
+            mmproj: "mmproj-nex-agi_Nex-N2.5-mini-f16.gguf", nCpuMoe: 25 },
+    about: "A 35B-A3B agent model trained to use computers and browsers (OSWorld-Verified 71). Do it for me can drive the PC with it." },
   // Dense 27B at 2-bit (HauhauCS's K_P quants keep the important tensors at higher precision), so it fits the GPU whole:
   // ~30-38 tok/s with its built-in MTP drafting, where Q3/IQ3 with layers in RAM ran at 5-8 tok/s. The vision
   // projector runs on the CPU to leave room for 20k of context.

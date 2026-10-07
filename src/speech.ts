@@ -12,6 +12,8 @@ import type { MemoryConfig } from "./memory";
 
 export const KOKORO = "http://127.0.0.1:8880";
 export const VOICE_SERVER = "http://127.0.0.1:8890";
+/** Phonon-2 speech-to-text on the CPU (the Workstation's transcribe pack): Transcribe, and Live calls when picked. */
+export const PHONON_SERVER = "http://127.0.0.1:8891";
 export const DEFAULT_VOICE = "af_heart"; // AUDIO_TTS_VOICE in start-all.ps1
 /** VoxCPM2 voices are stored with this prefix; plain names are Kokoro voices. */
 export const isVox = (v: string | undefined) => !!v?.startsWith("vox:");

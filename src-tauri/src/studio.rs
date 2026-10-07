@@ -18,20 +18,28 @@ use std::os::windows::process::CommandExt;
 
 const IMAGE_EXT: &[&str] = &["png", "jpg", "jpeg", "webp", "gif"];
 const VIDEO_EXT: &[&str] = &["mp4", "webm", "mov"];
+const MODEL_EXT: &[&str] = &["glb"]; // Picture to 3D (Pixal3D)
+const AUDIO_EXT: &[&str] = &["mp3", "flac", "opus", "ogg", "wav"];
 const THUMB_SIZE: u32 = 360;
 
 #[derive(Serialize, Clone, serde::Deserialize)]
 pub struct Asset {
     path: String,
     name: String,
-    kind: String, // image | video
+    kind: String, // image | video | audio
     mtime: f64,   // ms since epoch
     size: u64,
-    prompt: Option<String>,
+    prompt: Option<String>, // a song's style
     model: Option<String>,
     width: Option<u32>,
     height: Option<u32>,
     seed: Option<u64>,
+    lyrics: Option<String>,  // a song's
+    duration: Option<f64>,   // a song's length in seconds
+}
+
+fn is_media(x: &str) -> bool {
+    IMAGE_EXT.contains(&x) || VIDEO_EXT.contains(&x) || AUDIO_EXT.contains(&x) || MODEL_EXT.contains(&x)
 }
 
 /// Metadata is cached per file (path + mtime) so the gallery doesn't re-read every file each refresh.
@@ -55,23 +63,23 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>, depth: u32) {
                 walk(&p, out, depth + 1);
             }
         } else {
-            let x = ext_of(&p);
-            if IMAGE_EXT.contains(&x.as_str()) || VIDEO_EXT.contains(&x.as_str()) {
+            if is_media(&ext_of(&p)) {
                 out.push(p);
             }
         }
     }
 }
 
-/// The positive prompt, main model and seed from a ComfyUI API-format workflow.
-fn describe_workflow(json: &str) -> (Option<String>, Option<String>, Option<u64>) {
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else { return (None, None, None) };
-    let Some(nodes) = v.as_object() else { return (None, None, None) };
-    // Qwen-Image's encoder calls its text input "prompt".
+/// The positive prompt, main model and seed from a ComfyUI API-format workflow (and a song's lyrics).
+fn describe_workflow(json: &str) -> (Option<String>, Option<String>, Option<u64>, Option<String>) {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else { return (None, None, None, None) };
+    let Some(nodes) = v.as_object() else { return (None, None, None, None) };
+    // Qwen-Image's encoder calls its text input "prompt", ACE-Step's its style "tags".
     let text_of = |id: &str| -> Option<String> {
         let i = &nodes.get(id)?["inputs"];
-        i["text"].as_str().or(i["prompt"].as_str()).map(String::from)
+        i["text"].as_str().or(i["prompt"].as_str()).or(i["tags"].as_str()).map(String::from)
     };
+    let lyrics = nodes.values().find_map(|n| n["inputs"]["lyrics"].as_str().map(String::from));
     // Follow the sampler's (or guider's) "positive" link to its text encoder.
     let mut prompt = None;
     for n in nodes.values() {
@@ -106,7 +114,7 @@ fn describe_workflow(json: &str) -> (Option<String>, Option<String>, Option<u64>
         })
         .min()
         .map(|(_, s)| s);
-    (prompt, model, seed)
+    (prompt, model, seed, lyrics)
 }
 
 /// ComfyUI stores the workflow as a PNG tEXt chunk named "prompt". Also returns the image size.
@@ -158,15 +166,40 @@ fn video_meta(path: &Path) -> (Option<String>, Option<(u32, u32)>) {
     (prompt, size)
 }
 
+/// ComfyUI's audio savers write the workflow into the file's "prompt" tag too; ffprobe reads it and the length.
+fn audio_meta(path: &Path) -> (Option<String>, Option<f64>) {
+    let Ok(out) = hidden(&mut Command::new("ffprobe")).args(["-v", "quiet", "-print_format", "json", "-show_format"]).arg(path).output() else {
+        return (None, None);
+    };
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&out.stdout) else { return (None, None) };
+    let tags = &v["format"]["tags"];
+    let prompt = tags["prompt"].as_str().or(tags["PROMPT"].as_str()).map(String::from);
+    (prompt, v["format"]["duration"].as_str().and_then(|d| d.parse().ok()))
+}
+
 fn build_asset(p: &Path, mtime: f64, size: u64) -> Asset {
     let x = ext_of(p);
-    let kind = if VIDEO_EXT.contains(&x.as_str()) { "video" } else { "image" };
+    let kind = if VIDEO_EXT.contains(&x.as_str()) {
+        "video"
+    } else if AUDIO_EXT.contains(&x.as_str()) {
+        "audio"
+    } else if MODEL_EXT.contains(&x.as_str()) {
+        "model"
+    } else {
+        "image"
+    };
+    let mut duration = None;
     let (wf, dims) = match x.as_str() {
         "png" => png_meta(p),
         _ if kind == "video" => video_meta(p),
+        _ if kind == "audio" => {
+            let (wf, d) = audio_meta(p);
+            duration = d;
+            (wf, None)
+        }
         _ => (None, None),
     };
-    let (prompt, model, seed) = wf.as_deref().map(describe_workflow).unwrap_or((None, None, None));
+    let (prompt, model, seed, lyrics) = wf.as_deref().map(describe_workflow).unwrap_or((None, None, None, None));
     Asset {
         path: p.to_string_lossy().into_owned(),
         name: p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string(),
@@ -178,6 +211,8 @@ fn build_asset(p: &Path, mtime: f64, size: u64) -> Asset {
         width: dims.map(|d| d.0),
         height: dims.map(|d| d.1),
         seed,
+        lyrics: if kind == "audio" { lyrics } else { None },
+        duration,
     }
 }
 
@@ -282,13 +317,12 @@ pub fn reveal(path: String) -> Result<(), String> {
     Ok(())
 }
 
-/// A render the Studio may act on: an existing image or video inside ComfyUI's output folder.
+/// A render the Studio may act on: an existing image, video or song inside ComfyUI's output folder.
 pub(crate) fn render_path(root: Option<String>, path: &str) -> Result<PathBuf, String> {
     let dir = output_dir(root).canonicalize().map_err(|_| "ComfyUI's output folder doesn't exist".to_string())?;
     let p = PathBuf::from(path.replace('/', "\\"));
     let real = p.canonicalize().map_err(|_| "That file doesn't exist any more".to_string())?;
-    let x = ext_of(&real);
-    if !real.starts_with(&dir) || !(IMAGE_EXT.contains(&x.as_str()) || VIDEO_EXT.contains(&x.as_str())) {
+    if !real.starts_with(&dir) || !is_media(&ext_of(&real)) {
         return Err("Only renders in ComfyUI's output folder can be changed here".into());
     }
     // The checked path, but without canonicalize's \\?\ prefix, which Explorer and PowerShell don't take.
@@ -379,10 +413,18 @@ pub async fn save_render_as(app: AppHandle, root: Option<String>, path: String) 
     let p = render_path(root, &path)?;
     let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let x = ext_of(&p);
-    let kind = if VIDEO_EXT.contains(&x.as_str()) { "Video" } else { "Image" };
+    let (kind, folder) = if VIDEO_EXT.contains(&x.as_str()) {
+        ("Video", "Videos")
+    } else if AUDIO_EXT.contains(&x.as_str()) {
+        ("Song", "Music")
+    } else if MODEL_EXT.contains(&x.as_str()) {
+        ("3D model", "Pictures")
+    } else {
+        ("Image", "Pictures")
+    };
     let mut dialog = app.dialog().file().set_file_name(&name).add_filter(kind, &[x.as_str()]);
-    if let Some(pictures) = std::env::var_os("USERPROFILE").map(|h| PathBuf::from(h).join("Pictures")).filter(|d| d.exists()) {
-        dialog = dialog.set_directory(pictures);
+    if let Some(dir) = std::env::var_os("USERPROFILE").map(|h| PathBuf::from(h).join(folder)).filter(|d| d.exists()) {
+        dialog = dialog.set_directory(dir);
     }
     let Some(dest) = tauri::async_runtime::spawn_blocking(move || dialog.blocking_save_file()).await.map_err(|e| e.to_string())? else {
         return Ok(None);
