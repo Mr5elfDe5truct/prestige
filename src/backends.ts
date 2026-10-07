@@ -356,8 +356,9 @@ export async function streamChat(
         messages: messages.map(toOpenAI),
         stream: true,
         stream_options: { include_usage: true },
-        // Qwen's chat templates take this to skip thinking (Deep Research's quick steps).
-        ...(extra.think === false ? { chat_template_kwargs: { enable_thinking: false } } : {}),
+        // Qwen's chat templates take enable_thinking to skip thinking (Deep Research's quick steps), Nex-N2.5's take
+        // reasoning_effort "none"; each ignores the other's.
+        ...(extra.think === false ? { chat_template_kwargs: { enable_thinking: false, reasoning_effort: "none" } } : {}),
         ...withTools,
       }),
       signal,
