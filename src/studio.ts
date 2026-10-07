@@ -1,7 +1,7 @@
 // Studio screen: the real renders in ComfyUI's output folder, and a create bar that queues the
 // stack's own ComfyUI workflows (Qwen-Image-2.1 or its 4-step turbo for images, Z-Image-Turbo without
 // them, Qwen-Image-2.1 to edit an image, LTX-2.5 for video with sound, Wan 2.2 to animate an image, or Wan 2.2 SVI
-// to make a longer video from it in up to four chained shots).
+// to make a longer video from it in up to four chained shots), and ACE-Step 1.5 for songs (a style, lyrics, a length).
 // A reference image (a character or an item, from reference.ts) puts that subject into a new scene with Qwen-Image-2.1;
 // in Video mode that picture (or the reference itself) becomes LTX-2.5's first frame.
 // The Webcam mode shows the camera pane from camera.ts. Chat uses renderMedia() to make images or a video the same way
@@ -18,6 +18,11 @@ import {
   LTX_SECONDS,
   QUALITY_NAMES,
   SIZES,
+  SONG_BPMS,
+  SONG_KEYS,
+  SONG_LANGUAGES,
+  SONG_METERS,
+  SONG_SECONDS,
   SVI_FPS,
   SVI_FRAMES,
   SVI_SHOTS,
@@ -37,6 +42,7 @@ import {
   update,
   wanAuto,
   wanFrames,
+  type MusicSettings,
   type Quality,
   type SettingsKey,
 } from "./gensettings";
@@ -52,22 +58,24 @@ const COMFY = "http://127.0.0.1:8188";
 interface Asset {
   path: string;
   name: string;
-  kind: "image" | "video" | "model"; // model: a .glb from Picture to 3D
+  kind: "image" | "video" | "audio" | "model"; // model: a .glb from Picture to 3D
   mtime: number;
   size: number;
-  prompt?: string | null;
+  prompt?: string | null; // for a song, its style
   model?: string | null;
   width?: number | null;
   height?: number | null;
   seed?: number | null;
+  lyrics?: string | null; // a song's
+  duration?: number | null; // a song's length in seconds
 }
 
-type GenMode = "image" | "fast" | "edit" | "inpaint" | "video" | "animate" | "long" | "ref" | "reffast" | "refvideo" | "model3d";
+type GenMode = "image" | "fast" | "edit" | "inpaint" | "video" | "animate" | "long" | "ref" | "reffast" | "refvideo" | "song" | "model3d";
 
 // How a workflow takes the generation settings: an image model with a latent size and batch, an edit
 // (size follows the picture), LTX with a 2× upscale pass ("ltx") or without ("ltx1"), Wan's two samplers,
-// Wan 2.2 SVI's chained shots ("svi"), or Pixal3D turning a picture into a textured 3D model ("model3d").
-type Family = "image" | "edit" | "ltx" | "ltx1" | "wan" | "svi" | "model3d";
+// Wan 2.2 SVI's chained shots ("svi"), an ACE-Step song ("song"), or Pixal3D turning a picture into a textured 3D model ("model3d").
+type Family = "image" | "edit" | "ltx" | "ltx1" | "wan" | "svi" | "song" | "model3d";
 
 interface Mode {
   file: string;
@@ -230,6 +238,17 @@ const MODES: Record<GenMode, Mode> = {
     secs: 410,
     imageNode: "6",
   },
+  // ACE-Step 1.5 turbo: the style goes in as tags, and the lyrics and the music settings beside them (node 4).
+  song: {
+    file: "ace-step-15-song.api.json",
+    label: "ACE-Step 1.5",
+    family: "song",
+    promptNode: "4",
+    promptKey: "tags",
+    seed: ["7", "seed"],
+    latent: "6",
+    secs: 10,
+  },
   // Picture to 3D: Pixal3D (int8) through ComfyUI's native nodes, the picture's background removed by BiRefNet and its
   // field of view from MoGe; a textured .glb comes out (workflows\pixal3d-image-to-3d.api.json).
   model3d: {
@@ -242,6 +261,21 @@ const MODES: Record<GenMode, Mode> = {
     note: "textured 3D model",
     imageNode: "122",
   },
+};
+
+/* ACE-Step 1.5 turbo on an RTX 3060 12 GB (ComfyUI's log and nvidia-smi): its 1.7B language model writes the audio codes
+ * (~60 tokens/s), then 8 diffusion steps and a tiled VAE decode. Each song loads the models fresh (~5.2 GB peak at any
+ * length): 30 s of music took 18 s, 60 s 26 s, 120 s 44 s, 180 s 62 s, 240 s 53 s. On a 6 GB RTX 2060 the language
+ * model ran at 1.7 s a token (a 60 s song took 9 min), so songs stay on ComfyUI's main card. */
+const SONG_FIXED_SECS = 10;
+const SONG_SECS_PER_SECOND = 0.3;
+const SONG_PEAK_GB = 5.3;
+/** What a song's progress line says for each step. */
+const SONG_STEPS: Record<string, string> = {
+  "TextEncodeAceStepAudio1.5": "Composing the melody and vocals",
+  KSampler: "Rendering the audio",
+  VAEDecodeAudioTiled: "Decoding the audio",
+  SaveAudioMP3: "Saving the MP3",
 };
 
 // Pixal3D's samplers, in order (structure, shape, upsampled shape, texture): each gets its own seed.
@@ -306,6 +340,7 @@ interface Plan {
   frames?: number;
   fps?: number;
   shots?: number; // a long video's shots, each `frames` long
+  song?: MusicSettings; // a song's length, tempo, key, meter and language
   draft?: boolean; // LTX without its upscale pass: half size, much quicker
   load: number; // VRAM use relative to the defaults, which fit a 12 GB card (the limits scale with ComfyUI's card)
   secs: number; // rough render time on the reference PC
@@ -314,13 +349,16 @@ interface Plan {
 }
 
 const settingsKey = (gm: GenMode): SettingsKey =>
-  gm === "video" || gm === "refvideo" ? "video" : gm === "animate" ? "animate" : gm === "long" ? "long" : "image";
+  gm === "video" || gm === "refvideo" ? "video" : gm === "animate" ? "animate" : gm === "long" ? "long" : gm === "song" ? "music" : "image";
 const isVideo = (gm: GenMode) => gm === "video" || gm === "animate" || gm === "long" || gm === "refvideo";
 
 /** A picture a render starts from: a render in the gallery (edit, animate) or a reference image. */
 type Source = Asset | Reference;
 /** Changes to a plan for one step of a chain: the first frame for a video is one picture at the video's shape. */
 type Override = { w: number; h: number; count: 1 };
+
+/** "2:30", "45 s". */
+const songLength = (s: number) => (s < 60 ? `${s} s` : `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`);
 
 /** The quality levels a model offers, with their steps. */
 const levels = (m: Mode) => (Object.keys(QUALITY_NAMES) as Quality[]).filter((q) => m.steps?.[q] != null);
@@ -366,12 +404,22 @@ function sviDims(size: number, srcW?: number | null, srcH?: number | null): [num
   return r >= 1 ? [r32(size), r32(size / r)] : [r32(size * r), r32(size)];
 }
 
-/** What a render with the current settings will be: sizes, steps, frames, and a VRAM and time estimate. */
-function plan(gm: GenMode, src: Source | null = srcAsset, o?: Override): Plan {
+/** What a render with the current settings will be: sizes, steps, frames, and a VRAM and time estimate. A song can
+ *  take its own tempo, key and language (chat's songwriter picks them) over the saved ones. */
+function plan(gm: GenMode, src: Source | null = srcAsset, o?: Override, song?: Partial<MusicSettings>): Plan {
   const m = modeOf(gm);
   let p: Omit<Plan, "warn">;
   // Picture to 3D: one model per picture; its time and VRAM were measured (see MODES.model3d).
   if (m.family === "model3d") return { w: 0, h: 0, count: 1, load: 0, secs: m.secs, warn: "" };
+  if (m.family === "song") {
+    // Measured (see SONG_FIXED_SECS): the same ~5.3 GB at every length, so only a small card gets a warning.
+    const s = { ...settings().music, ...song };
+    const { main } = comfyCards();
+    const mainGB = main ? main.mem_total / 1024 : vramGB("comfyui");
+    const where = main ? `the ${shortName(main)}'s ${Math.round(mainGB)} GB` : cardsText("comfyui");
+    const warn = mainGB < SONG_PEAK_GB + 0.7 ? `ACE-Step peaks at about ${SONG_PEAK_GB} GB, more than ${where} can hold: it will run partly from system RAM, slowly.` : "";
+    return { w: 0, h: 0, count: 1, seconds: s.seconds, song: s, load: 0, secs: SONG_FIXED_SECS + SONG_SECS_PER_SECOND * s.seconds, warn };
+  }
   if (m.family === "image" || m.family === "edit") {
     const s = settings().image;
     const steps = stepsOf(m, s.quality)!;
@@ -520,6 +568,13 @@ function apply(m: Mode, g: any, p: Plan, seed: number) {
       }
       break;
     }
+    case "song": {
+      // The text encoder's own seed drives the language model that writes the audio codes; the sampler's the rest.
+      const s = p.song!;
+      set(g, m.promptNode, { seed, duration: s.seconds, bpm: s.bpm, keyscale: s.key, timesignature: s.meter, language: s.language });
+      set(g, m.latent!, { seconds: s.seconds });
+      break;
+    }
   }
 }
 // The Image mode's model: Qwen-Image-2.1, or its 4-step turbo when "fast" is picked (remembered).
@@ -548,12 +603,14 @@ interface Deps {
   show: () => void;
   /** Opens a 3D model (.glb) in the Canvas's 3D viewer. */
   openModel: (path: string, name: string) => void;
+  /** Lyrics for a song in this style from the chat model, about `seconds` long (Music mode's "Write lyrics"). */
+  writeLyrics: (style: string, seconds: number, signal: AbortSignal) => Promise<string>;
 }
 
 let deps: Deps;
 let items: Asset[] = [];
-let filter: "all" | "image" | "video" = "all";
-let mode: "image" | "video" | "webcam" = "image";
+let filter: "all" | "image" | "video" | "audio" = "all";
+let mode: "image" | "video" | "music" | "webcam" = "image";
 // The image being animated (Video mode) or edited (Image mode), picked from the lightbox.
 let srcAsset: Asset | null = null;
 // The reference image (a character or item to put in a new scene), and how it's used. Kept across Image and Video.
@@ -627,6 +684,7 @@ export function initStudio(d: Deps) {
     renderCreate();
   });
   onSettingsChange(() => renderCreate());
+  initSongWriter();
   $("#gen-form").addEventListener("submit", (e) => {
     e.preventDefault();
     generate();
@@ -670,6 +728,7 @@ async function loadWorkflows() {
 
 /** The workflow the create bar runs now. */
 function currentMode(): GenMode {
+  if (mode === "music") return "song";
   if (mode === "video") return srcAsset ? animatePick() : ref ? "refvideo" : "video";
   if (srcAsset) return "edit";
   if (ref) return refImageMode();
@@ -708,7 +767,9 @@ function renderCreate() {
     ($("#animate-img") as HTMLImageElement).src = convertFileSrc(srcAsset.path);
     $("#animate-what").textContent = `${gm === "edit" ? "Editing" : "Animating"} this image with ${modeOf(gm).label}`;
   }
-  renderRefSlot(gm, webcam);
+  // A song takes lyrics beside its style (empty: an instrumental).
+  $("#song-lyrics").hidden = gm !== "song";
+  renderRefSlot(gm, webcam || gm === "song");
   if (webcam) {
     $("#gen-warn").hidden = true;
     $("#gen-settings").hidden = true;
@@ -724,9 +785,11 @@ function renderCreate() {
   ($("#gen-btn") as HTMLButtonElement).disabled = !wf;
   // While something renders, the button adds to the queue.
   ($("#gen-btn") as HTMLButtonElement).textContent =
-    job || starting || current ? "Add to queue" : gm === "animate" || gm === "long" ? "Animate" : gm === "edit" ? "Edit" : "Generate";
+    job || starting || current ? "Add to queue" : gm === "animate" || gm === "long" ? "Animate" : gm === "edit" ? "Edit" : gm === "song" ? "Make song" : "Generate";
   ($("#gen-prompt") as HTMLInputElement).placeholder =
-    gm === "image" || gm === "fast"
+    gm === "song"
+      ? "Describe the style… e.g. dreamy indie pop, soft female vocals, warm guitars, summer night"
+      : gm === "image" || gm === "fast"
       ? "Describe an image… e.g. a red and gold dragon coiled around a glowing GPU"
       : gm === "ref" || gm === "reffast"
         ? "Describe the new scene… e.g. sitting at a café in Paris at golden hour, laughing"
@@ -755,7 +818,8 @@ function renderCreate() {
   const p = plan(gm);
   // A chained video's time includes making its first frame.
   const shown = chain ? { ...p, secs: p.secs + plan(first, ref, frameSize()).secs } : p;
-  const gear = `<button type="button" class="opt pick set${settingsOpen ? " on" : ""}" title="Size, quality, seed${isVideo(gm) ? ", length" : ", count"}…" aria-expanded="${settingsOpen}">⚙ Settings</button>`;
+  const what = gm === "song" ? "Length, tempo, key, language, seed" : `Size, quality, seed${isVideo(gm) ? ", length" : ", count"}`;
+  const gear = `<button type="button" class="opt pick set${settingsOpen ? " on" : ""}" title="${what}…" aria-expanded="${settingsOpen}">⚙ Settings</button>`;
   $("#gen-opts").innerHTML = wf
     ? chip + summary(gm, shown).map((o) => `<span class="opt"><b>${o}</b></span>`).join("") + gear
     : `<span class="opt">workflows\\${esc(missing)} not found, so this mode is off</span>`;
@@ -765,6 +829,35 @@ function renderCreate() {
   const panel = $("#gen-settings");
   panel.hidden = !wf || !settingsOpen;
   if (!panel.hidden) settingsForm(panel, gm, false);
+}
+
+// ---------- song lyrics ----------
+/** Music mode's "Write lyrics": the chat model writes lyrics for the style in the prompt box (click again to stop). */
+function initSongWriter() {
+  const btn = $<HTMLButtonElement>("#song-write");
+  const box = $<HTMLTextAreaElement>("#song-lyrics-text");
+  let writing: AbortController | null = null;
+  btn.addEventListener("click", async () => {
+    if (writing) return writing.abort();
+    const style = ($("#gen-prompt") as HTMLInputElement).value.trim();
+    if (!style) {
+      deps.toast("Describe the song's style or what it's about first, then Write lyrics.");
+      return $("#gen-prompt").focus();
+    }
+    if (box.value.trim() && !confirm("Replace the lyrics in the box?")) return;
+    writing = new AbortController();
+    btn.textContent = "Stop writing";
+    box.classList.add("writing");
+    try {
+      box.value = await deps.writeLyrics(style, settings().music.seconds, writing.signal);
+    } catch (e) {
+      if (!writing.signal.aborted) deps.toast(`Couldn't write lyrics: ${errMsg(e)}`, "warn");
+    } finally {
+      writing = null;
+      btn.textContent = "✍ Write lyrics for me";
+      box.classList.remove("writing");
+    }
+  });
 }
 
 // ---------- reference image slot ----------
@@ -869,6 +962,13 @@ function summary(gm: GenMode, p: Plan): string[] {
   const m = modeOf(gm);
   const s = settings()[settingsKey(gm)];
   const out: string[] = [];
+  if (p.song) {
+    const sg = p.song;
+    out.push(songLength(sg.seconds), `${sg.bpm} bpm`, sg.key, SONG_METERS.find(([v]) => v === sg.meter)?.[1].split(" ")[0] ?? sg.meter);
+    if (sg.language !== "en") out.push(SONG_LANGUAGES.find(([c]) => c === sg.language)?.[1] ?? sg.language);
+    out.push(s.seed != null ? `seed ${s.seed}` : "random seed", aboutTime(p.secs));
+    return out;
+  }
   if (p.w) out.push(`${p.w} × ${p.h}`);
   if (p.seconds) out.push(`${p.seconds} s · ${p.fps} fps`);
   if (p.steps) out.push(`${p.steps} steps`);
@@ -955,10 +1055,19 @@ function settingsForm(el: HTMLElement, gm: GenMode, withWarn: boolean) {
     f.push(pick("Low-noise model", "low", "low noise"));
     if (!sviModels && !sviModelsLoading) loadSviModels().then(() => sviModels && el.isConnected && settingsForm(el, gm, withWarn));
   }
+  if (m.family === "song") {
+    const v = settings().music;
+    f.push(field("Length", "seconds", optionList(SONG_SECONDS.map((n) => [n, songLength(n)]), v.seconds)));
+    f.push(field("Tempo", "bpm", optionList(SONG_BPMS.map((n) => [n, `${n} bpm`]), v.bpm)));
+    f.push(field("Key", "key", optionList(SONG_KEYS.map((k) => [k, k]), v.key)));
+    f.push(field("Meter", "meter", optionList(SONG_METERS, v.meter)));
+    f.push(field("Lyrics language", "language", optionList(SONG_LANGUAGES, v.language), "Chat's /song picks the tempo, key and language for each song"));
+  }
+  const quality = "quality" in s ? s.quality : "standard";
   if (m.family === "ltx")
-    f.push(field("Quality", "quality", optionList([["draft", "Draft · half size, one pass"], ["standard", "Standard · upscaled 2×"]], s.quality === "draft" ? "draft" : "standard")));
+    f.push(field("Quality", "quality", optionList([["draft", "Draft · half size, one pass"], ["standard", "Standard · upscaled 2×"]], quality === "draft" ? "draft" : "standard")));
   else if (m.steps) {
-    const q = m.steps[s.quality] != null ? s.quality : "standard";
+    const q = m.steps[quality] != null ? quality : "standard";
     f.push(field("Quality", "quality", optionList(levels(m).map((l) => [l, `${QUALITY_NAMES[l]} · ${m.steps![l]} steps`]), q)));
   }
   if (m.family === "image") f.push(field("How many", "count", optionList([1, 2, 3, 4].map((n) => [n, n === 1 ? "1 image" : `${n} images`]), settings().image.count)));
@@ -979,8 +1088,9 @@ function settingsForm(el: HTMLElement, gm: GenMode, withWarn: boolean) {
       const k = sel.dataset.k!;
       // Numbers stay numbers (length, fps, count, the long video's size…); words stay words. "size" is both: the long
       // video's longest side, and an image's Small / Standard / Large, which Number() turned into NaN (saved as null).
+      // A song's meter is a digit too, but ACE-Step takes it as text ("4", "6").
       const model = k === "high" || k === "low";
-      const value = /^\d+$/.test(sel.value) ? Number(sel.value) : model ? sel.value || null : sel.value;
+      const value = /^\d+$/.test(sel.value) && k !== "meter" ? Number(sel.value) : model ? sel.value || null : sel.value;
       update(key, { [k]: value } as any);
     }),
   );
@@ -1040,21 +1150,29 @@ function render() {
     p.className = "thumb pending";
     const vid = isVideo(job.mode);
     const n = job.count;
-    p.innerHTML = `<div class="pic"><span class="badge ${vid ? "vid" : ""}">${vid ? "VIDEO" : n > 1 ? `${n} IMAGES` : "IMAGE"}</span></div><figcaption><span class="p"></span><span class="m">rendering…</span></figcaption>`;
+    const badge = job.mode === "song" ? `<span class="badge song">SONG</span>` : `<span class="badge ${vid ? "vid" : ""}">${vid ? "VIDEO" : n > 1 ? `${n} IMAGES` : "IMAGE"}</span>`;
+    p.innerHTML = `<div class="pic">${badge}</div><figcaption><span class="p"></span><span class="m">rendering…</span></figcaption>`;
     $(".p", p).textContent = job.prompt;
     g.appendChild(p);
   }
   for (const a of list) {
     const fig = document.createElement("button");
+    const song = a.kind === "audio";
     const model = a.kind === "model";
-    fig.className = "thumb" + (model ? " model" : " pending") + (fresh.has(a.name) ? " fresh" : "");
+    fig.className = "thumb" + (song ? " song" : model ? " model" : " pending") + (fresh.has(a.name) ? " fresh" : "");
     fig.dataset.path = a.path;
-    // A 3D model has no picture of its own: a cube, and a click opens it in the 3D viewer.
-    const cube = model ? `<span class="model-art" aria-hidden="true">${CUBE_SVG}</span>` : "";
-    fig.innerHTML = `<div class="pic">${cube}<span class="badge ${a.kind === "video" ? "vid" : model ? "m3d" : ""}">${model ? "3D" : a.kind.toUpperCase()}</span></div><figcaption><span class="p"></span><span class="m"></span></figcaption>`;
+    // A song has no picture: a note and the first lines of its lyrics instead. A 3D model gets a cube, and a click opens
+    // it in the 3D viewer.
+    const pic = song
+      ? `<span class="song-art" aria-hidden="true">${NOTE_SVG}</span><span class="song-lines"></span>`
+      : model
+        ? `<span class="model-art" aria-hidden="true">${CUBE_SVG}</span>`
+        : "";
+    fig.innerHTML = `<div class="pic">${pic}<span class="badge ${a.kind === "video" ? "vid" : song ? "song" : model ? "m3d" : ""}">${song ? "SONG" : model ? "3D" : a.kind.toUpperCase()}</span></div><figcaption><span class="p"></span><span class="m"></span></figcaption>`;
     $(".p", fig).textContent = a.prompt || a.name;
     $(".p", fig).title = a.prompt || a.name;
-    $(".m", fig).textContent = [a.model, age(a.mtime)].filter(Boolean).join(" · ");
+    $(".m", fig).textContent = [a.model, a.duration ? songLength(Math.round(a.duration)) : "", age(a.mtime)].filter(Boolean).join(" · ");
+    if (song) $(".song-lines", fig).textContent = lyricLines(a.lyrics, 4);
     if (a.kind === "video") {
       // Hovering plays the clip, muted.
       fig.addEventListener("mouseenter", () => {
@@ -1080,7 +1198,7 @@ function render() {
     fig.addEventListener("click", () => (model ? deps.openModel(a.path, a.name) : openLightbox(a)));
     fig.addEventListener("contextmenu", (e) => showMenu(e, a));
     g.appendChild(fig);
-    if (!model) io.observe(fig);
+    if (!song && !model) io.observe(fig);
   }
 }
 
@@ -1102,6 +1220,14 @@ function makeModel(a: Asset) {
     .catch((e) => errMsg(e) !== "stopped" && deps.toast(`Couldn't make the 3D model: ${errMsg(e)}`, "warn"));
 }
 
+const NOTE_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 18V5l11-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="17" cy="16" r="3" /></svg>`;
+
+/** The first sung lines of a song's lyrics, without the [Verse] / [Chorus] tags. */
+function lyricLines(lyrics: string | null | undefined, n: number) {
+  const lines = (lyrics ?? "").split("\n").map((l) => l.trim()).filter((l) => l && !/^\[.*\]$/.test(l));
+  return lines.length ? lines.slice(0, n).join("\n") : "Instrumental";
+}
+
 // ---------- lightbox ----------
 let lbAsset: Asset | null = null;
 
@@ -1118,6 +1244,14 @@ function openLightbox(a: Asset) {
     v.autoplay = true;
     v.loop = true;
     media.appendChild(v);
+  } else if (a.kind === "audio") {
+    // The song plays straight away, with its lyrics to read along.
+    const box = document.createElement("div");
+    box.className = "lb-song";
+    box.innerHTML = `<span class="song-art" aria-hidden="true">${NOTE_SVG}</span><audio controls autoplay></audio><pre class="lb-lyrics"></pre>`;
+    ($("audio", box) as HTMLAudioElement).src = convertFileSrc(a.path);
+    $(".lb-lyrics", box).textContent = a.lyrics?.trim() || "Instrumental (no lyrics)";
+    media.appendChild(box);
   } else {
     const img = document.createElement("img");
     img.src = convertFileSrc(a.path);
@@ -1129,9 +1263,9 @@ function openLightbox(a: Asset) {
   dl.innerHTML = "";
   const rows: [string, string][] = [
     ["File", a.name],
-    ["Type", a.kind === "video" ? "Video" : "Image"],
+    ["Type", a.kind === "video" ? "Video" : a.kind === "audio" ? "Song" : "Image"],
     ["Model", a.model || "unknown"],
-    ["Size", a.width ? `${a.width} × ${a.height}` : "–"],
+    a.kind === "audio" ? ["Length", a.duration ? songLength(Math.round(a.duration)) : "–"] : ["Size", a.width ? `${a.width} × ${a.height}` : "–"],
     ["Seed", a.seed != null ? String(a.seed) : "–"],
     ["File size", `${(a.size / 1048576).toFixed(1)} MB`],
     ["Made", `${new Date(a.mtime).toLocaleString()} (${age(a.mtime)})`],
@@ -1144,6 +1278,9 @@ function openLightbox(a: Asset) {
     dl.append(dt, dd);
   }
   ($("#lb-copy") as HTMLButtonElement).disabled = !a.prompt;
+  // A song's prompt is its style, and reusing it brings back its lyrics too.
+  $("#lb-copy").textContent = a.kind === "audio" ? "Copy style" : "Copy prompt";
+  $("#lb-reuse").textContent = a.kind === "audio" ? "Reuse style and lyrics" : "Reuse prompt";
   ($("#lb-animate") as HTMLButtonElement).hidden = a.kind !== "image" || !(workflows.animate || workflows.long);
   ($("#lb-edit") as HTMLButtonElement).hidden = a.kind !== "image" || !workflows.edit;
   $("#lb-edit").onclick = () => startFrom(a, "image");
@@ -1160,7 +1297,7 @@ function openLightbox(a: Asset) {
 }
 
 function closeLightbox() {
-  const v = $("#lb-media video") as HTMLVideoElement | null;
+  const v = $("#lb-media video, #lb-media audio") as HTMLMediaElement | null;
   v?.pause();
   $("#lb-media").innerHTML = "";
   $("#lb").hidden = true;
@@ -1205,8 +1342,10 @@ function paintToChange(a: Asset) {
 function reusePrompt(a: Asset) {
   deps.show();
   ($("#gen-prompt") as HTMLInputElement).value = a.prompt || "";
+  // A song's style and its lyrics both come back.
+  if (a.kind === "audio") ($("#song-lyrics-text") as HTMLTextAreaElement).value = isInstrumental(a.lyrics) ? "" : (a.lyrics ?? "");
   srcAsset = null;
-  mode = a.kind === "video" ? "video" : "image";
+  mode = a.kind === "video" ? "video" : a.kind === "audio" ? "music" : "image";
   renderCreate();
   closeLightbox();
   $("#gen-prompt").focus();
@@ -1214,9 +1353,10 @@ function reusePrompt(a: Asset) {
 
 /** Fixes the seed for the next render of this kind, to vary a render you liked. */
 function reuseSeed(a: Asset) {
-  const key: SettingsKey = a.kind === "image" ? "image" : /svi-long/i.test(a.name) ? "long" : /wan/i.test(a.model ?? a.name) ? "animate" : "video";
+  const key: SettingsKey =
+    a.kind === "image" ? "image" : a.kind === "audio" ? "music" : /svi-long/i.test(a.name) ? "long" : /wan/i.test(a.model ?? a.name) ? "animate" : "video";
   update(key, { seed: a.seed ?? null });
-  deps.toast(`The next ${key === "image" ? "image" : "video"} uses seed ${a.seed}. Pick Random in Settings to go back.`);
+  deps.toast(`The next ${key === "image" ? "image" : key === "music" ? "song" : "video"} uses seed ${a.seed}. Pick Random in Settings to go back.`);
 }
 
 const revealFile = (a: Asset) => invoke("reveal", { path: a.path }).catch((e) => deps.toast(errMsg(e), "warn"));
@@ -1245,7 +1385,7 @@ async function deleteRender(a: Asset) {
   closeMenu();
   const dlg = $("#del-confirm") as HTMLDialogElement;
   $("#del-name").textContent = a.name;
-  $("#del-kind").textContent = a.kind;
+  $("#del-kind").textContent = a.kind === "audio" ? "song" : a.kind;
   dlg.returnValue = "";
   dlg.showModal();
   await new Promise((r) => dlg.addEventListener("close", r, { once: true }));
@@ -1290,12 +1430,13 @@ function showMenu(e: MouseEvent, a: Asset) {
     ...(image && (workflows.animate || workflows.long) ? [{ label: "Animate (image → video)…", run: () => startFrom(a, "video") }] : []),
     ...(image && (workflows.ref || workflows.reffast) ? [{ label: "Use as reference image", run: () => useAsReference(a) }] : []),
     ...(image && workflows.model3d ? [{ label: "Make a 3D model", run: () => makeModel(a), key: "Pixal3D" }] : []),
-    ...(a.prompt ? [{ label: "Reuse prompt", run: () => reusePrompt(a) }] : []),
+    ...(a.prompt ? [{ label: a.kind === "audio" ? "Reuse style and lyrics" : "Reuse prompt", run: () => reusePrompt(a) }] : []),
     ...(a.seed != null ? [{ label: "Reuse seed", run: () => reuseSeed(a), key: String(a.seed) }] : []),
     "-",
     ...(image ? [{ label: "Copy image", run: () => fileAction("copy_render", a, { asImage: true }, "Image copied.") }] : []),
     { label: "Copy file", run: () => fileAction("copy_render", a, { asImage: false }, "File copied. Paste it into a folder or a chat app."), key: "to paste elsewhere" },
-    ...(a.prompt ? [{ label: "Copy prompt", run: () => copy(a.prompt || "") }] : []),
+    ...(a.prompt ? [{ label: a.kind === "audio" ? "Copy style" : "Copy prompt", run: () => copy(a.prompt || "", a.kind === "audio" ? "Style" : "Prompt") }] : []),
+    ...(a.kind === "audio" && a.lyrics && !isInstrumental(a.lyrics) ? [{ label: "Copy lyrics", run: () => copy(a.lyrics || "", "Lyrics") }] : []),
     { label: "Copy file path", run: () => copy(a.path, "Path") },
     { label: "Save a copy as…", run: () => saveAs(a) },
     "-",
@@ -1388,8 +1529,9 @@ async function generate() {
     return;
   }
   const src = gm === "animate" || gm === "long" || gm === "edit" ? srcAsset : gm === "ref" || gm === "reffast" || gm === "refvideo" ? ref : null;
+  const lyrics = gm === "song" ? ($("#song-lyrics-text") as HTMLTextAreaElement).value : undefined;
   try {
-    enqueue(gm, prompt, src, { kind: refPrefs().kind });
+    enqueue(gm, prompt, src, { kind: refPrefs().kind, lyrics });
   } catch (e) {
     deps.toast(`Couldn't add the render: ${errMsg(e)}`, "warn");
   }
@@ -1425,7 +1567,13 @@ interface QueueOpts {
   kind?: RefKind; // how a reference image is described to Qwen-Image
   override?: Override; // size and count for a chain's first frame
   mask?: { name: string; w: number; h: number }; // inpaint: the mask in ComfyUI's input folder, and the picture's size
+  lyrics?: string; // a song's (empty: an instrumental)
+  song?: Partial<MusicSettings>; // a song's tempo, key or language over the saved settings (chat's songwriter)
 }
+
+/** ACE-Step's way of asking for no vocals. */
+const INSTRUMENTAL = "[Instrumental]";
+const isInstrumental = (l: string | null | undefined) => !l?.trim() || /^\[(instrumental|inst)\]$/i.test(l.trim());
 
 /** What Qwen-Image is asked: it's an edit model, so it redraws the picture it's given unless told what to change, and
  *  it can't see the mask. The painted area is greyed out in its copy and it's told to fill the grey. */
@@ -1493,15 +1641,17 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
   const graph = structuredClone(wf);
   if (m.promptNode) graph[m.promptNode].inputs[m.promptKey ?? "text"] = gm === "ref" || gm === "reffast" ? refPrompt(opts.kind ?? "auto", prompt) : prompt;
   const seed = takeSeed(settingsKey(gm));
-  const p = plan(gm, src, opts.override);
+  const p = plan(gm, src, opts.override, opts.song);
   if (m.family === "svi") shotPrompts(prompt, p.shots!).forEach((t, i) => (graph[SVI.shots[i].prompt].inputs.text = t));
+  if (m.family === "song") graph[m.promptNode].inputs.lyrics = isInstrumental(opts.lyrics) ? INSTRUMENTAL : opts.lyrics!.trim();
   apply(m, graph, p, seed);
   if (gm === "inpaint") {
     if (!opts.mask) throw new Error("nothing is painted");
     inpaintGraph(graph, opts.mask);
   }
   const nodes: Record<string, string> = {};
-  for (const [id, n] of Object.entries<any>(graph)) nodes[id] = (m.family === "model3d" && MODEL3D_STEPS[n.class_type]) || n.class_type;
+  for (const [id, n] of Object.entries<any>(graph))
+    nodes[id] = (m.family === "song" && SONG_STEPS[n.class_type]) || (m.family === "model3d" && MODEL3D_STEPS[n.class_type]) || n.class_type;
   return { graph, nodes, seed, count: p.count, label: modeOf(gm).label };
 }
 
@@ -1777,13 +1927,15 @@ async function finish(ok: boolean, why = "") {
   }
   if (q) notify(q);
   renderQueue();
+  // The button goes back from "Add to queue" when nothing else is waiting.
+  renderCreate();
   pump();
 }
 
 // ---------- used from chat ----------
-export type MediaKind = "image" | "video";
-/** The workflow chat uses: the Studio's Image mode pick, or LTX text-to-video. */
-const chatMode = (kind: MediaKind): GenMode => (kind === "video" ? "video" : workflows[imageMode] ? imageMode : "fast");
+export type MediaKind = "image" | "video" | "audio";
+/** The workflow chat uses: the Studio's Image mode pick, LTX text-to-video, or an ACE-Step song. */
+const chatMode = (kind: MediaKind): GenMode => (kind === "audio" ? "song" : kind === "video" ? "video" : workflows[imageMode] ? imageMode : "fast");
 
 /** The model chat images (or videos) are made with ("Qwen-Image-2.1 → LTX-2.5" for a video from a reference). */
 export async function modelLabel(kind: MediaKind, withRef = false) {
@@ -1830,12 +1982,28 @@ export async function renderModel(r: Reference, progress: (pct: number, label: s
   return toModel(r, "chat", progress);
 }
 
+/** Chat's /song: a song in this style with these lyrics (empty: an instrumental). `song` sets its tempo, key or
+ *  language for this one song; its length is the saved setting. Resolves with the saved file. */
+export async function renderSong(
+  style: string,
+  lyrics: string,
+  progress: (pct: number, label: string) => void,
+  song: Partial<MusicSettings> = {},
+): Promise<Asset[]> {
+  await ensureWorkflows();
+  if (!workflows.song) throw new Error(`workflows\\${MODES.song.file} wasn't found (update the Workstation and add the music pack)`);
+  return run("song", style, null, { lyrics, song }, progress, { from: "chat" });
+}
+
+/** A song's length in the settings (chat's songwriter writes about that much). */
+export const songSeconds = () => settings().music.seconds;
+
 /** The generation settings form for chat's popover (the same settings as Studio's). */
 export async function chatSettings(el: HTMLElement, kind: MediaKind) {
   await ensureWorkflows();
   const gm = chatMode(kind);
   if (!workflows[gm]) {
-    el.innerHTML = `<p class="credit">workflows\${esc(modeOf(gm).file)} wasn't found, so chat can't make ${kind === "video" ? "videos" : "images"} yet.</p>`;
+    el.innerHTML = `<p class="credit">workflows\${esc(modeOf(gm).file)} wasn't found, so chat can't make ${kind === "video" ? "videos" : kind === "audio" ? "songs" : "images"} yet.</p>`;
     return;
   }
   settingsForm(el, gm, true);
