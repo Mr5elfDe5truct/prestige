@@ -610,6 +610,10 @@ body.canvas-open .toast { left: calc((100% - var(--canvas-w) - 16px) / 2); }
 .canvas-stage { flex: 1; min-height: 0; background: #000; }
 .canvas-stage[hidden] { display: none; }
 .canvas-frame { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+/* a 3D model (canvas.ts openModel): the viewer fills the stage; the page tools don't apply */
+.model-view { width: 100%; height: 100%; }
+.model-view canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+.canvas.model .canvas-tabs, .canvas.model #canvas-rerun, .canvas.model #canvas-copy, .canvas.model #canvas-fix { display: none; }
 .canvas-code { flex: 1; min-height: 0; resize: none; border: 0; background: var(--bg); color: var(--fg); padding: 12px 14px; font: 12px/1.5 var(--mono); tab-size: 2; white-space: pre; outline: none; }
 .canvas-code[hidden] { display: none; }
 .msg-body .canvas-card { display: flex; align-items: center; gap: 12px; margin: 10px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
@@ -829,3 +833,13 @@ dialog.characters[open] { display: flex; flex-direction: column; gap: 12px; }
 .ts-field { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--muted); }
 .ts-field input { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font: 12.5px var(--mono); padding: 7px 9px; }
 .ts-acts { display: flex; gap: 6px; }
+/* picture to 3D: a model's tile in the gallery and its card in chat (studio.ts, main.ts) */
+.thumb.model .pic { display: grid; place-items: center; background: radial-gradient(circle at 35% 25%, color-mix(in srgb, var(--gold) 16%, var(--panel-2)), var(--panel-2) 70%); }
+.model-art { color: var(--gold); width: 42%; height: 42%; }
+.model-art svg { width: 100%; height: 100%; }
+.thumb .badge.m3d { color: #111; background: var(--gold); }
+.chat-render.model .model-card { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--deep); color: var(--fg); text-align: left; cursor: pointer; }
+.chat-render.model .model-card:hover { border-color: var(--gold); }
+.chat-render.model .model-card svg { width: 34px; height: 34px; color: var(--gold); flex: none; }
+.chat-render.model .model-card span { display: flex; flex-direction: column; }
+.chat-render.model .model-card small { color: var(--muted); }

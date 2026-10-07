@@ -18,6 +18,7 @@ use std::os::windows::process::CommandExt;
 
 const IMAGE_EXT: &[&str] = &["png", "jpg", "jpeg", "webp", "gif"];
 const VIDEO_EXT: &[&str] = &["mp4", "webm", "mov"];
+const MODEL_EXT: &[&str] = &["glb"]; // Picture to 3D (Pixal3D)
 const THUMB_SIZE: u32 = 360;
 
 #[derive(Serialize, Clone, serde::Deserialize)]
@@ -56,7 +57,7 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>, depth: u32) {
             }
         } else {
             let x = ext_of(&p);
-            if IMAGE_EXT.contains(&x.as_str()) || VIDEO_EXT.contains(&x.as_str()) {
+            if IMAGE_EXT.contains(&x.as_str()) || VIDEO_EXT.contains(&x.as_str()) || MODEL_EXT.contains(&x.as_str()) {
                 out.push(p);
             }
         }
@@ -160,7 +161,7 @@ fn video_meta(path: &Path) -> (Option<String>, Option<(u32, u32)>) {
 
 fn build_asset(p: &Path, mtime: f64, size: u64) -> Asset {
     let x = ext_of(p);
-    let kind = if VIDEO_EXT.contains(&x.as_str()) { "video" } else { "image" };
+    let kind = if VIDEO_EXT.contains(&x.as_str()) { "video" } else if MODEL_EXT.contains(&x.as_str()) { "model" } else { "image" };
     let (wf, dims) = match x.as_str() {
         "png" => png_meta(p),
         _ if kind == "video" => video_meta(p),
@@ -288,7 +289,7 @@ pub(crate) fn render_path(root: Option<String>, path: &str) -> Result<PathBuf, S
     let p = PathBuf::from(path.replace('/', "\\"));
     let real = p.canonicalize().map_err(|_| "That file doesn't exist any more".to_string())?;
     let x = ext_of(&real);
-    if !real.starts_with(&dir) || !(IMAGE_EXT.contains(&x.as_str()) || VIDEO_EXT.contains(&x.as_str())) {
+    if !real.starts_with(&dir) || !(IMAGE_EXT.contains(&x.as_str()) || VIDEO_EXT.contains(&x.as_str()) || MODEL_EXT.contains(&x.as_str())) {
         return Err("Only renders in ComfyUI's output folder can be changed here".into());
     }
     // The checked path, but without canonicalize's \\?\ prefix, which Explorer and PowerShell don't take.
@@ -379,7 +380,7 @@ pub async fn save_render_as(app: AppHandle, root: Option<String>, path: String) 
     let p = render_path(root, &path)?;
     let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let x = ext_of(&p);
-    let kind = if VIDEO_EXT.contains(&x.as_str()) { "Video" } else { "Image" };
+    let kind = if VIDEO_EXT.contains(&x.as_str()) { "Video" } else if MODEL_EXT.contains(&x.as_str()) { "3D model" } else { "Image" };
     let mut dialog = app.dialog().file().set_file_name(&name).add_filter(kind, &[x.as_str()]);
     if let Some(pictures) = std::env::var_os("USERPROFILE").map(|h| PathBuf::from(h).join("Pictures")).filter(|d| d.exists()) {
         dialog = dialog.set_directory(pictures);

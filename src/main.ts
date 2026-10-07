@@ -15,7 +15,7 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { initSystem, onGpus, showSystem, unloadAll } from "./system";
 import { ollamaCtx, onPlanChange, readGpus, refreshPlan, shortName, type Gpu } from "./gpus";
 import {
-  allowRenders, cancelRender, chatSettings, editLabel, editMedia, initStudio, modelLabel, openRender, renderMedia, renderMenu, showStudio, type MediaKind,
+  allowRenders, cancelRender, chatSettings, editLabel, editMedia, initStudio, modelLabel, openRender, renderMedia, renderMenu, renderModel, showStudio, type MediaKind,
 } from "./studio";
 import { onSettingsChange } from "./gensettings";
 import { CONSENT, bindRefChoices, hasFiles, imageIn, imageToBase64, onRefPrefsChange, refChoicesHtml, referenceFromBase64 } from "./reference";
@@ -34,7 +34,7 @@ import { addMemory, memoryContext, listMemories, rememberRequest, DEFAULT_OWUI, 
 import { addStache } from "./talk";
 import { applyCachedLook, applyLook, closeAppearance, initAppearance, openAppearance, type Look } from "./theme";
 import { pickReaction, reactFilter, reactedNote, showReaction, stripTags, REACT_HINT } from "./emotes";
-import { CANVAS_CMD, CANVAS_HINT, canvasOnChat, canvasReplyStart, findCanvas, initCanvas, openCanvas, streamCanvas, streamEnded, wantsCanvas } from "./canvas";
+import { CANVAS_CMD, CANVAS_HINT, canvasOnChat, canvasReplyStart, findCanvas, initCanvas, openCanvas, openModel, streamCanvas, streamEnded, wantsCanvas } from "./canvas";
 import {
   addDropped, addFiles, citeLabel, docById, hasDocs, initKnowledge, knowledgeFor, openKnowledge, openSource, readyDocs, type KbDoc, type Source,
 } from "./knowledge";
@@ -88,7 +88,7 @@ interface StoredMessage {
   tools?: ToolStep[]; // tools the model used for this reply
   // An image (or several, or a video) made from chat. "more" holds the other images of a batch.
   // reply: the model made it with a tool, so its content is the reply to show under it (not a note for later turns).
-  render?: { path: string; prompt: string; seconds?: number; more?: string[]; kind?: MediaKind; reply?: boolean };
+  render?: { path: string; prompt: string; seconds?: number; more?: string[]; kind?: MediaKind | "model"; reply?: boolean }; // model: a .glb (/3d)
   react?: string; // an emote reaction: yours on a reply, Prestige's on your message
   sources?: Source[]; // passages from Knowledge this reply was given (shown under it, cited in it)
 }
@@ -454,7 +454,13 @@ function renderFigure(bubble: HTMLElement, r: NonNullable<StoredMessage["render"
     const fig = document.createElement("figure");
     fig.className = "chat-render";
     fig.dataset.path = path;
-    if (r.kind === "video") {
+    if (r.kind === "model") {
+      // A 3D model: a card that opens it in the Canvas's 3D viewer; right-click for the rest.
+      fig.classList.add("model");
+      fig.innerHTML = `<button type="button" class="model-card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 2l9 5v10l-9 5-9-5V7z" /><path d="M3 7l9 5 9-5M12 12v10" /></svg><span><b></b><small>Open in the 3D viewer</small></span></button>`;
+      $("b", fig).textContent = path.split(/[\\/]/).pop() ?? "3D model";
+      $(".model-card", fig).addEventListener("click", () => openModel(path, path.split(/[\\/]/).pop() ?? "3D model"));
+    } else if (r.kind === "video") {
       // Plays inline; right-click for the rest.
       fig.innerHTML = `<video controls loop playsinline preload="metadata"></video>`;
       const v = $("video", fig) as HTMLVideoElement;
@@ -824,7 +830,7 @@ async function toolSource(path: string, images?: string[]): Promise<string | und
     }
   }
   if (images?.length) return images[0];
-  const lastPic = [...chat.messages].reverse().find((m) => m.render && m.render.kind !== "video");
+  const lastPic = [...chat.messages].reverse().find((m) => m.render && (m.render.kind ?? "image") === "image");
   if (lastPic?.render) return load(lastPic.render.path).catch(() => undefined);
   return undefined;
 }
@@ -1043,6 +1049,8 @@ function retractLiveTurn(): string | null {
 // "/video waves on rocks at dawn" (or /clip), or "make a video of…".
 const IMAGE_CMD = /^\/(?:image|imagine|img)\b\s*/i;
 const EDIT_CMD = /^\/edit\b\s*/i;
+// "/3d" (or /model): a textured 3D model of the attached picture, or of the last one made in the chat.
+const MODEL_CMD = /^\/(?:3d|model)\b\s*/i;
 const VIDEO_CMD = /^\/(?:video|clip)\b\s*/i;
 // "Can you make…", "I'd like…", "give me…", "show me…" a picture (or clip) "of…" / "showing…".
 const ASK_LEAD = String.raw`^(?:(?:hey|ok|okay)[,!]?\s+)?(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?)?`;
@@ -1135,6 +1143,62 @@ async function makeMedia(text: string, kind: MediaKind, prompt: string, hooks?: 
       hooks.onDelta?.(reply.render ? `Here's your ${what}.` : `I couldn't make that ${what}.`);
       hooks.onDone?.(!!reply.render);
     }
+  }
+}
+
+/** /3d: Pixal3D turns the picture into a textured .glb (about 5 minutes), shown in the Canvas's 3D viewer and saved with
+ *  the renders. */
+async function make3d(text: string, srcB64: string, hooks?: ReplyHooks) {
+  if (!inTauri) {
+    toast("3D models are made in the desktop app.");
+    return hooks?.onDone?.(false);
+  }
+  if (chat.messages.length === 0) chat.title = text.replace(/\s+/g, " ").slice(0, 60) || "3D model";
+  chat.messages.push({ role: "user", content: text, images: [srcB64] });
+  renderChat();
+  const reply: StoredMessage = { role: "assistant", content: "", model: "Pixal3D" };
+  const bubble = addAiBubble("Pixal3D");
+  const body = $(".msg-body", bubble);
+  const replyChat = chat.id;
+  phoneReplyStart("Pixal3D", text);
+  body.innerHTML = `<div class="render-progress"><div class="progress"><i></i></div><span class="status-line">Starting…</span></div>`;
+  scrollDown(true);
+  busy = new AbortController();
+  busy.signal.addEventListener("abort", () => cancelRender(), { once: true });
+  setBusyUi(true);
+  const t0 = Date.now();
+  try {
+    const ref = await referenceFromBase64(srcB64);
+    const got = await renderModel(ref, (pct, label) => {
+      ($(".progress", body) as HTMLElement | null)?.style.setProperty("--v", String(pct));
+      const l = $(".status-line", body);
+      if (l) l.textContent = label;
+    });
+    URL.revokeObjectURL(ref.url);
+    const a = got[0];
+    reply.render = { path: a.path, prompt: "3D model of the picture", seconds: Math.round((Date.now() - t0) / 1000), kind: "model" };
+    reply.content = `(I made a textured 3D model of the picture with Pixal3D. Saved as ${a.name}.)`;
+    renderFigure(bubble, reply.render);
+    openModel(a.path, a.name);
+  } catch (e) {
+    if (busy?.signal.aborted) reply.content = "*(stopped)*";
+    else {
+      reply.error = true;
+      reply.content = `Couldn't make the 3D model: ${errMsg(e)}`;
+      bubble.classList.add("error");
+    }
+    body.innerHTML = md(reply.content);
+  } finally {
+    chat.messages.push(reply);
+    bubble.dataset.i = String(chat.messages.length - 1);
+    if (!reply.error) reactButton(bubble, reply);
+    busy = null;
+    setBusyUi(false);
+    scrollDown();
+    persist()
+      .catch((e) => toast(`Couldn't save this chat: ${e}`, "warn"))
+      .finally(() => phoneReplyEnd(replyChat));
+    hooks?.onDone?.(!!reply.render);
   }
 }
 
@@ -1272,20 +1336,33 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
   }
   const live = !!opts.live;
   // "/edit make it night": changes the attached picture, or the last one made in this chat, by instruction.
+  // The attached picture, or else the last one made in this chat (for /edit and /3d).
+  const pictureToUse = async () => {
+    if (attachments[0]) return attachments[0];
+    const last = [...chat.messages].reverse().find((m) => m.render && (m.render.kind ?? "image") === "image");
+    if (!last?.render || !inTauri) return undefined;
+    try {
+      await allowRenders();
+      return await imageToBase64(await (await fetch(convertFileSrc(last.render.path))).blob());
+    } catch {
+      return undefined; // gone from disk: the caller asks for a picture
+    }
+  };
+  // "/3d": a textured 3D model of that picture.
+  if (!live && !opts.images && MODEL_CMD.test(text)) {
+    const src = await pictureToUse();
+    if (!src) {
+      toast("Attach a picture of an object or a character (or make one in this chat first), then /3d.");
+      opts.hooks?.onDone?.(false);
+      return;
+    }
+    attachments = [];
+    renderAttachments();
+    return make3d(text, src, opts.hooks);
+  }
   if (!live && !opts.images && EDIT_CMD.test(text)) {
     const instruction = text.replace(EDIT_CMD, "").trim();
-    let src = attachments[0];
-    if (!src) {
-      const last = [...chat.messages].reverse().find((m) => m.render && m.render.kind !== "video");
-      if (last?.render && inTauri) {
-        try {
-          await allowRenders();
-          src = await imageToBase64(await (await fetch(convertFileSrc(last.render.path))).blob());
-        } catch {
-          /* gone from disk: asks for a picture below */
-        }
-      }
-    }
+    const src = await pictureToUse();
     if (!instruction || !src) {
       toast(!src ? "Attach a picture to edit (or make one in this chat first), then /edit and what to change." : "Say what to change after /edit, e.g. /edit make it night");
       opts.hooks?.onDone?.(false);
@@ -2178,6 +2255,11 @@ async function main() {
     freeGpu: () => unloadAll(undefined, "comfyui"),
     cameraPane: (on: boolean) => showCameraPane(on),
     show: () => go("studio"),
+    // The 3D viewer lives in the Canvas, which is on the chat screen.
+    openModel: (path, name) => {
+      go("chat");
+      openModel(path, name);
+    },
   });
   onSpeakingChange((on) => {
     if (!on) markSpeaking(null);

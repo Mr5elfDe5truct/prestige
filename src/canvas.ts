@@ -223,7 +223,49 @@ export function closeCanvas() {
   streaming = false;
   frame?.remove();
   frame = null;
+  stopModel();
   setVisible();
+}
+
+// ---------- a 3D model (Picture to 3D) ----------
+// Not a page: the .glb is drawn by Prestige's own three.js viewer (model3d.ts) in the panel, not in the sandboxed frame,
+// so it loads from disk without a CDN or copying the file into the page.
+let modelView: { dispose: () => void } | null = null;
+
+function stopModel() {
+  modelView?.dispose();
+  modelView = null;
+  $(".model-view", panel)?.remove();
+  panel?.classList.remove("model");
+}
+
+/** Shows a 3D model file in the Canvas. `path` is the .glb on disk. */
+export async function openModel(path: string, name: string) {
+  closeCanvas();
+  muted = false;
+  shown = true;
+  title = name;
+  errors = [];
+  renderErrors();
+  setVisible();
+  showTab("run");
+  panel.classList.add("model");
+  $("#canvas-title").textContent = name;
+  setStatus("Loading the model…");
+  const view = document.createElement("div");
+  view.className = "model-view";
+  $("#canvas-stage").appendChild(view);
+  try {
+    const { mountViewer } = await import("./model3d");
+    const v = await mountViewer(view, convertFileSrc(path));
+    if (!view.isConnected) return v.dispose(); // closed (or replaced) while it was loading
+    modelView = v;
+    const s = v.stats;
+    setStatus(`${s.triangles.toLocaleString()} triangles · ${s.textures} textures · drag to turn, scroll to zoom`);
+  } catch (e) {
+    view.remove();
+    setStatus(`Couldn't show it: ${e instanceof Error ? e.message : e}`);
+  }
 }
 
 /** A new reply is starting: it may open the canvas. */
@@ -248,6 +290,7 @@ export function streamCanvas(c: CanvasCode) {
   if (muted) return;
   if (c.done) return openCanvas(c);
   if (!streaming) {
+    stopModel();
     streaming = true;
     shown = true;
     errors = [];
@@ -273,6 +316,7 @@ export function streamEnded() {
 }
 
 async function run() {
+  stopModel();
   errors = [];
   renderErrors();
   if (/<title[^>]*>[^<]/i.test(code)) title = titleOf(code); // an edit in the Code view may rename it
