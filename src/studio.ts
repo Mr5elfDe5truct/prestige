@@ -45,6 +45,7 @@ import {
   type MusicSettings,
   type Quality,
   type SettingsKey,
+  type VideoSettings,
 } from "./gensettings";
 import { CONSENT, bindRefChoices, hasFiles, imageIn, loadReference, onRefPrefsChange, refChoicesHtml, refPrefs, refPrompt, sceneOf, setRefPrefs, uploadReference, type RefKind, type Reference } from "./reference";
 import { characterById, characters, faceBlob, onCharactersChange } from "./characters";
@@ -595,7 +596,7 @@ function sviDims(size: number, srcW?: number | null, srcH?: number | null): [num
 
 /** What a render with the current settings will be: sizes, steps, frames, and a VRAM and time estimate. A song can
  *  take its own tempo, key and language (chat's songwriter picks them) over the saved ones. */
-function plan(gm: GenMode, src: Source | null = srcAsset, o?: Override, song?: Partial<MusicSettings>): Plan {
+function plan(gm: GenMode, src: Source | null = srcAsset, o?: Override, song?: Partial<MusicSettings>, video?: Partial<VideoSettings>): Plan {
   const m = modeOf(gm);
   let p: Omit<Plan, "warn">;
   // Picture to 3D: one model per picture; its time and VRAM were measured (see MODES.model3d).
@@ -649,7 +650,7 @@ function plan(gm: GenMode, src: Source | null = srcAsset, o?: Override, song?: P
       secs: m.secs * ((work * s.shots) / SVI_BASE) * (steps / 4),
     };
   } else {
-    const s = settings().video;
+    const s = { ...settings().video, ...video };
     const [w, h] = parseRes(s.res);
     const frames = ltxFrames(s.seconds, s.fps);
     const draft = m.family === "ltx" && s.quality === "draft";
@@ -1929,6 +1930,7 @@ interface QueueOpts {
   lyrics?: string; // a song's (empty: an instrumental)
   song?: Partial<MusicSettings>; // a song's tempo, key or language over the saved settings (chat's songwriter)
   talk?: { audio: Blob; seconds: number }; // a talking video's voice recording and its length
+  video?: Partial<VideoSettings>; // a video's length, size or quality over the saved settings (a Director shot)
 }
 
 /** ACE-Step's way of asking for no vocals. */
@@ -2006,7 +2008,7 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
   if (m.promptNode) graph[m.promptNode].inputs[m.promptKey ?? "text"] = gm === "ref" || gm === "reffast" ? refPrompt(opts.kind ?? "auto", prompt) : prompt;
   // Renders without generation settings keep their seed to themselves, rather than taking the Image settings' one.
   const seed = NO_SETTINGS.includes(m.family) ? Math.floor(Math.random() * 2 ** 32) : takeSeed(settingsKey(gm));
-  const p = m.family === "talk" ? talkPlan(src, opts.talk?.seconds ?? 0) : plan(gm, src, opts.override, opts.song);
+  const p = m.family === "talk" ? talkPlan(src, opts.talk?.seconds ?? 0) : plan(gm, src, opts.override, opts.song, opts.video);
   if (m.family === "svi") shotPrompts(prompt, p.shots!).forEach((t, i) => (graph[SVI.shots[i].prompt].inputs.text = t));
   if (m.family === "song") graph[m.promptNode].inputs.lyrics = isInstrumental(opts.lyrics) ? INSTRUMENTAL : opts.lyrics!.trim();
   apply(m, graph, p, seed);
@@ -2410,6 +2412,22 @@ const TALK_PROMPT = "A person talking to the camera with natural expressions, bl
 /** How long a talking video of this much speech takes, in seconds (measured on an RTX 3060 12 GB). */
 export const talkSecs = (seconds: number) => TALK_LOAD_SECS + TALK_PART_SECS * talkParts(seconds);
 
+/** Director: one shot of a music video, LTX-2.5 text-to-video at 768×512 for this long; `quality` is the saved Video
+ *  quality unless given ("draft" skips the upscale pass). `title` is what the render queue shows. */
+export async function renderShot(
+  prompt: string,
+  seconds: number,
+  progress: (pct: number, label: string) => void,
+  how: { title?: string; note?: string; quality?: Quality } = {},
+): Promise<Asset[]> {
+  await ensureWorkflows();
+  if (!workflows.video) throw new Error(`workflows\\${MODES.video.file} wasn't found (update the Workstation and add the video pack)`);
+  const video: Partial<VideoSettings> = { seconds, res: "768x512", fps: 24, ...(how.quality ? { quality: how.quality } : {}) };
+  return run("video", prompt, null, { video }, progress, { from: "Director", title: how.title, note: how.note });
+}
+/** The saved Video quality ("draft" makes a Director's shots quicker). */
+export const videoQuality = () => settings().video.quality;
+
 /** Chat's /song: a song in this style with these lyrics (empty: an instrumental). `song` sets its tempo, key or
  *  language for this one song; its length is the saved setting. Resolves with the saved file. */
 export async function renderSong(
@@ -2438,8 +2456,9 @@ export async function chatSettings(el: HTMLElement, kind: MediaKind) {
 }
 
 /** Stops chat's render: takes it out of the queue if it's still waiting, or stops it if it's running. */
-export async function cancelRender() {
-  const mine = [...rq].reverse().find((j) => j.from === "chat" && (j.state === "waiting" || j.state === "running"));
+/** Stops chat's latest render (or the latest one from `from`, e.g. a Director's shot). */
+export async function cancelRender(from = "chat") {
+  const mine = [...rq].reverse().find((j) => j.from === from && (j.state === "waiting" || j.state === "running"));
   if (mine) cancelJob(mine);
 }
 
