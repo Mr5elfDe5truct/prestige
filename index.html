@@ -506,6 +506,7 @@
             <button class="btn" id="lb-inpaint" title="Paint over a part of the picture and regenerate only that part">Paint to change…</button>
             <button class="btn" id="lb-animate">Animate (image → video)</button>
             <button class="btn" id="lb-upscale" title="SeedVR2 redraws it sharper at a higher resolution, as a new file" hidden>Upscale</button>
+            <button class="btn" id="lb-laser" title="A PNG to engrave or an SVG to cut, at the size it'll be on the material">Laser…</button>
             <button class="btn" id="lb-save">Save a copy as…</button>
             <button class="btn danger" id="lb-delete" title="Move to the Recycle Bin (Delete key)">Delete</button>
             <button class="btn primary" id="lb-reuse">Reuse prompt</button>
@@ -574,6 +575,55 @@
         <div class="acts">
           <button class="btn" value="cancel">Cancel</button>
           <button class="btn primary" value="go" id="talk-go">Make it talk</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="sheet laser" id="laser">
+      <form method="dialog" onsubmit="return false">
+        <h2>Laser file <span class="credit" id="lz-name"></span></h2>
+        <div class="lz-body">
+          <div class="lz-view" id="lz-view"><canvas id="lz-canvas"></canvas><img id="lz-svg" alt="Traced shapes" hidden /></div>
+          <div class="lz-side">
+            <span class="seg lz-job" id="lz-job"><button type="button" data-job="photo">Engrave photo</button><button type="button" data-job="lineart">Engrave line art</button><button type="button" data-job="cut">Cut / score</button></span>
+            <p class="muted" id="lz-hint"></p>
+            <div class="lz-row">
+              <label>Width (mm)<input id="lz-width" type="number" min="5" max="2000" step="1" /></label>
+              <label data-for="photo lineart">Resolution<select id="lz-dpi">
+                <option value="254">254 DPI · 10 lines/mm (diode)</option>
+                <option value="318">318 DPI · 12.5 lines/mm</option>
+                <option value="300">300 DPI</option>
+                <option value="381">381 DPI · 15 lines/mm</option>
+                <option value="508">508 DPI · 20 lines/mm (fibre)</option>
+                <option value="600">600 DPI</option>
+                <option value="169">169 DPI · CO₂ on wood</option>
+              </select></label>
+            </div>
+            <label data-for="photo">Dithering<select id="lz-dither">
+              <option value="jarvis">Jarvis (smooth, photos on wood)</option>
+              <option value="floyd">Floyd–Steinberg (sharper)</option>
+              <option value="atkinson">Atkinson (lighter, leather and card)</option>
+              <option value="bayer">Ordered (even pattern, tile and slate)</option>
+              <option value="gray">Grayscale (lasers that vary power)</option>
+            </select></label>
+            <label data-for="lineart cut">Threshold <span id="lz-threshold-v"></span><input id="lz-threshold" type="range" min="1" max="254" /></label>
+            <label data-for="photo lineart cut">Brightness <span id="lz-bright-v"></span><input id="lz-bright" type="range" min="-100" max="100" /></label>
+            <label data-for="photo lineart cut">Contrast <span id="lz-contrast-v"></span><input id="lz-contrast" type="range" min="-100" max="100" /></label>
+            <label data-for="cut">Leave out specks under <span id="lz-speck-v"></span><input id="lz-speck" type="range" min="0" max="5" step="0.1" /></label>
+            <div data-for="cut" class="lz-row">
+              <span class="seg" id="lz-svg-style"><button type="button" data-style="cut" title="Hairline red outlines: most laser software cuts these">Cut lines</button><button type="button" data-style="fill" title="Filled black shapes: engraved as a vector fill or scored">Filled shapes</button></span>
+              <label class="check"><input id="lz-smooth" type="checkbox" />Smooth curves</label>
+            </div>
+            <label class="check" title="White burns instead of black: slate, black anodized aluminium, painted tiles, rubber stamps"><input id="lz-invert" type="checkbox" />Invert (dark materials, stamps)</label>
+            <label class="check" title="Flipped left to right, to engrave the back of clear glass or acrylic"><input id="lz-mirror" type="checkbox" />Mirror (back of glass or acrylic)</label>
+            <p class="muted lz-info" id="lz-info"></p>
+            <p class="muted lz-foot"><label class="check"><input id="lz-actual" type="checkbox" />Show actual pixels</label><button type="button" class="linkish" id="lz-reset">Reset the adjustments</button></p>
+          </div>
+        </div>
+        <div class="acts">
+          <button type="button" class="btn" id="lz-cancel">Cancel</button>
+          <button type="button" class="btn" id="lz-save-as" title="Pick where to save it (a USB stick, your laser software's folder)">Save as…</button>
+          <button type="button" class="btn primary" id="lz-save" title="Save into the gallery's laser folder">Save PNG</button>
         </div>
       </form>
     </dialog>

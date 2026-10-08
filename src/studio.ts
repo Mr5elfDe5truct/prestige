@@ -50,6 +50,7 @@ import {
 import { CONSENT, bindRefChoices, hasFiles, imageIn, loadReference, onRefPrefsChange, refChoicesHtml, refPrefs, refPrompt, referenceFromBase64, sceneOf, setRefPrefs, uploadReference, type RefKind, type Reference } from "./reference";
 import { characterById, characters, faceBlob, onCharactersChange } from "./characters";
 import { initInpaint, openInpaint, type SelectQuery } from "./inpaint";
+import { initLaser, openLaser } from "./laser";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
 const $$ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => Array.from(r.querySelectorAll(s)) as T[];
@@ -892,6 +893,7 @@ export function initStudio(d: Deps) {
     renderQueue();
   });
   deps = d;
+  initLaser({ toast: d.toast, root: d.root, openRender });
   $$(".filters [data-f]").forEach((b) =>
     b.addEventListener("click", () => {
       filter = b.dataset.f as typeof filter;
@@ -1600,6 +1602,8 @@ function openLightbox(a: Asset) {
     $("#lb-upscale").textContent = up.label;
     $("#lb-upscale").onclick = up.run;
   }
+  ($("#lb-laser") as HTMLButtonElement).hidden = a.kind !== "image";
+  $("#lb-laser").onclick = () => laser(a);
   ($("#lb-reuse") as HTMLButtonElement).disabled = !a.prompt;
   $("#lb-reveal").onclick = () => revealFile(a);
   $("#lb-copy").onclick = () => copy(a.prompt || "");
@@ -1683,6 +1687,12 @@ async function upscale(a: Asset, size: UpscaleSize) {
   } catch (e) {
     if (errMsg(e) !== "stopped") deps.toast(`Couldn't upscale it: ${errMsg(e)}`, "warn");
   }
+}
+
+/** Laser: a PNG to engrave or an SVG to cut from this picture (laser.ts). */
+function laser(a: Asset) {
+  closeLightbox();
+  openLaser(a.path, a.name, a.prompt ?? "");
 }
 
 /** Puts a mask in ComfyUI's input folder (named from its content). */
@@ -1942,6 +1952,7 @@ function showMenu(e: MouseEvent, a: Asset) {
     ...(image && (workflows.ref || workflows.reffast) ? [{ label: "Use as reference image", run: () => useAsReference(a) }] : []),
     ...(image && workflows.model3d ? [{ label: "Make a 3D model", run: () => makeModel(a), key: "Pixal3D" }] : []),
     ...(image && workflows.talk ? [{ label: "Make it talk…", run: () => deps.makeTalk(a.path), key: "InfiniteTalk" }] : []),
+    ...(image ? [{ label: "Make a laser file…", run: () => laser(a), key: "engrave or cut" }] : []),
     ...(a.prompt ? [{ label: a.kind === "audio" ? "Reuse style and lyrics" : "Reuse prompt", run: () => reusePrompt(a) }] : []),
     ...(a.seed != null ? [{ label: "Reuse seed", run: () => reuseSeed(a), key: String(a.seed) }] : []),
     "-",
