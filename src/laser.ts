@@ -252,7 +252,7 @@ function simplifyLoop(p: Pt[], tol: number): Pt[] {
 }
 
 /** One loop as SVG path data in millimetres: straight lines, or curves through the segment midpoints that keep sharp
- *  corners (over ~70°) sharp. */
+ *  corners sharp. */
 function pathData(p: Pt[], k: number, flipW: number | null): string {
   const f = (n: number) => String(Math.round(n * 100) / 100);
   const X = (x: number) => f((flipW != null ? flipW - x : x) * k);
@@ -269,7 +269,9 @@ function pathData(p: Pt[], k: number, flipW: number | null): string {
     const t2 = Math.atan2(c[1] - b[1], c[0] - b[0]);
     let t = Math.abs(t2 - t1);
     if (t > Math.PI) t = 2 * Math.PI - t;
-    return t > (70 * Math.PI) / 180;
+    // A curve is many short segments turning a little; a long straight edge turning by 30° or more is a corner.
+    const short = Math.min(Math.hypot(b[0] - a[0], b[1] - a[1]), Math.hypot(c[0] - b[0], c[1] - b[1]));
+    return t > Math.PI / 3 || (t > Math.PI / 6 && short > 6);
   };
   let d = `M${pt(mid(p[n - 1], p[0]))}`;
   for (let i = 0; i < n; i++) {
