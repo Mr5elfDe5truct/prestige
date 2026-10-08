@@ -951,11 +951,18 @@ export async function showStudio(on: boolean) {
   await refresh();
 }
 
+let workflowsRoot: string | null | undefined; // the Workstation folder they were read from
+let workflowsDone = false;
 function ensureWorkflows() {
+  // Once read, read them again if the Workstation folder changed or one was missing (it may be installed since).
+  const root = deps.root();
+  if (workflowsDone && (root !== workflowsRoot || Object.values(workflows).some((w) => !w))) workflowsLoaded = null;
   return (workflowsLoaded ??= loadWorkflows());
 }
 
 async function loadWorkflows() {
+  workflowsDone = false;
+  workflowsRoot = deps.root();
   for (const gm of Object.keys(MODES) as GenMode[]) {
     workflows[gm] = null;
     for (let m: Mode | undefined = MODES[gm]; m; m = m.fallback) {
@@ -966,6 +973,7 @@ async function loadWorkflows() {
       } catch {}
     }
   }
+  workflowsDone = true;
   renderCreate();
 }
 

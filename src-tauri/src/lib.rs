@@ -32,10 +32,20 @@ pub(crate) fn hidden(cmd: &mut Command) -> &mut Command {
 }
 
 /// Where the workstation lives unless the user picks another folder in Settings:
-/// %USERPROFILE%\RG Studios\Workstation, next to the other R.G. Studios apps.
+/// %USERPROFILE%\RG Studios\Workstation, next to the other R.G. Studios apps, or else the folder
+/// install.ps1 last installed it in (it writes that to %USERPROFILE%\RG Studios\workstation-folder.txt).
 fn default_stack_root() -> PathBuf {
     let home = std::env::var_os("USERPROFILE").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Users\Public"));
-    home.join("RG Studios").join("Workstation")
+    let rg = home.join("RG Studios");
+    let usual = rg.join("Workstation");
+    if usual.join("start-all.ps1").exists() {
+        return usual;
+    }
+    fs::read_to_string(rg.join("workstation-folder.txt"))
+        .ok()
+        .map(|t| PathBuf::from(t.trim_start_matches('\u{feff}').trim()))
+        .filter(|p| p.join("start-all.ps1").exists())
+        .unwrap_or(usual)
 }
 
 pub(crate) fn stack_root(root: Option<String>) -> PathBuf {
