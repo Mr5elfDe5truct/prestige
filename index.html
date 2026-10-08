@@ -439,6 +439,7 @@
           <label class="check"><input id="ch-shared" type="checkbox" /> Also give them the shared memory (what every model knows about you)</label>
           <div class="acts">
             <button class="btn danger" id="ch-delete" type="button">Delete</button>
+            <button class="btn" id="ch-video" type="button">Make a talking video…</button>
             <button class="btn" id="ch-save" type="button">Save</button>
             <button class="btn primary" id="ch-talk" type="button">Talk to them</button>
           </div>
@@ -527,6 +528,32 @@
         <div class="acts">
           <button class="btn" value="cancel" autofocus>Cancel</button>
           <button class="btn danger" value="delete">Delete</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="sheet talk" id="talk">
+      <form method="dialog">
+        <h2>Make it talk</h2>
+        <div class="talk-top">
+          <img id="talk-pic" alt="" />
+          <div class="talk-fields">
+            <label>What should they say?<textarea id="talk-text" rows="4" placeholder="Hi! I'm so glad you're here. Let me tell you about my day…"></textarea></label>
+            <label>Voice<select id="talk-voice"></select></label>
+            <p class="muted talk-file-row">
+              <button type="button" class="linkish" id="talk-file-btn">Or use a recording…</button>
+              <span id="talk-file-name"></span>
+              <button type="button" class="linkish" id="talk-file-clear" hidden>remove</button>
+            </p>
+            <input type="file" id="talk-file" accept="audio/*,.wav,.mp3,.m4a,.flac,.ogg,.webm" hidden />
+            <label>How they move<input id="talk-motion" type="text" autocomplete="off" placeholder="Optional, e.g. smiling, nodding, excited" /></label>
+          </div>
+        </div>
+        <p class="muted" id="talk-est"></p>
+        <p class="credit">InfiniteTalk works best on one face looking at the camera. Only use photos of real people with their permission.</p>
+        <div class="acts">
+          <button class="btn" value="cancel">Cancel</button>
+          <button class="btn primary" value="go" id="talk-go">Make it talk</button>
         </div>
       </form>
     </dialog>

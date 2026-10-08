@@ -29,6 +29,8 @@ interface Deps {
   choose: (id: string | undefined) => void;
   /** The voice Prestige itself uses, for a character without one. */
   defaultVoice: () => string;
+  /** "Make a talking video": their face says a line in their voice (InfiniteTalk). */
+  makeTalk: (c: Character) => void;
 }
 
 let deps: Deps;
@@ -247,6 +249,9 @@ function renderEditor() {
   $("#ch-face").innerHTML = editing.face ? `<img src="${faceUrl(editing)}" alt="${esc(editing.name)}" />` : `<span>Add a face</span>`;
   $("#ch-face-clear").hidden = !editing.face;
   $("#ch-talk").textContent = deps.active() === editing.id ? "Talking to them" : `Talk to ${editing.name || "them"}`;
+  const vid = $("#ch-video") as HTMLButtonElement;
+  vid.disabled = !editing.face;
+  vid.title = editing.face ? "Their face says a line in their voice, as a lip-synced video (InfiniteTalk)" : "Add a face first";
   renderMemory();
   renderVoices(editing.voice);
 }
@@ -368,6 +373,13 @@ export async function initCharacters(d: Deps) {
     await save();
     deps.choose(editing.id);
     ($("#characters") as HTMLDialogElement).close();
+  });
+  $("#ch-video").addEventListener("click", async () => {
+    if (!editing?.face) return;
+    readForm();
+    await save();
+    ($("#characters") as HTMLDialogElement).close();
+    deps.makeTalk(editing);
   });
   $("#ch-delete").addEventListener("click", async () => {
     if (!editing || !confirm(`Delete ${editing.name || "this character"}, with its memory? (Chats with it stay in Past chats.)`)) return;

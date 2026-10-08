@@ -15,12 +15,13 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { initSystem, onGpus, showSystem, unloadAll } from "./system";
 import { ollamaCtx, onPlanChange, readGpus, refreshPlan, shortName, type Gpu } from "./gpus";
 import {
-  allowRenders, cancelRender, chatSettings, editLabel, editMedia, initStudio, modelLabel, openRender, renderMedia, renderMenu, renderModel, renderSong, showStudio,
-  songSeconds, type MediaKind,
+  allowRenders, cancelRender, chatSettings, editLabel, editMedia, initStudio, modelLabel, openRender, renderMedia, renderMenu, renderModel, renderSong, renderTalk,
+  showStudio, songSeconds, talkSecs, type MediaKind,
 } from "./studio";
+import { askSpeech, speakLine } from "./talking";
 import { SONG_CMD, writeSong } from "./songwriter";
 import { onSettingsChange } from "./gensettings";
-import { CONSENT, bindRefChoices, hasFiles, imageIn, imageToBase64, onRefPrefsChange, refChoicesHtml, referenceFromBase64 } from "./reference";
+import { CONSENT, bindRefChoices, hasFiles, imageIn, imageToBase64, onRefPrefsChange, refChoicesHtml, referenceFromBase64, type Reference } from "./reference";
 import { initVoice, showVoice } from "./voice";
 import { initCamera, showCameraPane } from "./camera";
 import { initLive, startLive, LIVE_CTX, LIVE_MODELS } from "./live";
@@ -1076,6 +1077,9 @@ const IMAGE_CMD = /^\/(?:image|imagine|img)\b\s*/i;
 const EDIT_CMD = /^\/edit\b\s*/i;
 // "/3d" (or /model): a textured 3D model of the attached picture, or of the last one made in the chat.
 const MODEL_CMD = /^\/(?:3d|model)\b\s*/i;
+// "/talk Hello there!": the attached picture (or the character being talked to, or the last picture made in the chat)
+// says that line in the character's voice, as a lip-synced video.
+const TALK_CMD = /^\/(?:talk|say)\b\s*/i;
 const VIDEO_CMD = /^\/(?:video|clip)\b\s*/i;
 // "Can you make…", "I'd like…", "give me…", "show me…" a picture (or clip) "of…" / "showing…".
 const ASK_LEAD = String.raw`^(?:(?:hey|ok|okay)[,!]?\s+)?(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?)?`;
@@ -1237,6 +1241,89 @@ async function make3d(text: string, srcB64: string, hooks?: ReplyHooks) {
       .finally(() => phoneReplyEnd(replyChat));
     hooks?.onDone?.(!!reply.render);
   }
+}
+
+/** /talk: the line is spoken in the voice (Kokoro or VoxCPM2), then InfiniteTalk lip-syncs the picture to it (about
+ *  4 minutes per 3 seconds of speech). The video is shown in the chat and saved with the renders. */
+async function makeTalk(text: string, line: string, srcB64: string, voice: string, hooks?: ReplyHooks) {
+  if (!inTauri) {
+    toast("Talking videos are made in the desktop app.");
+    return hooks?.onDone?.(false);
+  }
+  if (chat.messages.length === 0) chat.title = text.replace(/\s+/g, " ").slice(0, 60) || "Talking video";
+  chat.messages.push({ role: "user", content: text, images: [srcB64] });
+  renderChat();
+  const reply: StoredMessage = { role: "assistant", content: "", model: "InfiniteTalk" };
+  const bubble = addAiBubble("InfiniteTalk");
+  const body = $(".msg-body", bubble);
+  const replyChat = chat.id;
+  phoneReplyStart("InfiniteTalk", text);
+  body.innerHTML = `<div class="render-progress"><div class="progress"><i></i></div><span class="status-line">Speaking the line…</span></div>`;
+  scrollDown(true);
+  busy = new AbortController();
+  busy.signal.addEventListener("abort", () => cancelRender(), { once: true });
+  setBusyUi(true);
+  const t0 = Date.now();
+  try {
+    const speech = await speakLine(line, voice);
+    if (busy.signal.aborted) throw new Error("stopped");
+    const ref = await referenceFromBase64(srcB64);
+    const got = await renderTalk(
+      ref,
+      speech.audio,
+      speech.seconds,
+      "",
+      (pct, label) => {
+        ($(".progress", body) as HTMLElement | null)?.style.setProperty("--v", String(pct));
+        const l = $(".status-line", body);
+        if (l) l.textContent = label;
+      },
+      "chat",
+      speech.title,
+    );
+    URL.revokeObjectURL(ref.url);
+    const a = got[0];
+    reply.render = { path: a.path, prompt: line, seconds: Math.round((Date.now() - t0) / 1000), kind: "video", reply: true };
+    reply.content = `(A talking video of the picture saying: "${line}". Saved as ${a.name}.)`;
+    renderFigure(bubble, reply.render);
+  } catch (e) {
+    if (busy?.signal.aborted) reply.content = "*(stopped)*";
+    else {
+      reply.error = true;
+      reply.content = `Couldn't make the talking video: ${errMsg(e)}`;
+      bubble.classList.add("error");
+    }
+    body.innerHTML = md(reply.content);
+  } finally {
+    chat.messages.push(reply);
+    bubble.dataset.i = String(chat.messages.length - 1);
+    if (!reply.error) reactButton(bubble, reply);
+    busy = null;
+    setBusyUi(false);
+    scrollDown();
+    persist()
+      .catch((e) => toast(`Couldn't save this chat: ${e}`, "warn"))
+      .finally(() => phoneReplyEnd(replyChat));
+    hooks?.onDone?.(!!reply.render);
+  }
+}
+
+/** "Make it talk…" on a picture (a render's path, or a character's face): asks what to say and in which voice, then
+ *  queues InfiniteTalk. The video opens when it's done; the render queue shows how far it is. */
+async function talkFromPicture(shown: string, pic: string | Reference, voice?: string) {
+  if (!inTauri) return toast("Talking videos are made in the desktop app.");
+  let speech;
+  try {
+    await allowRenders();
+    speech = await askSpeech(shown, voice || settings.voice, toast);
+  } catch (e) {
+    return toast(`Couldn't make the speech: ${errMsg(e)}`, "warn");
+  }
+  if (!speech) return;
+  toast(`Making it talk: about ${Math.max(1, Math.round(talkSecs(speech.seconds) / 60))} min. It opens when it's done (the render queue in Studio shows how far it is).`);
+  renderTalk(pic, speech.audio, speech.seconds, speech.prompt, () => {}, "Make it talk", speech.title)
+    .then((got) => got[0] && openRender(got[0].path))
+    .catch((e) => errMsg(e) !== "stopped" && toast(`Couldn't make the talking video: ${errMsg(e)}`, "warn"));
 }
 
 /** Lyrics as Markdown: each sung line on its own line, the [Verse] / [Chorus] tags in italics. */
@@ -1677,6 +1764,24 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
       return undefined; // gone from disk: the caller asks for a picture
     }
   };
+  // "/talk Hello!": the attached picture, the character's face or the last picture says it, in the character's voice.
+  if (!live && !opts.images && TALK_CMD.test(text)) {
+    const line = text.replace(TALK_CMD, "").trim();
+    const char = activeCharacter();
+    const src = attachments[0] ?? char?.face ?? (await pictureToUse());
+    if (!line || !src) {
+      toast(
+        !src
+          ? "Attach a picture of a face (or talk to a character with a face, or make a picture in this chat first), then /talk and what they should say."
+          : "Say what they should say after /talk, e.g. /talk Hi, I'm so glad you're here!",
+      );
+      opts.hooks?.onDone?.(false);
+      return;
+    }
+    attachments = [];
+    renderAttachments();
+    return makeTalk(text, line, src, voiceOf(char) || settings.voice || DEFAULT_VOICE, opts.hooks);
+  }
   // "/3d": a textured 3D model of that picture.
   if (!live && !opts.images && MODEL_CMD.test(text)) {
     const src = await pictureToUse();
@@ -2651,6 +2756,8 @@ async function main() {
       if (!current) throw new Error("no chat model is available (start the services first)");
       return (await writeSong(current, style, seconds, signal)).lyrics;
     },
+    // Right-click a picture > Make it talk: in the voice of the character being talked to, or Prestige's.
+    makeTalk: (path) => talkFromPicture(convertFileSrc(path), path, activeCharacter()?.voice),
   });
   onSpeakingChange((on) => {
     if (!on) markSpeaking(null);
@@ -2739,6 +2846,8 @@ async function main() {
     active: () => settings.character,
     choose: (id) => choosePersona(id),
     defaultVoice: () => settings.voice ?? DEFAULT_VOICE,
+    // "Make a talking video": their face in their voice.
+    makeTalk: async (c) => talkFromPicture(`data:image/jpeg;base64,${c.face}`, await referenceFromBase64(c.face!), voiceOf(c)),
   });
   if (settings.character && !characterById(settings.character)) settings.character = undefined;
   // The saved voice, or the character's (initVoice ran before settings were loaded).

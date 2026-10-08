@@ -70,12 +70,13 @@ interface Asset {
   duration?: number | null; // a song's length in seconds
 }
 
-type GenMode = "image" | "fast" | "edit" | "inpaint" | "video" | "animate" | "long" | "ref" | "reffast" | "refvideo" | "song" | "model3d";
+type GenMode = "image" | "fast" | "edit" | "inpaint" | "video" | "animate" | "long" | "ref" | "reffast" | "refvideo" | "song" | "model3d" | "talk";
 
 // How a workflow takes the generation settings: an image model with a latent size and batch, an edit
 // (size follows the picture), LTX with a 2× upscale pass ("ltx") or without ("ltx1"), Wan's two samplers,
-// Wan 2.2 SVI's chained shots ("svi"), an ACE-Step song ("song"), or Pixal3D turning a picture into a textured 3D model ("model3d").
-type Family = "image" | "edit" | "ltx" | "ltx1" | "wan" | "svi" | "song" | "model3d";
+// Wan 2.2 SVI's chained shots ("svi"), an ACE-Step song ("song"), Pixal3D turning a picture into a textured 3D model ("model3d"),
+// or InfiniteTalk making a picture speak a voice recording ("talk").
+type Family = "image" | "edit" | "ltx" | "ltx1" | "wan" | "svi" | "song" | "model3d" | "talk";
 
 interface Mode {
   file: string;
@@ -91,6 +92,15 @@ interface Mode {
   imageNode?: string; // LoadImage node for image-to-video, edits and reference images
   fallback?: Mode; // used when this workflow file isn't there
 }
+
+/* InfiniteTalk on an RTX 3060 12 GB at 448×640, 4 steps (ComfyUI's log and nvidia-smi): 55 s a step, so each 81-frame
+ * part takes ~255 s, plus ~15 s for the rest once the models are in RAM. 3.2 s of speech (one part) took 264 s, 8 s
+ * (three parts) 774 s; VRAM peaked at 10.1 GB either way, as ComfyUI streams the rest of Wan 2.1 14B from RAM.
+ * That's ~1.5 minutes of rendering per second of speech, so a talking video is capped at 30 s (~47 min). */
+const TALK_PART_SECS = 255;
+const TALK_LOAD_SECS = 15;
+/** The longest speech a talking video takes, in seconds. */
+export const TALK_MAX_SECONDS = 30;
 
 // The nodes in the stack's exported API workflows (workflows\*.api.json) that the settings go into.
 const QWEN_STEPS = { draft: 12, standard: 20, high: 30, max: 40 };
@@ -261,6 +271,20 @@ const MODES: Record<GenMode, Mode> = {
     note: "textured 3D model",
     imageNode: "122",
   },
+  // Talking characters: InfiniteTalk (MeiGen, on Wan 2.1 I2V 14B 480p in GGUF Q4_K_M with the lightx2v step-distill
+  // LoRA) lip-syncs a picture to a voice recording, through ComfyUI's native nodes (workflows\infinitetalk-talking.api.json).
+  // It makes 81 frames (3.24 s at 25 fps) at a time; longer speech chains more parts, each carrying on from the last 9
+  // frames of the one before (talkGraph). secs is one part.
+  talk: {
+    file: "infinitetalk-talking.api.json",
+    label: "InfiniteTalk",
+    family: "talk",
+    promptNode: "10",
+    seed: ["15", "noise_seed"],
+    secs: TALK_PART_SECS,
+    note: "talking video",
+    imageNode: "7",
+  },
 };
 
 /* ACE-Step 1.5 turbo on an RTX 3060 12 GB (ComfyUI's log and nvidia-smi): its 1.7B language model writes the audio codes
@@ -303,6 +327,82 @@ const MODEL3D_STEPS: Record<string, string> = {
   ApplyTextureToMesh: "Texturing the mesh",
   Save3DAdvanced: "Saving the .glb",
 };
+
+// InfiniteTalk's nodes (workflows\infinitetalk-talking.api.json): the voice recording and its encoding, the first
+// part's talk node, scheduler, sampler and decode, and the frames the video is made from. Each part is 81 frames at
+// 25 fps and carries on from the last 9 frames before it.
+const TALK = { audio: "8", encode: "9", talk: "12", scheduler: "14", sampler: "17", decode: "18", frames: "20", fps: 25, part: 81, motion: 9 };
+/** What a talking video's progress line says for its other steps. */
+const TALK_STEPS: Record<string, string> = {
+  LoadAudio: "Loading the voice",
+  AudioEncoderEncode: "Listening to the voice",
+  WanInfiniteTalkToVideo: "Matching the lips to the voice",
+  CreateVideo: "Adding the voice",
+  SaveVideo: "Saving the video",
+};
+
+/** A talking video's size: the picture's shape at the area of 448×640, in multiples of 16. On the 3060 a step took 54 s
+ *  there and 81 s at 528×768 (480p's full area), and the faces looked as good. */
+const TALK_AREA = 448 * 640;
+function talkDims(srcW?: number | null, srcH?: number | null): [number, number] {
+  const r = srcW && srcH ? srcW / srcH : 1;
+  const r16 = (x: number) => Math.max(256, Math.round(x / 16) * 16);
+  return [r16(Math.sqrt(TALK_AREA * r)), r16(Math.sqrt(TALK_AREA / r))];
+}
+
+/** How many 81-frame parts cover this much speech: the first makes 81 frames, each after it 72 new ones. */
+export function talkParts(seconds: number) {
+  const frames = Math.ceil(seconds * TALK.fps);
+  return frames <= TALK.part ? 1 : 1 + Math.ceil((frames - TALK.part) / (TALK.part - TALK.motion));
+}
+
+/** A talking video's plan: the picture's shape, enough parts for the speech, and the measured time. */
+function talkPlan(src: Source | null, seconds: number): Plan {
+  const [w, h] = talkDims(src?.width, src?.height);
+  const parts = talkParts(seconds);
+  return { w, h, count: 1, seconds, frames: Math.ceil(seconds * TALK.fps), fps: TALK.fps, shots: parts, load: 0, secs: TALK_LOAD_SECS + TALK_PART_SECS * parts, warn: "" };
+}
+
+/** Chains InfiniteTalk parts until the frames cover the speech. A part carries on from the last 9 frames of the one
+ *  before, and counts that part's frames to know where it is in its recording, so each gets the voice from where the
+ *  previous part started (its first 72 frames' worth then lie behind it). Its own first 9 frames repeat the previous
+ *  part's last 9, so they're dropped, and the parts are joined once at the end and cut to the speech's length. (Giving
+ *  each part everything made so far instead kept every growing copy in RAM: ~20 GB for 23 s.) */
+function talkGraph(g: any, p: Plan, seed: number) {
+  set(g, TALK.talk, { width: p.w, height: p.h });
+  const step = TALK.part - TALK.motion;
+  const join: Record<string, [string, number]> = { "images.image0": [TALK.decode, 0] };
+  let prev: [string, number] = [TALK.decode, 0];
+  for (let k = 2; k <= p.shots!; k++) {
+    const id = (n: number) => `${k}0${n}`;
+    // ~6 s of voice from where the previous part started: the 72 frames behind this part, then its own 81.
+    g[id(1)] = { class_type: "TrimAudioDuration", inputs: { audio: [TALK.audio, 0], start_index: ((k - 2) * step) / TALK.fps, duration: (step + TALK.part) / TALK.fps + 1 } };
+    g[id(2)] = { class_type: "AudioEncoderEncode", inputs: { ...g[TALK.encode].inputs, audio: [id(1), 0] } };
+    g[id(3)] = { class_type: "WanInfiniteTalkToVideo", inputs: { ...g[TALK.talk].inputs, audio_encoder_output_1: [id(2), 0], previous_frames: prev } };
+    g[id(4)] = { class_type: "BasicScheduler", inputs: { ...g[TALK.scheduler].inputs, model: [id(3), 0] } };
+    g[id(5)] = { class_type: "RandomNoise", inputs: { noise_seed: seed + k - 1 } };
+    g[id(6)] = { class_type: "CFGGuider", inputs: { model: [id(3), 0], positive: [id(3), 1], negative: [id(3), 2], cfg: 1 } };
+    g[id(7)] = { class_type: "SamplerCustomAdvanced", inputs: { ...g[TALK.sampler].inputs, noise: [id(5), 0], guider: [id(6), 0], sigmas: [id(4), 0], latent_image: [id(3), 3] } };
+    g[id(8)] = { class_type: "VAEDecode", inputs: { ...g[TALK.decode].inputs, samples: [id(7), 0] } };
+    g[id(9)] = { class_type: "ImageFromBatch", inputs: { image: [id(8), 0], batch_index: TALK.motion, length: step } };
+    join[`images.image${k - 1}`] = [id(9), 0];
+    prev = [id(8), 0];
+  }
+  if (p.shots! > 1) {
+    g["19"] = { class_type: "BatchImagesNode", inputs: join };
+    set(g, TALK.frames, { image: ["19", 0] });
+  }
+  set(g, TALK.frames, { length: p.frames });
+}
+
+/** The progress line for each part: "Animating part 2 of 4", "Decoding part 2 of 4". */
+function talkLabels(nodes: Record<string, string>, parts: number) {
+  for (let k = 1; k <= parts; k++) {
+    const of = parts > 1 ? ` part ${k} of ${parts}` : "";
+    nodes[k === 1 ? TALK.sampler : `${k}07`] = `Animating${of || " the face"}`;
+    nodes[k === 1 ? TALK.decode : `${k}08`] = `Decoding${of || " the frames"}`;
+  }
+}
 
 // The SVI workflow's nodes: each shot's prompt and noise, the merge after each shot, and the settings.
 const SVI = {
@@ -570,6 +670,9 @@ function apply(m: Mode, g: any, p: Plan, seed: number) {
     case "model3d":
       MODEL3D_SAMPLERS.forEach((id, i) => set(g, id, { seed: seed + i }));
       break;
+    case "talk":
+      talkGraph(g, p, seed);
+      break;
     case "svi": {
       const s = settings().long;
       set(g, SVI.size, { value: s.size });
@@ -628,6 +731,8 @@ interface Deps {
   openModel: (path: string, name: string) => void;
   /** Lyrics for a song in this style from the chat model, about `seconds` long (Music mode's "Write lyrics"). */
   writeLyrics: (style: string, seconds: number, signal: AbortSignal) => Promise<string>;
+  /** Opens "Make it talk" for this picture: what to say and in which voice. */
+  makeTalk: (path: string) => void;
 }
 
 let deps: Deps;
@@ -1460,6 +1565,7 @@ function showMenu(e: MouseEvent, a: Asset) {
     ...(image && (workflows.animate || workflows.long) ? [{ label: "Animate (image → video)…", run: () => startFrom(a, "video") }] : []),
     ...(image && (workflows.ref || workflows.reffast) ? [{ label: "Use as reference image", run: () => useAsReference(a) }] : []),
     ...(image && workflows.model3d ? [{ label: "Make a 3D model", run: () => makeModel(a), key: "Pixal3D" }] : []),
+    ...(image && workflows.talk ? [{ label: "Make it talk…", run: () => deps.makeTalk(a.path), key: "InfiniteTalk" }] : []),
     ...(a.prompt ? [{ label: a.kind === "audio" ? "Reuse style and lyrics" : "Reuse prompt", run: () => reusePrompt(a) }] : []),
     ...(a.seed != null ? [{ label: "Reuse seed", run: () => reuseSeed(a), key: String(a.seed) }] : []),
     "-",
@@ -1575,7 +1681,7 @@ function run(
   src: Source | null,
   opts: QueueOpts,
   progress?: (pct: number, label: string) => void,
-  how: { front?: boolean; note?: string; from?: string } = {},
+  how: { front?: boolean; note?: string; from?: string; title?: string } = {},
 ) {
   return new Promise<Asset[]>((resolve, reject) => {
     try {
@@ -1599,6 +1705,7 @@ interface QueueOpts {
   mask?: { name: string; w: number; h: number }; // inpaint: the mask in ComfyUI's input folder, and the picture's size
   lyrics?: string; // a song's (empty: an instrumental)
   song?: Partial<MusicSettings>; // a song's tempo, key or language over the saved settings (chat's songwriter)
+  talk?: { audio: Blob; seconds: number }; // a talking video's voice recording and its length
 }
 
 /** ACE-Step's way of asking for no vocals. */
@@ -1658,6 +1765,7 @@ interface QJob {
   error?: string;
   waiter?: { progress: (pct: number, label: string) => void; resolve: (a: Asset[]) => void; reject: (e: Error) => void };
   cancelled?: boolean; // stopped while it was getting ready
+  audio?: Blob; // a talking video's voice recording, uploaded with the picture
 }
 const rq: QJob[] = [];
 let current: QJob | null = null;
@@ -1671,7 +1779,7 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
   const graph = structuredClone(wf);
   if (m.promptNode) graph[m.promptNode].inputs[m.promptKey ?? "text"] = gm === "ref" || gm === "reffast" ? refPrompt(opts.kind ?? "auto", prompt) : prompt;
   const seed = takeSeed(settingsKey(gm));
-  const p = plan(gm, src, opts.override, opts.song);
+  const p = m.family === "talk" ? talkPlan(src, opts.talk?.seconds ?? 0) : plan(gm, src, opts.override, opts.song);
   if (m.family === "svi") shotPrompts(prompt, p.shots!).forEach((t, i) => (graph[SVI.shots[i].prompt].inputs.text = t));
   if (m.family === "song") graph[m.promptNode].inputs.lyrics = isInstrumental(opts.lyrics) ? INSTRUMENTAL : opts.lyrics!.trim();
   apply(m, graph, p, seed);
@@ -1681,16 +1789,24 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
   }
   const nodes: Record<string, string> = {};
   for (const [id, n] of Object.entries<any>(graph))
-    nodes[id] = (m.family === "song" && SONG_STEPS[n.class_type]) || (m.family === "model3d" && MODEL3D_STEPS[n.class_type]) || n.class_type;
-  return { graph, nodes, seed, count: p.count, label: modeOf(gm).label };
+    nodes[id] =
+      (m.family === "song" && SONG_STEPS[n.class_type]) || (m.family === "model3d" && MODEL3D_STEPS[n.class_type]) || (m.family === "talk" && TALK_STEPS[n.class_type]) || n.class_type;
+  if (m.family === "talk") talkLabels(nodes, p.shots!);
+  return { graph, nodes, seed, count: p.count, label: modeOf(gm).label, audio: opts.talk?.audio };
 }
 
 /** Adds a render to the queue (throws when its workflow is missing). */
-function enqueue(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpts, how: { front?: boolean; note?: string; from?: string; waiter?: QJob["waiter"] } = {}) {
+function enqueue(
+  gm: GenMode,
+  prompt: string,
+  src: Source | null,
+  opts: QueueOpts,
+  how: { front?: boolean; note?: string; from?: string; title?: string; waiter?: QJob["waiter"] } = {},
+) {
   const j: QJob = {
     id: jobIds++,
     gm,
-    prompt,
+    prompt: how.title ?? prompt, // what the queue shows: a talking video's line rather than how they move
     src,
     ...prepare(gm, prompt, src, opts),
     from: how.from ?? "Studio",
@@ -1835,6 +1951,15 @@ function renderQueue() {
   }
 }
 
+/** Puts a voice recording in ComfyUI's input folder (named from its content, so a retry reuses it). */
+async function uploadAudio(audio: Blob): Promise<string> {
+  const bytes = new Uint8Array(await audio.arrayBuffer());
+  const hash = new Uint8Array(await crypto.subtle.digest("SHA-1", bytes));
+  const hex = Array.from(hash.slice(0, 6), (b) => b.toString(16).padStart(2, "0")).join("");
+  const ext = audio.type.includes("mpeg") ? "mp3" : audio.type.includes("ogg") ? "ogg" : audio.type.includes("flac") ? "flac" : audio.type.includes("webm") ? "webm" : audio.type.includes("mp4") || audio.type.includes("m4a") ? "m4a" : "wav";
+  return invoke<string>("comfy_upload_bytes", bytes, { headers: { "x-name": `prestige-voice-${hex}.${ext}` } });
+}
+
 /** Sends a prepared render to ComfyUI. Throws if it couldn't be queued; progress then arrives by websocket. */
 async function submit(j: QJob) {
   const { gm, graph, nodes, seed, count, prompt, src } = j;
@@ -1850,6 +1975,10 @@ async function submit(j: QJob) {
     if (src && m.imageNode) {
       setJob(1, "Uploading the image to ComfyUI…");
       graph[m.imageNode].inputs.image = "path" in src ? await invoke<string>("comfy_upload", { path: src.path }) : await uploadReference(src);
+    }
+    if (j.audio) {
+      setJob(1, "Uploading the voice to ComfyUI…");
+      graph[TALK.audio].inputs.audio = await uploadAudio(j.audio);
     }
     if (j.cancelled) throw new Error("stopped");
     const r = await http(`${COMFY}/prompt`, {
@@ -2011,6 +2140,36 @@ export const editLabel = () => MODES.edit.label;
 export async function renderModel(r: Reference, progress: (pct: number, label: string) => void): Promise<Asset[]> {
   return toModel(r, "chat", progress);
 }
+
+/** Talking characters: InfiniteTalk lip-syncs the picture (a render's path, or a reference picture) to the voice
+ *  recording. `prompt` describes how they move ("smiling, nodding"); `title` is what the render queue shows (the line
+ *  they say). Resolves with the saved video. */
+export async function renderTalk(
+  pic: Reference | string,
+  audio: Blob,
+  seconds: number,
+  prompt: string,
+  progress: (pct: number, label: string) => void,
+  from = "chat",
+  title?: string,
+): Promise<Asset[]> {
+  await ensureWorkflows();
+  if (!workflows.talk) throw new Error(`workflows\\${MODES.talk.file} wasn't found (update the Workstation and add the talk pack)`);
+  let src: Source;
+  if (typeof pic === "string") {
+    await refresh();
+    const a = items.find((x) => x.path === pic);
+    src = a ?? { path: pic, name: pic.split(/[\\/]/).pop() ?? "picture", kind: "image", mtime: 0, size: 0 };
+  } else src = pic;
+  const parts = talkParts(seconds);
+  const note = parts > 1 ? `${parts} parts, about ${Math.round(talkSecs(seconds) / 60)} min · ` : "";
+  return run("talk", prompt || TALK_PROMPT, src, { talk: { audio, seconds } }, progress, { from, note, title });
+}
+
+/** What InfiniteTalk is told when nothing else is said about how they move. */
+const TALK_PROMPT = "A person talking to the camera with natural expressions, blinking and slight head movement.";
+/** How long a talking video of this much speech takes, in seconds (measured on an RTX 3060 12 GB). */
+export const talkSecs = (seconds: number) => TALK_LOAD_SECS + TALK_PART_SECS * talkParts(seconds);
 
 /** Chat's /song: a song in this style with these lyrics (empty: an instrumental). `song` sets its tempo, key or
  *  language for this one song; its length is the saved setting. Resolves with the saved file. */
