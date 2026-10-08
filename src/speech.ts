@@ -133,6 +133,29 @@ async function synth(text: string, gen: number): Promise<AudioBuffer | null> {
   }
 }
 
+/** The whole line spoken in a voice (Kokoro, or a VoxCPM2 one, cloned ones too) as a WAV file, for a talking video. */
+export async function synthesize(text: string, v: string): Promise<Blob> {
+  const vox = isVox(v);
+  let r: Response;
+  try {
+    r = await http(`${vox ? VOICE_SERVER : KOKORO}/v1/audio/speech`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(
+        vox ? { model: "voxcpm2", input: text, voice: v.slice(4), response_format: "wav" } : { model: "kokoro", input: text, voice: v, response_format: "wav", speed: 1.0 },
+      ),
+    });
+  } catch (e) {
+    const who = vox ? "the voice server (VoxCPM2)" : "Kokoro";
+    throw new Error(errMsg(e) === "not reachable" ? `${who} isn't running (start the services)` : errMsg(e));
+  }
+  if (!r.ok) {
+    const detail = ((await r.json().catch(() => ({}))) as any).detail;
+    throw new Error(detail ? String(detail) : `${vox ? "the voice server" : "Kokoro"} answered ${r.status}`);
+  }
+  return new Blob([await r.arrayBuffer()], { type: "audio/wav" });
+}
+
 const onError: ((msg: string) => void)[] = [];
 /** Called with a message when speech fails (shown as a toast). */
 export function onSpeechError(fn: (msg: string) => void) {

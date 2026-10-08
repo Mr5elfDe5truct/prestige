@@ -782,6 +782,16 @@ dialog.characters[open] { display: flex; flex-direction: column; gap: 12px; }
 .ch-face img { width: 100%; height: 100%; object-fit: cover; }
 .ch-fields { flex: 1; min-width: 0; }
 .ch-fields label:first-child { margin-top: 0; }
+/* Make it talk: the picture beside what to say, the voice and how they move. */
+.sheet.talk { width: min(620px, calc(100vw - 32px)); }
+.talk-top { display: flex; gap: 16px; align-items: flex-start; }
+.talk-top img { width: 150px; max-height: 220px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); flex-shrink: 0; }
+.talk-fields { flex: 1; min-width: 0; }
+.talk-fields label:first-child { margin-top: 0; }
+.talk-fields select, .talk-fields input { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font: 13px var(--body); padding: 8px 10px; text-transform: none; letter-spacing: 0; }
+.talk-fields textarea:disabled, .talk-fields select:disabled { opacity: .45; }
+.talk-file-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+@media (max-width: 560px) { .talk-top { flex-direction: column; } .talk-top img { width: 100%; max-height: 200px; } }
 .ch-voice-row { display: flex; gap: 8px; align-items: center; }
 .ch-voice-row select { flex: 1; min-width: 0; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font: 13px var(--body); padding: 8px; text-transform: none; letter-spacing: 0; }
 .ch-memory { display: flex; flex-direction: column; gap: 4px; max-height: 180px; overflow-y: auto; }
