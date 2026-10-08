@@ -87,14 +87,17 @@ type GenMode =
   | "talk"
   | "select"
   | "cutout"
-  | "vidcut";
+  | "vidcut"
+  | "upimage"
+  | "upvideo";
 
 // How a workflow takes the generation settings: an image model with a latent size and batch, an edit
 // (size follows the picture), LTX with a 2× upscale pass ("ltx") or without ("ltx1"), Wan's two samplers,
 // Wan 2.2 SVI's chained shots ("svi"), an ACE-Step song ("song"), Pixal3D turning a picture into a textured 3D model ("model3d"),
 // InfiniteTalk making a picture speak a voice recording ("talk"), SAM 3.1 selecting something in a picture ("select", not
 // queued), a picture cut out onto transparent ("cutout"), or SAM 3.1 tracking a subject through a video ("vidcut").
-type Family = "image" | "edit" | "ltx" | "ltx1" | "wan" | "svi" | "song" | "model3d" | "talk" | "select" | "cutout" | "vidcut";
+// SeedVR2 sharpening a picture or a video to 1080p or 4K ("upscale").
+type Family = "image" | "edit" | "ltx" | "ltx1" | "wan" | "svi" | "song" | "model3d" | "talk" | "select" | "cutout" | "vidcut" | "upscale";
 
 interface Mode {
   file: string;
@@ -124,6 +127,18 @@ export const TALK_MAX_SECONDS = 30;
 /* SAM 3.1 tracking a subject through a video, measured on an RTX 3060 12 GB: 8 s at 448×640 (199 frames) in 123 s,
  * peak 4.0 GB. On the RTX 2060 6 GB it took 117 s at 3.0 GB, so a second card can run it (see segment). */
 const VIDCUT_SECS = 15;
+
+/* SeedVR2 on an RTX 3060 12 GB (nvidia-smi every 2 s): a 1024² picture to 1080p in 9 s, to 4K (2160²) in 15 s with
+ * the 3B model at 6.3 GB, or with the 7B at 10.6 GB (and a 832×1216 portrait to 2160×3156 in 18 s at 10.5 GB); the 7B is
+ * more faithful (SSIM 0.92 against the original, 0.86 for the 3B) at the same speed.
+ * Videos to 1080p with the 3B: sampling is quick (~3 s per 21 frames); SeedVR2's VAE is what takes the time, ~5 s a
+ * frame at 1620×1080. 2 s of 768×512 took 378 s with the template's 512 px tiles, 267 s with 1024 px tiles and 128-frame
+ * temporal tiles (7.1 GB), 240 s untiled (7.8 GB, but that grows with the length). SeedVR2's own automatic chunking
+ * picked 1 frame per chunk at 1080p, so chunks are set to 21 frames, which keeps the frames consistent. */
+const UPSCALE_IMAGE_SECS = 20;
+const UPSCALE_VIDEO_SECS = 130;
+/** What an upscale's shorter side becomes. */
+export type UpscaleSize = 1080 | 2160;
 
 // The nodes in the stack's exported API workflows (workflows\*.api.json) that the settings go into.
 const QWEN_STEPS = { draft: 12, standard: 20, high: 30, max: 40 };
@@ -342,6 +357,30 @@ const MODES: Record<GenMode, Mode> = {
     imageNode: "2",
     imageKey: "file",
   },
+  // Upscale and enhance: SeedVR2 (ByteDance, one-step diffusion restoration, ComfyUI's native nodes, 0.38's faster
+  // version) redraws a picture at 1080p or 4K with real detail, in tiles so it fits 12 GB
+  // (workflows\seedvr2-upscale-image.api.json). Pictures use the 7B model; secs is for 4K.
+  upimage: {
+    file: "seedvr2-upscale-image.api.json",
+    label: "SeedVR2",
+    family: "upscale",
+    promptNode: "",
+    seed: ["9", "seed"],
+    secs: UPSCALE_IMAGE_SECS,
+    imageNode: "1",
+  },
+  // A video to 1080p with the 3B model, a few frames at a time so they stay consistent
+  // (workflows\seedvr2-upscale-video.api.json). secs is per second of video.
+  upvideo: {
+    file: "seedvr2-upscale-video.api.json",
+    label: "SeedVR2",
+    family: "upscale",
+    promptNode: "",
+    seed: ["10", "seed"],
+    secs: UPSCALE_VIDEO_SECS,
+    imageNode: "1",
+    imageKey: "file",
+  },
 };
 
 /* ACE-Step 1.5 turbo on an RTX 3060 12 GB (ComfyUI's log and nvidia-smi): its 1.7B language model writes the audio codes
@@ -389,6 +428,19 @@ const MODEL3D_STEPS: Record<string, string> = {
 // part's talk node, scheduler, sampler and decode, and the frames the video is made from. Each part is 81 frames at
 // 25 fps and carries on from the last 9 frames before it.
 const TALK = { audio: "8", encode: "9", talk: "12", scheduler: "14", sampler: "17", decode: "18", frames: "20", fps: 25, part: 81, motion: 9 };
+/** What an upscale's progress line says. */
+const UPSCALE_STEPS: Record<string, string> = {
+  ResizeImageMaskNode: "Resizing",
+  VAEEncodeTiled: "Encoding in tiles",
+  SeedVR2TemporalChunk: "Splitting the video into chunks",
+  KSampler: "Restoring detail",
+  SeedVR2TemporalMerge: "Joining the chunks",
+  VAEDecodeTiled: "Decoding in tiles",
+  SeedVR2PostProcessing: "Matching the colours",
+  CreateVideo: "Making the video",
+  SaveVideo: "Saving the video",
+  SaveImage: "Saving the picture",
+};
 /** What a cut-out's progress line says. */
 const CUT_STEPS: Record<string, string> = {
   RemoveBackground: "Finding the subject",
@@ -600,7 +652,7 @@ function plan(gm: GenMode, src: Source | null = srcAsset, o?: Override, song?: P
   const m = modeOf(gm);
   let p: Omit<Plan, "warn">;
   // Picture to 3D: one model per picture; its time and VRAM were measured (see MODES.model3d).
-  if (m.family === "model3d" || m.family === "select" || m.family === "cutout") return { w: 0, h: 0, count: 1, load: 0, secs: m.secs, warn: "" };
+  if (m.family === "model3d" || m.family === "select" || m.family === "cutout" || m.family === "upscale") return { w: 0, h: 0, count: 1, load: 0, secs: m.secs, warn: "" };
   if (m.family === "vidcut") return { w: 0, h: 0, count: 1, load: 0, secs: m.secs * 8, warn: "" }; // per second of video (videoCutout)
   if (m.family === "song") {
     // Measured (see SONG_FIXED_SECS): the same ~5.3 GB at every length, so only a small card gets a warning.
@@ -1490,6 +1542,13 @@ function openLightbox(a: Asset) {
   ($("#lb-inpaint") as HTMLButtonElement).hidden = a.kind !== "image" || !workflows.inpaint;
   $("#lb-inpaint").onclick = () => paintToChange(a);
   $("#lb-animate").onclick = () => startFrom(a, "video");
+  // One button to sharpen it: 4K for a picture (1080p when that's all it lacks), 1080p for a video.
+  const up = upscaleItems(a).filter((x): x is Exclude<MenuItem, "-"> => x !== "-").pop();
+  ($("#lb-upscale") as HTMLButtonElement).hidden = !up;
+  if (up) {
+    $("#lb-upscale").textContent = up.label;
+    $("#lb-upscale").onclick = up.run;
+  }
   ($("#lb-reuse") as HTMLButtonElement).disabled = !a.prompt;
   $("#lb-reveal").onclick = () => revealFile(a);
   $("#lb-copy").onclick = () => copy(a.prompt || "");
@@ -1542,6 +1601,37 @@ function paintToChange(a: Asset, selecting = false) {
       if (errMsg(e) !== "stopped") deps.toast(`Couldn't change it: ${errMsg(e)}`, "warn");
     }
   }, { select, cutout, selecting });
+}
+
+/** The Upscale menu items a render gets: 1080p and 4K for a picture smaller than that, 1080p for a video. */
+function upscaleItems(a: Asset): MenuItem[] {
+  const short = a.width && a.height ? Math.min(a.width, a.height) : 0;
+  const out: MenuItem[] = [];
+  if (a.kind === "image" && workflows.upimage) {
+    if (short < 1080) out.push({ label: "Upscale to 1080p", run: () => upscale(a, 1080), key: "SeedVR2" });
+    if (short < 2160) out.push({ label: "Upscale to 4K", run: () => upscale(a, 2160), key: "SeedVR2" });
+  }
+  if (a.kind === "video" && workflows.upvideo && short < 1080) out.push({ label: "Upscale to 1080p", run: () => upscale(a, 1080), key: "SeedVR2" });
+  return out;
+}
+
+/** Upscale and enhance: SeedVR2 redraws the picture (or every frame of the video) at 1080p or 4K. The result goes into
+ *  the gallery next to the original and opens when it's done. */
+async function upscale(a: Asset, size: UpscaleSize) {
+  closeLightbox();
+  const video = a.kind === "video";
+  const name = size === 1080 ? "1080p" : "4K";
+  const secs = video ? MODES.upvideo.secs * Math.max(1, await videoSeconds(a.path)) : MODES.upimage.secs;
+  deps.toast(`Upscaling to ${name}: ${aboutTime(secs)}. It opens when it's done.`);
+  try {
+    const out = await run(video ? "upvideo" : "upimage", `${a.prompt || a.name}`, a, { upscale: size }, undefined, {
+      from: "Upscale",
+      title: `${a.name} to ${name}`,
+    });
+    if (out[0]) openRender(out[0].path);
+  } catch (e) {
+    if (errMsg(e) !== "stopped") deps.toast(`Couldn't upscale it: ${errMsg(e)}`, "warn");
+  }
 }
 
 /** Puts a mask in ComfyUI's input folder (named from its content). */
@@ -1786,6 +1876,7 @@ function showMenu(e: MouseEvent, a: Asset) {
     ...(image && workflows.select ? [{ label: "Select to change or cut out…", run: () => paintToChange(a, true), key: "SAM 3.1" }] : []),
     ...(image && workflows.cutout ? [{ label: "Remove background", run: () => removeBackground(a), key: "transparent PNG" }] : []),
     ...(a.kind === "video" && workflows.vidcut ? [{ label: "Cut out a subject…", run: () => videoCutout(a), key: "green screen" }] : []),
+    ...upscaleItems(a),
     ...(image && (workflows.animate || workflows.long) ? [{ label: "Animate (image → video)…", run: () => startFrom(a, "video") }] : []),
     ...(image && (workflows.ref || workflows.reffast) ? [{ label: "Use as reference image", run: () => useAsReference(a) }] : []),
     ...(image && workflows.model3d ? [{ label: "Make a 3D model", run: () => makeModel(a), key: "Pixal3D" }] : []),
@@ -1931,6 +2022,7 @@ interface QueueOpts {
   song?: Partial<MusicSettings>; // a song's tempo, key or language over the saved settings (chat's songwriter)
   talk?: { audio: Blob; seconds: number }; // a talking video's voice recording and its length
   video?: Partial<VideoSettings>; // a video's length, size or quality over the saved settings (a Director shot)
+  upscale?: UpscaleSize; // an upscale's shorter side
 }
 
 /** ACE-Step's way of asking for no vocals. */
@@ -1997,7 +2089,7 @@ let current: QJob | null = null;
 let jobIds = 1;
 
 /** Renders whose workflow has no Studio settings (and so no seed setting of their own). */
-const NO_SETTINGS: Family[] = ["talk", "select", "cutout", "vidcut"];
+const NO_SETTINGS: Family[] = ["talk", "select", "cutout", "vidcut", "upscale"];
 
 /** Builds a render's workflow now, with the current settings and a fresh seed (it may run much later). */
 function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpts) {
@@ -2016,6 +2108,11 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
     if (!opts.mask) throw new Error("nothing is painted");
     inpaintGraph(graph, opts.mask);
   }
+  // An upscale's size: the shorter side becomes 1080 or 2160 (the longer one follows the shape).
+  if (m.family === "upscale") {
+    graph["3"].inputs["resize_type.shorter_size"] = opts.upscale ?? 2160;
+    graph[gm === "upvideo" ? "15" : "12"].inputs.filename_prefix = `${gm === "upvideo" ? "video/" : ""}upscaled-${opts.upscale === 1080 ? "1080p" : "4k"}`;
+  }
   // A cut-out of a selection: its mask in place of BiRefNet's.
   if (gm === "cutout" && opts.mask) {
     graph["2"] = { class_type: "LoadImageMask", inputs: { image: opts.mask.name, channel: "red" } };
@@ -2031,6 +2128,7 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
       (m.family === "model3d" && MODEL3D_STEPS[n.class_type]) ||
       (m.family === "talk" && TALK_STEPS[n.class_type]) ||
       ((m.family === "cutout" || m.family === "vidcut") && CUT_STEPS[n.class_type]) ||
+      (m.family === "upscale" && UPSCALE_STEPS[n.class_type]) ||
       n.class_type;
   if (m.family === "talk") talkLabels(nodes, p.shots!);
   return { graph, nodes, seed, count: p.count, label: modeOf(gm).label, audio: opts.talk?.audio };
