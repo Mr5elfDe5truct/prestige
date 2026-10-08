@@ -2722,7 +2722,7 @@ function actsFor(a: Asset): string[] {
 
 /** A character's face, small, for the phone's picker (faces are up to 2048 px). */
 const faceThumbs = new Map<string, string>();
-async function faceThumb(c: Parameters<typeof faceBlob>[0]) {
+export async function faceThumb(c: Parameters<typeof faceBlob>[0]) {
   const key = `${c.id}:${c.face!.length}`;
   let t = faceThumbs.get(key);
   if (!t) {

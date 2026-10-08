@@ -173,6 +173,27 @@
       .sheet-menu > div { width: 100%; background: var(--panel); border-top: 1px solid var(--line); border-radius: 16px 16px 0 0; padding: 10px 10px calc(10px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; }
       .sheet-menu button { text-align: left; background: none; border: 0; padding: 13px 12px; border-radius: 8px; font-size: 15px; }
       .sheet-menu button:active { background: var(--panel-2); }
+      .sheet-menu button img, .sheet-menu button .ini { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; vertical-align: middle; margin-right: 10px; display: inline-grid; place-items: center; background: var(--panel-2); border: 1px solid var(--line); font-size: 13px; color: var(--gold); }
+      .sheet-menu button.on { color: var(--gold); }
+      button.brand { background: none; border: 0; padding: 0; text-align: left; color: inherit; }
+      .gpu { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+      .gpu h4 { grid-column: 1 / -1; margin: 0; font-size: 13px; color: var(--gold); font-weight: 600; }
+      .meter { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+      .meter small { display: block; color: var(--muted); font-size: 11px; }
+      .meter b { font: 600 16px var(--mono); }
+      .meter .bar, .ram .bar { display: block; height: 4px; background: var(--line); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+      .meter .bar i, .ram .bar i { display: block; height: 100%; background: var(--red); }
+      .meter.hot b { color: #ffb36b; }
+      .svc { display: grid; grid-template-columns: 12px 1fr auto; gap: 6px 8px; align-items: center; font-size: 13px; margin-top: 8px; }
+      .svc i { width: 9px; height: 9px; border-radius: 50%; background: #6b5a52; }
+      .svc i.ok { background: var(--ok); }
+      .svc .port { font: 11px var(--mono); color: var(--muted); }
+      .mrow { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 13.5px; }
+      .mrow:first-child { border-top: 0; }
+      .mrow .t { flex: 1; min-width: 0; }
+      .mrow small { display: block; color: var(--muted); font-size: 11.5px; }
+      .mrow.loaded b { color: var(--gold); }
+      .mrow .btn { padding: 6px 12px; font-size: 13px; }
       .sheet-menu .title { font-size: 12px; color: var(--muted); padding: 6px 12px; }
       .toast { position: fixed; z-index: 30; left: 50%; bottom: 90px; transform: translateX(-50%); background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; font-size: 13px; max-width: 90vw; }
     </style>
@@ -189,7 +210,7 @@
 
     <header id="top" hidden>
       <button class="icon" id="menu" aria-label="Chats"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10" /></svg></button>
-      <div class="brand"><b>Prestige</b><small id="who">by R.G. Studios</small></div>
+      <button type="button" class="brand" id="persona" aria-label="Who to talk to"><b>Prestige</b><small id="who">by R.G. Studios</small></button>
       <span class="grow"></span>
       <button class="icon" id="call" aria-label="Talk (voice and Live)" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4" /></svg></button>
       <select id="model" aria-label="Model"></select>
@@ -198,6 +219,7 @@
       <button type="button" data-tab="chat" class="sel">Chat</button>
       <button type="button" data-tab="studio">Studio</button>
       <button type="button" data-tab="renders">Renders<span class="count" id="q-count" hidden></span></button>
+      <button type="button" data-tab="system">System</button>
     </nav>
     <main id="thread" hidden></main>
 
@@ -231,6 +253,14 @@
         <div class="row"><b style="flex:1">Render queue</b><button type="button" class="linkish" id="st-q-clear">clear finished</button></div>
         <div class="q" id="st-queue"></div>
       </div>
+    </section>
+
+    <!-- System: the PC's cards, RAM, services and models (load and unload). -->
+    <section class="pane" id="system" hidden>
+      <div id="sys-gpus" style="display:flex;flex-direction:column;gap:10px"></div>
+      <div class="card ram" id="sys-ram" hidden></div>
+      <div class="card"><b>Models</b><div id="sys-models"><p class="muted">Loading…</p></div></div>
+      <div class="card"><b>Services</b><div class="svc" id="sys-svc"></div></div>
     </section>
 
     <!-- Renders: everything in ComfyUI's output folder on the PC. -->
@@ -300,6 +330,7 @@
         <div style="display:flex;gap:8px"><button class="btn primary" id="new-chat" style="flex:1">New chat</button><button class="btn" id="close-drawer">Close</button></div>
         <div class="list" id="chats"></div>
         <span class="grow"></span>
+        <button class="btn" id="drawer-persona">Characters</button>
         <button class="btn" id="change-pc" hidden>Connect to another PC</button>
         <button class="btn" id="unpair">Unpair this phone</button>
       </div>
@@ -369,7 +400,7 @@
 
       // ---------- pairing ----------
       function showPair() {
-        ["#top", "#tabs", "#thread", "#bottom", "#studio", "#renders"].forEach((s) => ($(s).hidden = true));
+        ["#top", "#tabs", "#thread", "#bottom", "#studio", "#renders", "#system"].forEach((s) => ($(s).hidden = true));
         $("#pair").hidden = false;
         const m = location.hash.match(/code=(\d{6})/);
         if (m) $("#code").value = m[1];
@@ -517,7 +548,7 @@
           const cur = sel.value || s.model;
           sel.innerHTML = (s.models || []).map((m) => `<option value="${esc(m.key)}">${esc(m.name)}</option>`).join("") || `<option value="">No models</option>`;
           if (cur) sel.value = cur;
-          $("#who").textContent = s.character ? `talking to ${s.character}` : "by R.G. Studios";
+          $("#who").textContent = s.character ? `talking to ${s.character} ▾` : "by R.G. Studios ▾";
           pcVoice = s.voice || "af_heart";
           liveAvailable = !!s.live;
           setBusy(!!s.busy);
@@ -1411,6 +1442,12 @@
         $("#thread").hidden = $("#bottom").hidden = t !== "chat";
         $("#studio").hidden = t !== "studio";
         $("#renders").hidden = t !== "renders";
+        $("#system").hidden = t !== "system";
+        clearInterval(sysTimer);
+        if (t === "system") {
+          loadSystem();
+          sysTimer = setInterval(() => !document.hidden && loadSystem(), 3000);
+        }
         if (t === "studio") studioInfo();
         if (t === "renders" && (!gallery.loaded || gallery.stale)) loadGallery(true);
         if (t === "chat") $("#thread").scrollTop = $("#thread").scrollHeight;
@@ -1425,10 +1462,14 @@
         return new Promise((res) => {
           const box = $("#pick-list");
           box.innerHTML = title ? `<div class="title">${esc(title)}</div>` : "";
-          for (const [v, label, cls] of options) {
+          for (const [v, label, cls, pic] of options) {
             const b = document.createElement("button");
             b.type = "button";
-            b.textContent = label;
+            // A face (or the first letter) beside a character's name.
+            if (pic !== undefined) {
+              b.innerHTML = pic === null ? `<img alt="" src="/icon.png" />` : pic ? `<img alt="" src="data:image/jpeg;base64,${pic}" />` : `<span class="ini">${esc(label.trim().charAt(0).toUpperCase())}</span>`;
+              b.append(label);
+            } else b.textContent = label;
             if (cls) b.className = cls;
             b.addEventListener("click", () => done(v));
             box.appendChild(b);
@@ -1878,6 +1919,101 @@
             gallery.total = Math.max(0, gallery.total - 1);
             drawGallery(true);
           }
+        } catch (e) {
+          toast(e.message);
+        }
+      }
+
+      // ---------- characters: who Prestige talks as ----------
+      async function pickPersona() {
+        $("#drawer").hidden = true;
+        let r;
+        try {
+          r = await ask("characters.list");
+        } catch (e) {
+          return toast(e.message);
+        }
+        const opts = [["", "Prestige", !r.active ? "on" : "", null]];
+        for (const c of r.list) opts.push([c.id, c.name, c.id === r.active ? "on" : "", c.thumb || ""]);
+        const v = await choose(r.list.length ? "Talk to" : "Make characters in Prestige on the PC (the picker beside the model menu).", opts);
+        if (v === null || v === (r.active || "")) return;
+        try {
+          await ask("characters.choose", { id: v || null });
+          toast(v ? `Now talking to ${r.list.find((c) => c.id === v).name}.` : "Back to Prestige.");
+          loadState();
+        } catch (e) {
+          toast(e.message);
+        }
+      }
+      $("#persona").addEventListener("click", pickPersona);
+      $("#drawer-persona").addEventListener("click", pickPersona);
+
+      // ---------- System: the PC's cards, RAM, services and models ----------
+      let sysTimer = 0;
+      let sysBusy = false;
+      async function loadSystem() {
+        if (sysBusy) return;
+        sysBusy = true;
+        try {
+          drawSystem(await ask("system.status"));
+        } catch (e) {
+          $("#sys-models").innerHTML = `<p class="muted">${esc(e.message)}</p>`;
+        } finally {
+          sysBusy = false;
+        }
+      }
+      function drawSystem(s) {
+        const meter = (label, val, pct, sub = "", hot = false) =>
+          `<div class="meter${hot ? " hot" : ""}"><small>${esc(label)}</small><b>${esc(val)}</b>` +
+          (pct != null ? `<span class="bar"><i style="width:${Math.max(0, Math.min(100, pct))}%"></i></span>` : "") +
+          (sub ? `<small>${esc(sub)}</small>` : "") +
+          `</div>`;
+        $("#sys-gpus").innerHTML = s.gpus.length
+          ? s.gpus
+              .map(
+                (g) =>
+                  `<div class="card gpu"><h4>${esc(g.name)}</h4>` +
+                  meter("GPU load", `${g.util}%`, g.util) +
+                  meter("VRAM", `${g.usedGB} / ${g.totalGB} GB`, (g.usedGB / g.totalGB) * 100, `${Math.max(0, g.totalGB - g.usedGB).toFixed(1)} GB free`, g.usedGB / g.totalGB > 0.92) +
+                  meter("Temperature", `${g.temp}°C`, null, "", g.hot) +
+                  meter("Power", g.power != null ? `${g.power} W` : "n/a", null) +
+                  `</div>`,
+              )
+              .join("")
+          : `<p class="muted">No GPU readings from the PC yet.</p>`;
+        $("#sys-ram").hidden = !s.ram;
+        if (s.ram) $("#sys-ram").innerHTML = `<div class="row"><b style="flex:1">System RAM</b><span>${s.ram.usedGB} / ${s.ram.totalGB} GB</span></div><span class="bar"><i style="width:${(s.ram.usedGB / s.ram.totalGB) * 100}%"></i></span>`;
+        const box = $("#sys-models");
+        box.innerHTML = s.models.length ? "" : `<p class="muted">No models answered. Start the services on the PC.</p>`;
+        for (const m of s.models) {
+          const row = document.createElement("div");
+          row.className = `mrow${m.state === "loaded" ? " loaded" : ""}`;
+          const state = { loading: "Loading…", loaded: "In VRAM", asleep: "Asleep", disk: "On disk" }[m.state];
+          row.innerHTML = `<span class="t"><b></b><small></small></span><button type="button" class="btn"></button>`;
+          row.querySelector("b").textContent = m.name;
+          row.querySelector("small").textContent = [m.role, m.size, m.backend, state].filter(Boolean).join(" · ");
+          const b = row.querySelector("button");
+          b.textContent = m.state === "loaded" ? "Unload" : "Load";
+          b.disabled = m.state === "loading";
+          b.addEventListener("click", () => modelAct(m, m.state === "loaded" ? "unload" : "load"));
+          box.appendChild(row);
+        }
+        $("#sys-svc").innerHTML = s.services.map((x) => `<i class="${x.ok ? "ok" : ""}" title="${x.ok ? "running" : "not answering"}"></i><span>${esc(x.name)}</span><span class="port">${esc(x.port)}</span>`).join("");
+      }
+      /** Load or unload a model; one that may not fit asks first, as on the PC. */
+      async function modelAct(m, action, choice) {
+        try {
+          const r = await ask(`system.${action}`, { key: m.key, choice });
+          if (r.ask) {
+            const opts = [["load", "Load it anyway"]];
+            if (r.others) opts.push(["free", "Unload the others, then load it"]);
+            opts.push(["cancel", "Cancel"]);
+            const c = await choose(r.ask, opts);
+            if (c && c !== "cancel") return modelAct(m, action, c);
+            return;
+          }
+          if (r.message) toast(r.message);
+          loadSystem();
         } catch (e) {
           toast(e.message);
         }
