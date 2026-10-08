@@ -1,5 +1,5 @@
-// Mesa, molded: things grow into place. The look itself is mesa.css (on while body has the "mesa" class, which theme.ts
-// sets from Settings → Appearance); this adds the motion. Panels rise out of the ground when the launch screen lifts and
+// Mesa, molded: things grow into place. The look itself is mesa.css (the Molded style: body[data-style="molded"], which
+// theme.ts sets from Settings → Appearance → Style); this adds the motion. Panels rise out of the ground when the launch screen lifts and
 // when a section opens, popovers and dialogs grow open from the button that opened them (and fold back into it when
 // they close), and new messages grow into the thread. It only watches the page: the rest of the app opens and closes
 // things as it always has, by their `hidden` attribute or dialog.showModal().
@@ -17,7 +17,7 @@ const POPOVERS: [string, string][] = [
 /** Panels that rise into place when a section opens. */
 const PANELS = ".composer-dock, .card, .create, .rq, .gallery, .voice-stage, .update-banner, .offline";
 
-const on = () => document.body.classList.contains("mesa") && !matchMedia("(prefers-reduced-motion: reduce)").matches;
+const on = () => document.body.dataset.style === "molded" && !matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /** Plays one of mesa.css's animation classes, and takes it off again when it ends (the last frame clips the shadows). */
 const runs = new WeakMap<HTMLElement, Record<string, number>>();
