@@ -16,7 +16,7 @@ import { initSystem, onGpus, showSystem, unloadAll } from "./system";
 import { ollamaCtx, onPlanChange, readGpus, refreshPlan, shortName, type Gpu } from "./gpus";
 import {
   allowRenders, cancelRender, chatSettings, editLabel, editMedia, initStudio, modelLabel, openRender, renderMedia, renderMenu, renderModel, renderSong, renderTalk,
-  renderShot, showStudio, songSeconds, talkSecs, videoQuality, type MediaKind,
+  onQueueChange, phoneQueue, phoneStudio, renderShot, showStudio, songSeconds, talkSecs, videoQuality, type MediaKind,
 } from "./studio";
 import { DIRECTOR_ASK, DIRECTOR_CMD, SHOT_SECONDS, SONG_SECS, askedSeconds, directorSecs, lyricsSrt, planVideo } from "./director";
 import { askSpeech, speakLine } from "./talking";
@@ -50,7 +50,7 @@ import {
   activeCharacter, characterById, characterMemory, characterPrompt, faceScene, initCharacters, remember, renderPicker, setCharacterVoice, voiceOf, wantsFace,
 } from "./characters";
 import type { RefKind } from "./reference";
-import { initPhone, phoneOn, phonePush, phoneState, refreshPhone } from "./phone";
+import { initPhone, onPhoneAsk, phoneOn, phonePush, phoneState, refreshPhone } from "./phone";
 import { initToolStore, openToolStore } from "./toolstore";
 import { listen } from "@tauri-apps/api/event";
 
@@ -2375,6 +2375,30 @@ async function fromPhone(p: PhoneSend) {
   send(p.text, { hooks });
 }
 
+/** Phones see the render queue as it changes: at most once a second while a render's progress moves, straight away
+ *  when one is added or finishes (and then the gallery is new too). */
+let queueSent = 0;
+let queueTimer: number | undefined;
+let queueShape = "";
+function phoneQueueChanged() {
+  if (!phoneOn()) return;
+  const q = phoneQueue();
+  const shape = q.map((j) => `${j.id}:${j.state}`).join(",");
+  const send = () => {
+    queueSent = Date.now();
+    phonePush({ type: "queue", queue: phoneQueue() });
+  };
+  clearTimeout(queueTimer);
+  if (shape !== queueShape) {
+    const before = new Set(queueShape.split(","));
+    const finished = q.some((j) => j.state === "done" && !before.has(`${j.id}:done`));
+    queueShape = shape;
+    send();
+    if (finished) phonePush({ type: "gallery" });
+  } else if (Date.now() - queueSent >= 1000) send();
+  else queueTimer = window.setTimeout(send, 1000 - (Date.now() - queueSent));
+}
+
 interface PhoneSend {
   chatId?: string | null;
   text: string;
@@ -3030,6 +3054,9 @@ async function main() {
       busy?.abort();
       stopSpeaking();
     });
+    // Studio, Renders and the render queue on the phone.
+    onPhoneAsk("studio", (action, args) => phoneStudio(action, args));
+    onQueueChange(phoneQueueChanged);
   }
   updateToolsButton();
   updateSpeakButton();

@@ -527,6 +527,7 @@ pub fn run() {
             phone::phone_forget,
             phone::phone_push,
             phone::phone_set_state,
+            phone::phone_answer,
             toolstore::tools_extra_get,
             toolstore::tools_extra_set,
             toolstore::tools_setup,

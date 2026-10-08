@@ -110,6 +110,70 @@
       .call-bar { display: flex; gap: 12px; width: 100%; justify-content: center; }
       .call-bar .btn { min-width: 84px; }
       .call-bar .end { background: var(--red); border-color: var(--red); color: #fff; font-weight: 600; }
+      /* Chat · Studio · Renders */
+      .tabs { display: flex; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--bg); }
+      .tabs button { flex: 1; background: none; border: 0; border-radius: 999px; padding: 7px 0; color: var(--muted); font-size: 14px; position: relative; }
+      .tabs button.sel { background: var(--panel-2); color: var(--fg); font-weight: 600; }
+      .tabs .count { display: inline-block; min-width: 18px; margin-left: 4px; padding: 0 5px; border-radius: 999px; background: var(--red); color: #fff; font: 11px/18px var(--mono); }
+      .pane { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 12px; padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
+      .seg.wide { width: 100%; }
+      .seg.wide button { flex: 1; padding: 9px 0; }
+      .seg.small button { padding: 6px 12px; font-size: 13px; }
+      .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+      .row { display: flex; align-items: center; gap: 10px; }
+      .row img.pic { width: 64px; height: 64px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); flex: none; }
+      .row .what { flex: 1; font-size: 13px; color: var(--muted); }
+      .x { width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel-2); padding: 0; flex: none; }
+      .pane textarea { width: 100%; flex: none; border-radius: 12px; font-size: 15px; min-height: 84px; max-height: none; }
+      .pane textarea.lyrics { min-height: 150px; font: 13.5px/1.45 var(--mono); }
+      .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+      .chips span, .chips button { font: 12px var(--mono); border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px; color: var(--muted); background: none; }
+      .chips .model { color: var(--gold); border-color: var(--gold); }
+      .warn { font-size: 13px; color: #ffb36b; margin: 0; }
+      .muted { color: var(--muted); font-size: 12.5px; margin: 0; }
+      .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .fields label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); min-width: 0; }
+      .fields label.full { grid-column: 1 / -1; }
+      .fields select, .fields input { max-width: none; width: 100%; border-radius: 10px; padding: 8px; font-size: 14px; background: var(--panel-2); color: var(--fg); border: 1px solid var(--line); }
+      .fields small { font-size: 11px; }
+      .seed-row { display: flex; gap: 6px; }
+      .seed-row input { flex: 1; min-width: 0; }
+      .seed-row .btn { padding: 6px 10px; font-size: 12px; }
+      .linkish { background: none; border: 0; padding: 0; color: var(--muted); text-decoration: underline; font-size: 12.5px; }
+      .go { width: 100%; padding: 13px; font-size: 16px; }
+      .q { display: flex; flex-direction: column; gap: 8px; }
+      .q-row { display: flex; gap: 10px; align-items: center; font-size: 13px; }
+      .q-row .t { flex: 1; min-width: 0; }
+      .q-row b { display: block; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .q-row small { display: block; color: var(--muted); font-size: 11.5px; overflow-wrap: anywhere; }
+      .q-row > span:first-child { width: 18px; text-align: center; flex: none; }
+      .q-row .bar { display: block; height: 3px; background: var(--line); border-radius: 2px; margin-top: 4px; overflow: hidden; }
+      .q-row .bar i { display: block; height: 100%; background: var(--red); }
+      .q-row.failed small { color: #ff8a8a; }
+      .filters { display: flex; gap: 6px; overflow-x: auto; flex: none; }
+      .filters button { border: 1px solid var(--line); background: none; border-radius: 999px; padding: 5px 12px; font-size: 13px; color: var(--muted); flex: none; }
+      .filters button.sel { background: var(--red); border-color: var(--red); color: #fff; }
+      .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+      .tile { position: relative; aspect-ratio: 1; border: 0; padding: 0; border-radius: 8px; overflow: hidden; background: var(--panel-2); display: grid; place-items: center; color: var(--gold); }
+      .tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+      .tile svg { width: 34%; height: 34%; }
+      .tile .badge { position: absolute; left: 4px; bottom: 4px; font: 9px var(--mono); background: rgba(0, 0, 0, .7); color: #fff; border-radius: 4px; padding: 1px 4px; }
+      .tile .song-t { position: absolute; left: 6px; right: 6px; bottom: 20px; font-size: 10px; color: var(--muted); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .rv { position: fixed; inset: 0; z-index: 20; background: #000; display: flex; flex-direction: column; }
+      .rv .media { flex: 1; min-height: 0; display: grid; place-items: center; overflow: hidden; padding: env(safe-area-inset-top) 0 0; }
+      .rv .media img, .rv .media video { max-width: 100%; max-height: 100%; object-fit: contain; }
+      .rv .media .song-box { width: 100%; padding: 16px; display: flex; flex-direction: column; gap: 10px; max-height: 100%; overflow-y: auto; }
+      .rv .media pre { white-space: pre-wrap; font: 13px/1.5 var(--body); color: var(--fg); margin: 0; }
+      .rv .info { max-height: 46vh; overflow-y: auto; background: var(--panel); border-top: 1px solid var(--line); padding: 12px 14px calc(12px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 10px; }
+      .rv .info p { margin: 0; font-size: 13.5px; }
+      .rv .acts { display: flex; flex-wrap: wrap; gap: 6px; }
+      .rv .acts .btn { padding: 8px 11px; font-size: 13px; }
+      .btn.danger { color: #ff8a8a; }
+      .sheet-menu { position: fixed; inset: 0; z-index: 25; background: rgba(0, 0, 0, .55); display: flex; align-items: flex-end; }
+      .sheet-menu > div { width: 100%; background: var(--panel); border-top: 1px solid var(--line); border-radius: 16px 16px 0 0; padding: 10px 10px calc(10px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; }
+      .sheet-menu button { text-align: left; background: none; border: 0; padding: 13px 12px; border-radius: 8px; font-size: 15px; }
+      .sheet-menu button:active { background: var(--panel-2); }
+      .sheet-menu .title { font-size: 12px; color: var(--muted); padding: 6px 12px; }
       .toast { position: fixed; z-index: 30; left: 50%; bottom: 90px; transform: translateX(-50%); background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; font-size: 13px; max-width: 90vw; }
     </style>
   </head>
@@ -130,7 +194,54 @@
       <button class="icon" id="call" aria-label="Talk (voice and Live)" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4" /></svg></button>
       <select id="model" aria-label="Model"></select>
     </header>
+    <nav class="tabs" id="tabs" hidden>
+      <button type="button" data-tab="chat" class="sel">Chat</button>
+      <button type="button" data-tab="studio">Studio</button>
+      <button type="button" data-tab="renders">Renders<span class="count" id="q-count" hidden></span></button>
+    </nav>
     <main id="thread" hidden></main>
+
+    <!-- Studio: make images, videos and songs on the PC, with its settings, a reference picture and the render queue. -->
+    <section class="pane" id="studio" hidden>
+      <div class="seg wide" id="st-mode"><button type="button" data-mode="image" class="sel">Image</button><button type="button" data-mode="video">Video</button><button type="button" data-mode="music">Music</button></div>
+      <div class="card" id="st-src" hidden>
+        <div class="row"><img class="pic" id="st-src-img" alt="" /><span class="what" id="st-src-what"></span><button type="button" class="x" id="st-src-clear" aria-label="Stop using this picture">✕</button></div>
+      </div>
+      <div class="card" id="st-ref" hidden>
+        <div class="row" id="st-ref-empty">
+          <span class="what">Put a character or an item from your own picture into the scene.</span>
+          <button type="button" class="btn" id="st-ref-add">Reference image</button>
+        </div>
+        <div id="st-ref-set" hidden>
+          <div class="row"><img class="pic" id="st-ref-img" alt="" /><span class="what" id="st-ref-what"></span><button type="button" class="x" id="st-ref-clear" aria-label="Remove the reference">✕</button></div>
+          <div id="st-ref-picks" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px"></div>
+          <p class="muted" id="st-ref-consent" style="margin-top:8px"></p>
+        </div>
+      </div>
+      <textarea id="st-prompt" rows="3" placeholder="Describe an image…"></textarea>
+      <div id="st-lyrics-box" hidden>
+        <textarea id="st-lyrics" class="lyrics" placeholder="Lyrics with [Verse], [Chorus] and [Bridge] tags. Leave it empty for an instrumental."></textarea>
+        <button type="button" class="linkish" id="st-write" style="margin-top:6px">Write lyrics for me</button>
+      </div>
+      <div class="chips" id="st-chips"></div>
+      <p class="warn" id="st-warn" hidden></p>
+      <div class="card" id="st-settings" hidden></div>
+      <button type="button" class="btn primary go" id="st-go">Generate</button>
+      <div class="card" id="st-queue-card" hidden>
+        <div class="row"><b style="flex:1">Render queue</b><button type="button" class="linkish" id="st-q-clear">clear finished</button></div>
+        <div class="q" id="st-queue"></div>
+      </div>
+    </section>
+
+    <!-- Renders: everything in ComfyUI's output folder on the PC. -->
+    <section class="pane" id="renders" hidden>
+      <div class="filters" id="r-filters">
+        <button type="button" data-f="all" class="sel">All</button><button type="button" data-f="image">Images</button><button type="button" data-f="video">Videos</button><button type="button" data-f="audio">Songs</button><button type="button" data-f="model">3D</button>
+      </div>
+      <p class="muted" id="r-note"></p>
+      <div class="grid" id="r-grid"></div>
+      <button type="button" class="btn" id="r-more" hidden>Show more</button>
+    </section>
     <footer id="bottom" hidden>
       <div class="attach-row" id="attach-row" hidden></div>
       <form class="composer" id="composer">
@@ -140,7 +251,7 @@
         <button type="button" class="icon" id="stop" aria-label="Stop" hidden><svg viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="1" /></svg></button>
         <button type="submit" class="icon send" id="send" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h13M13 6l6 6-6 6" /></svg></button>
       </form>
-      <p class="hint" id="hint">Runs on your PC (shows there too) · /image, /video, /research and /edit work here</p>
+      <p class="hint" id="hint">Runs on your PC (shows there too) · /image, /video, /song, /research and /edit work here</p>
       <input type="file" id="file" accept="image/*" multiple hidden />
     </footer>
     <div class="menu" id="attach-menu" hidden>
@@ -162,6 +273,16 @@
         <button class="btn primary" id="viewer-save" type="button">Save to phone</button>
       </div>
     </section>
+    <section class="rv" id="rv" hidden>
+      <div class="media" id="rv-media"></div>
+      <div class="info">
+        <p id="rv-prompt"></p>
+        <p class="muted" id="rv-meta"></p>
+        <div class="acts" id="rv-acts"></div>
+        <div class="acts"><button type="button" class="btn" id="rv-close">Close</button><button type="button" class="btn primary" id="rv-save">Save to phone</button></div>
+      </div>
+    </section>
+    <div class="sheet-menu" id="pick-menu" hidden><div id="pick-list"></div></div>
     <section class="call" id="call-ui" hidden>
       <div class="seg" id="call-mode"><button type="button" data-mode="voice">Voice</button><button type="button" data-mode="live">Live</button></div>
       <video id="call-cam" playsinline muted autoplay hidden></video>
@@ -248,7 +369,7 @@
 
       // ---------- pairing ----------
       function showPair() {
-        ["#top", "#thread", "#bottom"].forEach((s) => ($(s).hidden = true));
+        ["#top", "#tabs", "#thread", "#bottom", "#studio", "#renders"].forEach((s) => ($(s).hidden = true));
         $("#pair").hidden = false;
         const m = location.hash.match(/code=(\d{6})/);
         if (m) $("#code").value = m[1];
@@ -464,6 +585,8 @@
           awaiting = false;
           if (!ev.busy) setBusy(false);
         } else if (ev.type === "state") loadState();
+        else if (ev.type === "queue") drawQueue(ev.queue || []);
+        else if (ev.type === "gallery") galleryChanged();
       }
 
       function connect() {
@@ -488,6 +611,9 @@
         if (!es || es.readyState === 2 || Date.now() - lastEvent > 25000) connect();
         loadState();
         if (chatId && !streaming) loadChat(chatId);
+        if (tab === "studio") studioInfo();
+        if (tab === "renders" && gallery.stale) loadGallery(true);
+        ask("studio.queue").then((r) => drawQueue(r.queue)).catch(() => {});
       }
       document.addEventListener("visibilitychange", () => {
         if (!document.hidden) catchUp();
@@ -881,15 +1007,20 @@
           row.appendChild(d);
         });
       }
-      /** A picture as a base64 JPEG, at most `max` pixels on its longer side. */
-      function jpeg(src, w, h, max = 1280, q = 0.85) {
+      /** A picture as a base64 JPEG, at most `max` pixels on its longer side, with its size. */
+      function sized(src, w, h, max = 1280, q = 0.85) {
         const k = Math.min(1, max / Math.max(w, h));
         const c = document.createElement("canvas");
         c.width = Math.round(w * k);
         c.height = Math.round(h * k);
-        c.getContext("2d").drawImage(src, 0, 0, c.width, c.height);
-        return c.toDataURL("image/jpeg", q).split(",")[1];
+        const g = c.getContext("2d");
+        // Transparent areas (cut-outs) become white rather than black.
+        g.fillStyle = "#fff";
+        g.fillRect(0, 0, c.width, c.height);
+        g.drawImage(src, 0, 0, c.width, c.height);
+        return { b64: c.toDataURL("image/jpeg", q).split(",")[1], w: c.width, h: c.height };
       }
+      const jpeg = (src, w, h, max, q) => sized(src, w, h, max, q).b64;
       async function fileToJpeg(file) {
         const bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
         try {
@@ -917,9 +1048,19 @@
       });
       $("#pick-photo").addEventListener("click", () => {
         $("#attach-menu").hidden = true;
+        photoFor = "chat";
         $("#file").click();
       });
+      // Photos go to the chat's message, or (from Studio) become the reference image.
+      let photoFor = "chat";
       $("#file").addEventListener("change", async () => {
+        if (photoFor === "ref") {
+          const f = $("#file").files[0];
+          $("#file").value = "";
+          photoFor = "chat";
+          if (f) setRefFromBlob(f);
+          return;
+        }
         for (const f of [...$("#file").files].slice(0, 4 - shots.length)) {
           try {
             shots.push(await fileToJpeg(f));
@@ -947,6 +1088,7 @@
       }
       $("#take-photo").addEventListener("click", () => {
         $("#attach-menu").hidden = true;
+        photoFor = "chat";
         camSheet(true);
       });
       $("#cam-close").addEventListener("click", () => camSheet(false));
@@ -957,10 +1099,16 @@
       $("#cam-shoot").addEventListener("click", () => {
         const v = $("#cam-video");
         if (!v.videoWidth) return;
-        shots.push(jpeg(v, v.videoWidth, v.videoHeight));
-        drawShots();
+        if (photoFor === "ref") {
+          photoFor = "chat";
+          setRef(sized(v, v.videoWidth, v.videoHeight, 2048, 0.92));
+        } else {
+          shots.push(jpeg(v, v.videoWidth, v.videoHeight));
+          drawShots();
+        }
         camSheet(false);
       });
+      $("#cam-close").addEventListener("click", () => (photoFor = "chat"));
 
       // ---------- a render, full screen (save it to the phone from here) ----------
       let viewing = null;
@@ -1252,12 +1400,497 @@
         $("#change-pc").addEventListener("click", () => app.setup());
       }
 
+      // ---------- Chat · Studio · Renders ----------
+      /** Asks Prestige on the PC to do something (phone.rs hands it to the app and brings back its answer). */
+      const ask = (action, args = {}) => api("/api/do", { method: "POST", body: JSON.stringify({ action, args }) });
+      let tab = localStorage.getItem("prestige-tab") || "chat";
+      function showTab(t) {
+        tab = t;
+        localStorage.setItem("prestige-tab", t);
+        document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("sel", b.dataset.tab === t));
+        $("#thread").hidden = $("#bottom").hidden = t !== "chat";
+        $("#studio").hidden = t !== "studio";
+        $("#renders").hidden = t !== "renders";
+        if (t === "studio") studioInfo();
+        if (t === "renders" && (!gallery.loaded || gallery.stale)) loadGallery(true);
+        if (t === "chat") $("#thread").scrollTop = $("#thread").scrollHeight;
+      }
+      $("#tabs").addEventListener("click", (e) => {
+        const b = e.target.closest("button[data-tab]");
+        if (b) showTab(b.dataset.tab);
+      });
+
+      /** A sheet of choices from the bottom of the screen; resolves with the picked value (null when dismissed). */
+      function choose(title, options) {
+        return new Promise((res) => {
+          const box = $("#pick-list");
+          box.innerHTML = title ? `<div class="title">${esc(title)}</div>` : "";
+          for (const [v, label, cls] of options) {
+            const b = document.createElement("button");
+            b.type = "button";
+            b.textContent = label;
+            if (cls) b.className = cls;
+            b.addEventListener("click", () => done(v));
+            box.appendChild(b);
+          }
+          const menu = $("#pick-menu");
+          const done = (v) => {
+            menu.hidden = true;
+            menu.onclick = null;
+            res(v);
+          };
+          menu.onclick = (e) => e.target === menu && done(null);
+          menu.hidden = false;
+        });
+      }
+
+      // ---------- Studio ----------
+      const studio = { mode: localStorage.getItem("prestige-st-mode") || "image", src: null, ref: null, character: null, info: null, settingsOpen: false };
+      let infoSeq = 0;
+      const createArgs = () => ({ mode: studio.mode, src: studio.src?.path || null, ref: studio.ref ? { w: studio.ref.w, h: studio.ref.h } : studio.character ? { w: 1024, h: 1024 } : null });
+
+      /** Asks the PC what the create bar would make now, and shows it. */
+      async function studioInfo() {
+        const seq = ++infoSeq;
+        try {
+          const info = await ask("studio.info", createArgs());
+          if (seq === infoSeq) drawStudio(info);
+        } catch (e) {
+          if (seq === infoSeq) {
+            $("#st-chips").innerHTML = `<span>${esc(e.message)}</span>`;
+            $("#st-go").disabled = true;
+          }
+        }
+      }
+
+      function drawStudio(info) {
+        studio.info = info;
+        document.querySelectorAll("#st-mode button").forEach((b) => b.classList.toggle("sel", b.dataset.mode === studio.mode));
+        // The picture being edited or animated.
+        $("#st-src").hidden = !studio.src;
+        if (studio.src) {
+          $("#st-src-img").src = thumbUrl(studio.src);
+          $("#st-src-what").textContent = info.srcWhat;
+        }
+        // The reference image (a photo, or a character's face).
+        $("#st-ref").hidden = !info.refOk;
+        const hasRef = !!(studio.ref || studio.character);
+        $("#st-ref-empty").hidden = hasRef;
+        $("#st-ref-set").hidden = !hasRef;
+        if (hasRef) {
+          $("#st-ref-img").src = studio.ref ? `data:image/jpeg;base64,${studio.ref.b64}` : studio.character?.thumb ? `data:image/jpeg;base64,${studio.character.thumb}` : "/icon.png";
+          $("#st-ref-what").textContent = (studio.character ? `${studio.character.name}'s face. ` : "") + info.refWhat;
+          const p = info.refPrefs;
+          const seg = (attr, cur, opts) => `<span class="seg small">${opts.map(([v, l]) => `<button type="button" data-${attr}="${v}" class="${v === cur ? "sel" : ""}">${esc(l)}</button>`).join("")}</span>`;
+          $("#st-ref-picks").innerHTML =
+            (!studio.character && (!info.refVideo || p.frame === "scene") ? seg("kind", p.kind, [["auto", "Auto"], ["character", "Character"], ["item", "Item"]]) : "") +
+            (info.refVideo ? seg("frame", p.frame, [["scene", "New scene first"], ["itself", "Animate this picture"]]) : "");
+          $("#st-ref-consent").textContent = info.consent;
+        }
+        $("#st-prompt").placeholder = info.placeholder;
+        $("#st-lyrics-box").hidden = studio.mode !== "music";
+        // The model (tap to switch where there's a choice) and what the settings come to.
+        const chips = $("#st-chips");
+        chips.innerHTML = "";
+        if (info.missing) chips.innerHTML = `<span>workflows\\${esc(info.missing)} isn't on the PC, so this mode is off</span>`;
+        else {
+          const m = document.createElement(info.canPick ? "button" : "span");
+          m.className = "model";
+          m.textContent = info.label + (info.canPick ? " ⇄" : "");
+          if (info.canPick) m.addEventListener("click", () => ask("studio.pick", { create: createArgs() }).then(drawStudio).catch((e) => toast(e.message)));
+          chips.appendChild(m);
+          for (const c of info.chips) {
+            const s = document.createElement("span");
+            s.textContent = c;
+            chips.appendChild(s);
+          }
+          const gear = document.createElement("button");
+          gear.textContent = studio.settingsOpen ? "⚙ Hide settings" : "⚙ Settings";
+          gear.addEventListener("click", () => {
+            studio.settingsOpen = !studio.settingsOpen;
+            drawStudio(studio.info);
+          });
+          chips.appendChild(gear);
+        }
+        $("#st-warn").hidden = !info.warn;
+        $("#st-warn").textContent = info.warn;
+        drawSettings(info);
+        $("#st-go").textContent = info.button;
+        $("#st-go").disabled = !!info.missing;
+        drawQueue(info.queue);
+      }
+
+      /** The generation settings: the PC's own, shared with Studio and chat there. */
+      function drawSettings(info) {
+        const box = $("#st-settings");
+        box.hidden = !studio.settingsOpen || !!info.missing;
+        if (box.hidden) return;
+        const opt = (options, cur) => options.map(([v, l]) => `<option value="${esc(v)}"${String(v) === String(cur) ? " selected" : ""}>${esc(l)}</option>`).join("");
+        box.innerHTML =
+          `<div class="fields">${info.fields
+            .map((f) => `<label class="${f.options.length > 8 || f.k === "high" || f.k === "low" ? "full" : ""}">${esc(f.label)}<select data-k="${esc(f.k)}">${opt(f.options, f.value)}</select>${f.hint ? `<small>${esc(f.hint)}</small>` : ""}</label>`)
+            .join("")}` +
+          `<label class="full">Seed<span class="seed-row"><input type="number" inputmode="numeric" min="0" placeholder="random" value="${info.seed ?? ""}" id="st-seed" /><button type="button" class="btn" data-seed="">Random</button>${info.lastSeed != null ? `<button type="button" class="btn" data-seed="last">Last · ${info.lastSeed}</button>` : ""}</span></label></div>` +
+          (info.cards ? `<p class="muted">VRAM: ${esc(info.cards)}</p>` : "") +
+          `<div class="row"><span class="muted" style="flex:1">${esc(info.label)} · shared with Studio and chat on the PC</span><button type="button" class="linkish" id="st-reset">Reset to defaults</button></div>`;
+        const set = (patch) => ask("studio.set", { key: info.key, create: createArgs(), ...patch }).then(drawStudio).catch((e) => toast(e.message));
+        box.querySelectorAll("select").forEach((s) => s.addEventListener("change", () => set({ k: s.dataset.k, value: s.value })));
+        $("#st-seed").addEventListener("change", (e) => set({ k: "seed", value: e.target.value }));
+        box.querySelectorAll("[data-seed]").forEach((b) => b.addEventListener("click", () => set({ k: "seed", value: b.dataset.seed })));
+        $("#st-reset").addEventListener("click", () => set({ reset: true }));
+      }
+
+      $("#st-mode").addEventListener("click", (e) => {
+        const b = e.target.closest("button[data-mode]");
+        if (!b || b.dataset.mode === studio.mode) return;
+        studio.mode = b.dataset.mode;
+        localStorage.setItem("prestige-st-mode", studio.mode);
+        // A picture picked to edit stays only if it can be animated instead (and the other way round).
+        if (studio.mode === "music") studio.src = null;
+        studioInfo();
+      });
+      $("#st-src-clear").addEventListener("click", () => {
+        studio.src = null;
+        studioInfo();
+      });
+      $("#st-ref-picks").addEventListener("click", (e) => {
+        const b = e.target.closest("[data-kind], [data-frame]");
+        if (!b) return;
+        ask("studio.refPrefs", { kind: b.dataset.kind, frame: b.dataset.frame, create: createArgs() }).then(drawStudio).catch((err) => toast(err.message));
+      });
+      $("#st-ref-clear").addEventListener("click", () => {
+        studio.ref = studio.character = null;
+        studioInfo();
+      });
+      $("#st-ref-add").addEventListener("click", async () => {
+        const faces = studio.info?.faces || [];
+        const opts = [];
+        if (avOk()) opts.push(["camera", "Take a photo"]);
+        opts.push(["gallery", "Choose from gallery"]);
+        for (const f of faces) opts.push([`face:${f.id}`, `${f.name}'s face`]);
+        const v = await choose("Reference image", opts);
+        if (v === "camera") {
+          photoFor = "ref";
+          camSheet(true);
+        } else if (v === "gallery") {
+          photoFor = "ref";
+          $("#file").click();
+        } else if (v && v.startsWith("face:")) {
+          const f = faces.find((x) => `face:${x.id}` === v);
+          studio.ref = null;
+          studio.character = f;
+          studioInfo();
+        }
+      });
+      /** A photo (taken here, picked, or a render) becomes the reference image. */
+      function setRef(r) {
+        studio.ref = r;
+        studio.character = null;
+        studio.src = null; // a reference replaces a picture picked to edit or animate
+        if (studio.mode === "music") studio.mode = "image";
+        studioInfo();
+      }
+      async function setRefFromBlob(blob) {
+        try {
+          const bmp = await createImageBitmap(blob, { imageOrientation: "from-image" });
+          setRef(sized(bmp, bmp.width, bmp.height, 2048, 0.92));
+          bmp.close?.();
+        } catch {
+          toast("Couldn't read that picture.");
+        }
+      }
+
+      $("#st-write").addEventListener("click", async () => {
+        const style = $("#st-prompt").value.trim();
+        if (!style) return toast("Describe the song's style or what it's about first.");
+        if ($("#st-lyrics").value.trim() && !confirm("Replace the lyrics in the box?")) return;
+        const b = $("#st-write");
+        b.disabled = true;
+        b.textContent = "Writing lyrics on the PC…";
+        try {
+          const r = await ask("studio.lyrics", { style });
+          $("#st-lyrics").value = r.lyrics || "";
+        } catch (e) {
+          toast(e.message);
+        } finally {
+          b.disabled = false;
+          b.textContent = "Write lyrics for me";
+        }
+      });
+
+      $("#st-go").addEventListener("click", async () => {
+        const prompt = $("#st-prompt").value.trim();
+        if (!prompt) return toast(studio.mode === "music" ? "Describe the song's style first." : "Describe what to make first.");
+        const b = $("#st-go");
+        b.disabled = true;
+        try {
+          const r = await ask("studio.generate", {
+            mode: studio.mode,
+            prompt,
+            lyrics: studio.mode === "music" ? $("#st-lyrics").value : undefined,
+            src: studio.src?.path || null,
+            ref: studio.ref?.b64 || null,
+            character: studio.character?.id || null,
+          });
+          toast(r.ahead ? `Added to the render queue (${r.ahead} ahead).` : "Rendering on the PC. It shows in Renders when it's done.");
+          drawQueue(r.queue);
+        } catch (e) {
+          toast(e.message);
+        } finally {
+          b.disabled = false;
+        }
+      });
+
+      // ---------- the render queue ----------
+      let queue = [];
+      function drawQueue(q) {
+        queue = q || [];
+        const live = queue.filter((j) => j.state === "waiting" || j.state === "running").length;
+        $("#q-count").hidden = !live;
+        $("#q-count").textContent = live;
+        const card = $("#st-queue-card");
+        card.hidden = !queue.length;
+        const box = $("#st-queue");
+        box.innerHTML = "";
+        for (const j of [...queue].reverse()) {
+          const row = document.createElement("div");
+          row.className = `q-row ${j.state}`;
+          const icon = { waiting: "⏳", running: "●", done: "✓", failed: "✗", stopped: "■" }[j.state];
+          const status = j.state === "done" ? `Done in ${j.took ?? 0} s` : j.state === "failed" ? `Failed: ${j.error || ""}` : j.state === "stopped" ? "Stopped" : j.status;
+          row.innerHTML = `<span>${icon}</span><span class="t"><b></b><small></small>${j.state === "running" ? `<span class="bar"><i style="width:${j.pct}%"></i></span>` : ""}</span>`;
+          row.querySelector("b").textContent = j.prompt;
+          row.querySelector("small").textContent = `${j.label} · ${j.from} · ${status}`;
+          const act = (label, fn) => {
+            const b = document.createElement("button");
+            b.type = "button";
+            b.className = "linkish";
+            b.textContent = label;
+            b.addEventListener("click", fn);
+            row.appendChild(b);
+          };
+          const qa = (action) => ask(`studio.${action}`, { id: j.id }).then((r) => drawQueue(r.queue)).catch((e) => toast(e.message));
+          if (j.state === "waiting") act("remove", () => qa("cancel"));
+          if (j.state === "running") act("stop", () => qa("cancel"));
+          if (j.state === "done" && j.result[0]) act("open", () => openAsset(j.result[0].path));
+          if (j.state === "failed" || j.state === "stopped") act("try again", () => qa("retry"));
+          box.appendChild(row);
+        }
+      }
+      $("#st-q-clear").addEventListener("click", () => ask("studio.clear").then((r) => drawQueue(r.queue)).catch((e) => toast(e.message)));
+
+      // ---------- Renders ----------
+      const thumbUrl = (a) => `/api/thumb?path=${encodeURIComponent(a.path)}&mtime=${encodeURIComponent(a.mtime)}&t=${encodeURIComponent(token)}`;
+      const gallery = { filter: "all", items: [], total: 0, loaded: false, stale: false, loading: false };
+      const NOTE = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 18V5l11-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="17" cy="16" r="3" /></svg>`;
+      const CUBE = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2l9 5v10l-9 5-9-5V7z" /><path d="M3 7l9 5 9-5M12 12v10" /></svg>`;
+
+      async function loadGallery(fresh) {
+        if (gallery.loading) return;
+        gallery.loading = true;
+        if (fresh) $("#r-note").textContent = "Loading…";
+        try {
+          const r = await ask("studio.gallery", { filter: gallery.filter, offset: fresh ? 0 : gallery.items.length, limit: 48 });
+          gallery.items = fresh ? r.items : gallery.items.concat(r.items);
+          gallery.total = r.total;
+          gallery.loaded = true;
+          gallery.stale = false;
+          drawGallery(fresh);
+        } catch (e) {
+          $("#r-note").textContent = e.message;
+        } finally {
+          gallery.loading = false;
+        }
+      }
+      function drawGallery(fresh) {
+        const g = $("#r-grid");
+        if (fresh) g.innerHTML = "";
+        $("#r-note").textContent = gallery.total ? `${gallery.total} on the PC` : "Nothing here yet.";
+        for (const a of gallery.items.slice(g.children.length)) {
+          const t = document.createElement("button");
+          t.type = "button";
+          t.className = "tile";
+          if (a.kind === "audio") t.innerHTML = `${NOTE}<span class="song-t"></span><span class="badge">SONG</span>`;
+          else if (a.kind === "model") t.innerHTML = `${CUBE}<span class="badge">3D</span>`;
+          else t.innerHTML = `<img loading="lazy" alt="" />${a.kind === "video" ? `<span class="badge">VIDEO</span>` : ""}`;
+          if (a.kind === "audio") t.querySelector(".song-t").textContent = a.prompt || a.name;
+          const img = t.querySelector("img");
+          if (img) {
+            img.src = thumbUrl(a);
+            img.onerror = () => img.remove();
+          }
+          t.addEventListener("click", () => openRv(a));
+          g.appendChild(t);
+        }
+        $("#r-more").hidden = gallery.items.length >= gallery.total;
+      }
+      function galleryChanged() {
+        gallery.stale = true;
+        if (tab === "renders") loadGallery(true);
+      }
+      $("#r-more").addEventListener("click", () => loadGallery(false));
+      $("#r-filters").addEventListener("click", (e) => {
+        const b = e.target.closest("button[data-f]");
+        if (!b) return;
+        gallery.filter = b.dataset.f;
+        document.querySelectorAll("#r-filters button").forEach((x) => x.classList.toggle("sel", x === b));
+        loadGallery(true);
+      });
+
+      /** A render from the queue: found in the gallery (newest first), then opened. */
+      async function openAsset(path) {
+        let a = gallery.items.find((x) => x.path === path);
+        if (!a) {
+          try {
+            const r = await ask("studio.gallery", { filter: "all", offset: 0, limit: 48 });
+            a = r.items.find((x) => x.path === path);
+          } catch {}
+        }
+        if (a) openRv(a);
+        else toast("That render isn't on the PC any more.");
+      }
+
+      // ---------- a render, full screen, with what can be done with it ----------
+      let rvAsset = null;
+      const ACTS = {
+        edit: "Edit",
+        animate: "Animate",
+        reference: "Use as reference",
+        up1080: "Upscale to 1080p",
+        up4k: "Upscale to 4K",
+        model3d: "Make a 3D model",
+        removebg: "Remove background",
+        vidcut: "Cut out a subject",
+        talk: "Make it talk",
+        prompt: "Reuse prompt",
+        seed: "Reuse seed",
+        delete: "Delete",
+      };
+      function openRv(a) {
+        rvAsset = a;
+        const m = $("#rv-media");
+        const url = fileUrl(a.path);
+        if (a.kind === "video") m.innerHTML = `<video controls playsinline autoplay loop></video>`;
+        else if (a.kind === "audio") m.innerHTML = `<div class="song-box"><b class="song"></b><audio controls autoplay></audio><pre></pre></div>`;
+        else if (a.kind === "model") m.innerHTML = `<div class="tile" style="width:40%">${CUBE}</div>`;
+        else m.innerHTML = `<img alt="" />`;
+        const el = m.querySelector("video, audio, img");
+        if (el) el.src = url;
+        if (a.kind === "audio") {
+          m.querySelector(".song").textContent = `♪ ${a.prompt || a.name}`;
+          m.querySelector("pre").textContent = a.lyrics?.trim() || "Instrumental (no lyrics)";
+        }
+        $("#rv-prompt").textContent = a.prompt || (a.kind === "model" ? "A textured 3D model (.glb). Open it on the PC to turn it around." : "No prompt saved in this file.");
+        const meta = [a.model, a.width ? `${a.width} × ${a.height}` : "", a.duration ? `${Math.round(a.duration)} s` : "", a.seed != null ? `seed ${a.seed}` : "", `${(a.size / 1048576).toFixed(1)} MB`, new Date(a.mtime).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })];
+        $("#rv-meta").textContent = meta.filter(Boolean).join(" · ");
+        const acts = [...(a.acts || [])];
+        if (a.prompt && a.kind !== "model") acts.splice(acts.indexOf("seed") >= 0 ? acts.indexOf("seed") : acts.length - 1, 0, "prompt");
+        const box = $("#rv-acts");
+        box.innerHTML = "";
+        for (const k of acts) {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className = `btn${k === "delete" ? " danger" : ""}`;
+          b.textContent = ACTS[k] || k;
+          b.addEventListener("click", () => rvAct(a, k));
+          box.appendChild(b);
+        }
+        $("#rv").hidden = false;
+      }
+      function closeRv() {
+        $("#rv").hidden = true;
+        $("#rv-media").innerHTML = "";
+        rvAsset = null;
+      }
+      $("#rv-close").addEventListener("click", closeRv);
+      $("#rv-save").addEventListener("click", () => rvAsset && saveRender(rvAsset.path));
+
+      /** A render as a base64 JPEG (for a reference, or a picture sent with /talk). */
+      async function renderJpeg(path, max = 2048) {
+        const r = await fetch(fileUrl(path));
+        if (!r.ok) throw new Error("Couldn't load the picture from the PC.");
+        const bmp = await createImageBitmap(await r.blob());
+        try {
+          return sized(bmp, bmp.width, bmp.height, max, 0.92);
+        } finally {
+          bmp.close?.();
+        }
+      }
+
+      async function rvAct(a, k) {
+        const toStudio = (mode) => {
+          closeRv();
+          studio.mode = mode;
+          localStorage.setItem("prestige-st-mode", mode);
+          showTab("studio");
+        };
+        if (k === "edit" || k === "animate") {
+          studio.src = a;
+          studio.ref = studio.character = null;
+          $("#st-prompt").value = "";
+          toStudio(k === "edit" ? "image" : "video");
+          return $("#st-prompt").focus();
+        }
+        if (k === "reference") {
+          try {
+            const r = await renderJpeg(a.path);
+            closeRv();
+            showTab("studio");
+            setRef(r);
+          } catch (e) {
+            toast(e.message);
+          }
+          return;
+        }
+        if (k === "prompt") {
+          studio.src = null;
+          $("#st-prompt").value = a.prompt || "";
+          if (a.kind === "audio") $("#st-lyrics").value = /^\s*\[(instrumental|inst)\]\s*$/i.test(a.lyrics || "") ? "" : a.lyrics || "";
+          return toStudio(a.kind === "video" ? "video" : a.kind === "audio" ? "music" : "image");
+        }
+        if (k === "talk") {
+          const line = prompt("What should they say? (up to about 30 seconds of speech)");
+          if (!line || !line.trim()) return;
+          try {
+            const pic = await renderJpeg(a.path, 1280);
+            closeRv();
+            showTab("chat");
+            await send(`/talk ${line.trim()}`, { images: [pic.b64] });
+          } catch (e) {
+            toast(e.message);
+          }
+          return;
+        }
+        let text = "";
+        if (k === "vidcut") {
+          text = prompt("What should stay? The rest of the video turns green, ready to key out in a video editor.", "") || "";
+          if (!text.trim()) return;
+        }
+        if (k === "delete" && !confirm(`Delete ${a.name}? It goes to the Recycle Bin on the PC.`)) return;
+        try {
+          const r = await ask("studio.act", { path: a.path, what: k, text });
+          if (r.queue) {
+            drawQueue(r.queue);
+            toast(`${ACTS[k]}: added to the render queue on the PC.`);
+          } else if (r.message) toast(r.message);
+          if (k === "delete") {
+            closeRv();
+            gallery.items = gallery.items.filter((x) => x.path !== a.path);
+            gallery.total = Math.max(0, gallery.total - 1);
+            drawGallery(true);
+          }
+        } catch (e) {
+          toast(e.message);
+        }
+      }
+
       function start() {
         $("#pair").hidden = true;
-        ["#top", "#thread", "#bottom"].forEach((s) => ($(s).hidden = false));
+        ["#top", "#tabs"].forEach((s) => ($(s).hidden = false));
+        showTab(tab);
         loadState();
         loadChat(chatId);
         connect();
+        ask("studio.queue").then((r) => drawQueue(r.queue)).catch(() => {});
       }
 
       if (token) start();

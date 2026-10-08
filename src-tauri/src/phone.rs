@@ -2,15 +2,18 @@
 // A small web server serves a phone-sized chat page (phone/index.html). A phone pairs once with the 6-digit code shown
 // on the PC and keeps a token; everything else needs that token. The phone is a remote for the desktop app: a message
 // from it is handed to the app's own chat (so models, characters, Knowledge, Deep Research and /image all work), and
-// the reply streams back to the phone as server-sent events. Only private addresses are answered (home networks,
-// Tailscale's 100.64.0.0/10, this PC); anything else gets 403.
+// the reply streams back to the phone as server-sent events. Studio, Renders and the render queue work the same way:
+// the phone asks (/api/do) and the desktop app answers (phone_answer), so a render from the phone is queued exactly
+// like one made on the PC. Only private addresses are answered (home networks, Tailscale's 100.64.0.0/10, this PC);
+// anything else gets 403.
 
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -50,6 +53,8 @@ pub struct Phone {
     clients: Mutex<Vec<Sender<String>>>,
     fails: Mutex<Vec<Instant>>, // wrong pairing codes in the last few minutes
     state: Mutex<serde_json::Value>, // what the desktop app last said about itself (models, character, busy)
+    asks: Mutex<HashMap<u64, Sender<serde_json::Value>>>, // phone requests waiting for the desktop app's answer
+    next_ask: AtomicU64,
 }
 
 fn now_ms() -> u64 {
@@ -312,12 +317,53 @@ fn api(app: &AppHandle, mut req: Request, path: &str, dev: &Device) {
             save(app, &s);
             let _ = req.respond(json(200, serde_json::json!({ "ok": true })));
         }
+        (Method::Post, "/api/do") => ask_app(app, req, dev),
         (Method::Get, "/api/events") => events(app, req),
         (Method::Get, "/api/file") => serve_file(app, req),
+        (Method::Get, "/api/thumb") => serve_thumb(app, req),
         _ => {
             let _ = req.respond(json(404, serde_json::json!({ "error": "not found" })));
         }
     }
+}
+
+/// Asks the desktop app to do something for the phone (queue a render, list the gallery, change a setting…) and waits
+/// for its answer. The body is { "action": "studio.generate", "args": {…} }; reference photos come as base64 JPEGs, so
+/// it can be large. Writing lyrics runs the chat model, so that one gets longer.
+fn ask_app(app: &AppHandle, mut req: Request, dev: &Device) {
+    let v = body_json(&mut req, 24 << 20);
+    let action = v["action"].as_str().unwrap_or("").to_string();
+    if action.is_empty() || action.len() > 64 {
+        let _ = req.respond(json(400, serde_json::json!({ "error": "no action" })));
+        return;
+    }
+    let phone = app.state::<Phone>();
+    let id = phone.next_ask.fetch_add(1, Ordering::SeqCst) + 1;
+    let (tx, rx) = channel();
+    phone.asks.lock().unwrap().insert(id, tx);
+    let _ = app.emit("phone-do", serde_json::json!({ "id": id, "action": action, "args": v["args"], "from": dev.name }));
+    let wait = if action.ends_with(".lyrics") { 300 } else { 90 };
+    let answer = rx.recv_timeout(Duration::from_secs(wait));
+    phone.asks.lock().unwrap().remove(&id);
+    let _ = match answer {
+        Ok(a) if a.get("error").is_some_and(|e| !e.is_null()) => req.respond(json(400, a)),
+        Ok(a) => req.respond(json(200, a)),
+        Err(_) => req.respond(json(504, serde_json::json!({ "error": "Prestige on the PC didn't answer. Is it still open?" }))),
+    };
+}
+
+/// A small JPEG of a render for the phone's gallery (the same cached thumbnails the desktop's gallery uses).
+fn serve_thumb(app: &AppHandle, req: Request) {
+    let root = crate::read_settings(app)["stackRoot"].as_str().map(String::from);
+    let path = query(req.url(), "path").unwrap_or_default();
+    let mtime: f64 = query(req.url(), "mtime").and_then(|m| m.parse().ok()).unwrap_or(0.0);
+    let thumb = crate::studio::render_path(root, &path)
+        .and_then(|p| tauri::async_runtime::block_on(crate::studio::thumbnail(app.clone(), p.to_string_lossy().into_owned(), mtime)))
+        .and_then(|t| fs::read(t).map_err(|e| e.to_string()));
+    let _ = match thumb {
+        Ok(b) => req.respond(Response::from_data(b).with_header(header("Content-Type", "image/jpeg")).with_header(header("Cache-Control", "private, max-age=86400"))),
+        Err(e) => req.respond(json(404, serde_json::json!({ "error": e }))),
+    };
 }
 
 const VOICE_SERVER: &str = "http://127.0.0.1:8890";
@@ -430,6 +476,7 @@ fn serve_file(app: &AppHandle, req: Request) {
         "flac" => "audio/flac",
         "opus" | "ogg" => "audio/ogg",
         "wav" => "audio/wav",
+        "glb" => "model/gltf-binary",
         _ => "application/octet-stream",
     };
     let range = req
@@ -593,6 +640,14 @@ pub fn phone_push(app: AppHandle, event: serde_json::Value) {
 #[tauri::command]
 pub fn phone_set_state(app: AppHandle, state: serde_json::Value) {
     *app.state::<Phone>().state.lock().unwrap() = state;
+}
+
+/// The desktop app's answer to a phone's request (/api/do).
+#[tauri::command]
+pub fn phone_answer(app: AppHandle, id: u64, answer: serde_json::Value) {
+    if let Some(tx) = app.state::<Phone>().asks.lock().unwrap().remove(&id) {
+        let _ = tx.send(answer);
+    }
 }
 
 #[cfg(test)]

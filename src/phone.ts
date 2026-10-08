@@ -39,6 +39,29 @@ export function phoneState(state: Record<string, unknown>) {
   phonePush({ type: "state" });
 }
 
+// ---------- requests from phones ----------
+// The phone asks for something ("studio.generate", "studio.gallery"…); the part of the app before the dot answers it.
+type Handler = (action: string, args: any, from: string) => Promise<unknown>;
+const handlers = new Map<string, Handler>();
+
+/** Answers the phone's requests that start with `prefix.` (its answer, or what went wrong, goes back to the phone). */
+export function onPhoneAsk(prefix: string, h: Handler) {
+  handlers.set(prefix, h);
+}
+
+async function answer(p: { id: number; action: string; args: unknown; from: string }) {
+  const dot = p.action.indexOf(".");
+  const h = handlers.get(p.action.slice(0, dot));
+  let out: unknown;
+  try {
+    if (!h) throw new Error(`Prestige on the PC doesn't know "${p.action}". Update it to the same version as the app.`);
+    out = (await h(p.action.slice(dot + 1), p.args ?? {}, p.from)) ?? { ok: true };
+  } catch (e) {
+    out = { error: errMsg(e) };
+  }
+  invoke("phone_answer", { id: p.id, answer: out }).catch(() => {});
+}
+
 const when = (ms: number) => (ms ? new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "never");
 
 function show(s: Status) {
@@ -83,6 +106,7 @@ export async function initPhone(d: Deps) {
     }
   });
   $("#phone-new-code").addEventListener("click", async () => show(await invoke<Status>("phone_new_code")));
+  listen<{ id: number; action: string; args: unknown; from: string }>("phone-do", (e) => answer(e.payload));
   listen("phone-paired", async () => {
     deps.toast("A phone was paired with Prestige.");
     show(await invoke<Status>("phone_status"));
