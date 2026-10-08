@@ -1,6 +1,6 @@
-/* Prestige · Mesa, molded. Every panel, key and button is cast from the same ground and rises out of it like a key on
-   a cast keybed: a lit top lip, side walls falling into shadow, a top face set in from the walls (the rounded shoulder)
-   and a soft fillet of shadow where it meets the ground. Text boxes and Prestige's replies are carved in instead.
+/* Prestige · Mesa, molded. Every panel, key and button is cast from the same ground and swells out of it as one piece,
+   like the keys of a Teenage Engineering OP-XY: a soft fillet where it meets the ground, a rounded shoulder and a
+   matte top. Text boxes and Prestige's replies are carved in instead.
    Only applies while body.mesa is on (Settings → Appearance → Molded surfaces); the colours come from theme.ts.
    --h is how tall raised things stand; --g (0 to 1) is how far they have risen, so they can grow into place (mesa.ts). */
 @property --g { syntax: "<number>"; inherits: true; initial-value: 1; }
@@ -12,61 +12,34 @@ body.mesa {
 }
 
 /* ---------- what is raised ---------- */
-/* panels: the HUD strip, the composer, the section dock, the history drawer, cards, popovers, menus, dialogs */
-body.mesa :is(.hud, .composer-dock, .dock, .history, .card, .create, .rq, .update-banner, .offline, .live-bar, .cu-card, .cam-pop, .emote-pick, .ctx-menu, .canvas, .phone-box, .canvas-card, .cu-next, .tool-confirm),
-/* low tiles: rows in lists and grids */
+/* One molded piece, not a stack: the surface bends up into a soft fillet (the crease at its foot, the lit slope behind,
+   the shade in front), rolls over a rounded shoulder (light on the top edge, shade under the bottom one) onto a matte
+   top. Everything is drawn with the element's own background and shadows, so nothing scrolls away inside a scroller. */
+body.mesa :is(.hud, .composer-dock, .dock, .history, .card, .create, .rq, .update-banner, .offline, .live-bar, .cu-card, .cam-pop, .emote-pick, .ctx-menu, .canvas, .phone-box, .canvas-card, .cu-next, .tool-confirm, dialog.sheet, .model-menu, .tools-pop),
 body.mesa :is(.mrow, .cat-card, .ms-row, .thumb, .kb-model, .history-item, .model-menu button, .ch-list button, .ch-fact, .chat-render.song, .chat-render.model .model-card, .look-swatch, .ref-add, .ms-tpl),
-/* keys */
-body.mesa :is(.btn, .icon-btn, .model-btn, .suggests button, .filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.pick, .live-ctl, .sources button, .chat-files .cf, .dock button),
-/* your messages stand up; Prestige's are carved in (below) */
-body.mesa .msg.you {
+body.mesa :is(.btn, .icon-btn, .model-btn, .suggests button, .filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.pick, .live-ctl, .sources button, .chat-files .cf),
+body.mesa .msg.you,
+body.mesa .dock button svg {
   --hh: calc(var(--h) * var(--g));
-  isolation: isolate;
+  --top: color-mix(in srgb, var(--face-hi) 75%, var(--wall-hi));
+  --mid: var(--face);
+  --foot: var(--face-lo);
   border-color: transparent;
-  background: linear-gradient(180deg, var(--wall-hi) 0%, var(--wall) 18%, var(--wall-mid) 62%, var(--wall-lo) 100%);
+  background: radial-gradient(130% 90% at 50% 0%, color-mix(in srgb, var(--top) 60%, transparent), transparent 70%), linear-gradient(180deg, var(--top), var(--mid) 45%, var(--foot));
   box-shadow:
-    0 0 0 1px rgba(0, 0, 0, .55),
-    0 calc(var(--hh) * -.12px) calc(var(--hh) * .7px) calc(var(--hh) * .05px) var(--lip),
-    0 calc(var(--hh) * .3px) calc(var(--hh) * .45px) rgba(0, 0, 0, .55),
-    0 calc(var(--hh) * 1px) calc(var(--hh) * 2.4px) calc(var(--hh) * .2px) rgba(0, 0, 0, .5);
+    inset 0 1px 0 color-mix(in srgb, var(--gold-hi) 11%, transparent),
+    inset 0 calc(var(--hh) * .35px) calc(var(--hh) * .6px) calc(var(--hh) * -.2px) color-mix(in srgb, var(--wall-hi) 60%, transparent),
+    inset 0 calc(var(--hh) * -.5px) calc(var(--hh) * .8px) calc(var(--hh) * -.2px) rgba(0, 0, 0, .6),
+    0 0 calc(1px + var(--hh) * .12px) rgba(0, 0, 0, .75),
+    0 calc(var(--hh) * .4px) calc(var(--hh) * .8px) calc(var(--hh) * .05px) rgba(0, 0, 0, .55),
+    0 calc(var(--hh) * 1.2px) calc(var(--hh) * 2.8px) calc(var(--hh) * .3px) rgba(0, 0, 0, .4),
+    0 calc(var(--hh) * -.4px) calc(var(--hh) * 1.2px) calc(var(--hh) * .1px) color-mix(in srgb, var(--wall-hi) 22%, transparent);
   transition: transform .12s, box-shadow .15s, color .15s;
 }
-/* the flat top face, set in from the walls so the shoulder shows */
-body.mesa :is(.hud, .composer-dock, .dock, .history, .card, .create, .rq, .update-banner, .offline, .live-bar, .cu-card, .cam-pop, .emote-pick, .ctx-menu, .canvas, .phone-box, .canvas-card, .cu-next, .tool-confirm)::before,
-body.mesa :is(.mrow, .cat-card, .ms-row, .thumb, .kb-model, .history-item, .model-menu button, .ch-list button, .ch-fact, .chat-render.song, .chat-render.model .model-card, .look-swatch, .ref-add, .ms-tpl)::before,
-body.mesa :is(.btn, .icon-btn, .model-btn, .suggests button, .filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.pick, .live-ctl, .sources button, .chat-files .cf, .dock button)::before,
-body.mesa .msg.you::before {
-  content: "";
-  position: absolute;
-  z-index: -1;
-  inset: calc(1px + var(--hh) * .12px) calc(1px + var(--hh) * .14px) calc(2px + var(--hh) * .35px);
-  border-radius: inherit;
-  pointer-events: none;
-  background: radial-gradient(120% 140% at 30% 0%, var(--face-hi), var(--face) 55%, var(--face-lo));
-  box-shadow: 0 0 calc(var(--hh) * .4px) calc(var(--hh) * .15px) rgba(0, 0, 0, .35), inset 0 1px 0 var(--lip);
-  transition: inset .15s;
-}
-/* static things need a box for the face; fixed, sticky and absolute ones already are one */
 body.mesa :is(.card, .create, .rq, .update-banner, .offline, .live-bar, .cu-card, .phone-box, .canvas-card, .cu-next, .tool-confirm, .mrow, .cat-card, .ms-row, .thumb, .kb-model, .history-item, .model-menu button, .ch-list button, .ch-fact, .chat-render.song, .chat-render.model .model-card, .look-swatch, .ref-add, .ms-tpl, .btn, .icon-btn, .model-btn, .suggests button, .filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.pick, .live-ctl, .sources button, .chat-files .cf, .dock button, .msg.you) {
   position: relative;
 }
-
-/* Things that scroll can't carry a face that would scroll away with them: their walls are drawn inside instead. */
-body.mesa :is(dialog.sheet, .model-menu, .tools-pop) {
-  --hh: calc(var(--h) * var(--g));
-  border-color: transparent;
-  border-radius: 22px;
-  background: radial-gradient(120% 140% at 30% 0%, var(--face-hi), var(--face) 55%, var(--face-lo));
-  box-shadow:
-    inset 0 calc(1px + var(--hh) * .12px) calc(var(--hh) * .1px) var(--wall-hi),
-    inset calc(1px + var(--hh) * .14px) 0 calc(var(--hh) * .2px) var(--wall),
-    inset calc(-1px - var(--hh) * .14px) 0 calc(var(--hh) * .2px) var(--wall),
-    inset 0 calc(-2px - var(--hh) * .35px) calc(var(--hh) * .25px) var(--wall-lo),
-    0 0 0 1px rgba(0, 0, 0, .55),
-    0 calc(var(--hh) * -.12px) calc(var(--hh) * .7px) calc(var(--hh) * .05px) var(--lip),
-    0 calc(var(--hh) * .3px) calc(var(--hh) * .45px) rgba(0, 0, 0, .55),
-    0 calc(var(--hh) * 2px) calc(var(--hh) * 4px) calc(var(--hh) * .4px) rgba(0, 0, 0, .55);
-}
+body.mesa :is(dialog.sheet, .model-menu, .tools-pop) { border-radius: 22px; }
 
 /* ---------- panels ---------- */
 body.mesa :is(.hud, .composer-dock, .dock, .history, .card, .create, .live-bar, .canvas, .cam-pop, .ctx-menu, .update-banner, .offline) { border-radius: 22px; }
@@ -94,15 +67,15 @@ body.mesa :is(.history-item, .model-menu button, .ch-list button, .ch-fact) { --
 body.mesa :is(.history-list, .ch-list) { gap: 6px; padding: 8px; }
 body.mesa .model-menu { padding: 10px 10px 14px; display: flex; flex-direction: column; gap: 6px; }
 body.mesa .model-menu button { display: grid; }
-body.mesa :is(.history-item, .model-menu button, .ch-list button):hover { --hh: calc(var(--h) * var(--g) * .5); background: linear-gradient(180deg, var(--wall-hi) 0%, var(--wall) 18%, var(--wall-mid) 62%, var(--wall-lo) 100%); }
-body.mesa :is(.history-item.sel, .model-menu button.sel, .ch-list button.sel) { --hh: calc(var(--h) * var(--g) * .15); box-shadow: 0 0 0 1px rgba(0, 0, 0, .55), 0 1px 2px rgba(0, 0, 0, .5); color: var(--gold-hi); }
+body.mesa :is(.history-item, .model-menu button, .ch-list button):hover { --hh: calc(var(--h) * var(--g) * .5); }
+body.mesa :is(.history-item.sel, .model-menu button.sel, .ch-list button.sel) { --hh: calc(var(--h) * var(--g) * .12); color: var(--gold-hi); }
 body.mesa :is(.history-item.sel, .ch-list button.sel)::after, body.mesa .model-menu button.sel::after { content: ""; position: absolute; left: 6px; top: 50%; width: 5px; height: 5px; margin-top: -2.5px; border-radius: 50%; background: var(--gold-hi); box-shadow: 0 0 calc(6px * var(--glow)) 1px color-mix(in srgb, var(--gold-hi) 80%, transparent); }
 body.mesa .history-item.sel .open, body.mesa .model-menu button.sel { padding-left: 16px; }
 body.mesa .thumb { border-radius: 14px; }
 body.mesa .thumb:hover { --hh: calc(var(--h) * var(--g) * .8); }
-body.mesa .mrow.loaded::before { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--red) 45%, transparent), 0 0 calc(var(--hh) * .4px) rgba(0, 0, 0, .35); }
-body.mesa .ms-row.running::before { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 60%, transparent); }
-body.mesa .cat-card.installed::before { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ok) 40%, transparent); }
+body.mesa .mrow.loaded { outline: 1px solid color-mix(in srgb, var(--red) 45%, transparent); outline-offset: -3px; }
+body.mesa .ms-row.running { outline: 1px solid color-mix(in srgb, var(--gold) 60%, transparent); outline-offset: -3px; }
+body.mesa .cat-card.installed { outline: 1px solid color-mix(in srgb, var(--ok) 40%, transparent); outline-offset: -3px; }
 
 /* ---------- keys ---------- */
 /* small keys: lower and rounder, pill-shaped at about half a panel's height */
@@ -132,9 +105,9 @@ body.mesa .model-btn[aria-expanded="true"] {
   --hh: calc(var(--h) * var(--g) * .22);
   transform: translateY(calc(var(--h) * .18px));
 }
-body.mesa :is(.btn, .icon-btn, .model-btn, .suggests button, .filters button, .gen-tabs button, .cat-filters button, .modes button, .seg button, .opt.pick, .live-ctl, .sources button):not(:disabled):active::before { inset: 2px; }
 body.mesa :is(.filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.set, .look-swatch, .live-ctl, #composer-speak, #composer-tools):is(.on),
-body.mesa [aria-pressed="true"]:is(.btn, .icon-btn, .live-ctl) { color: var(--gold-hi); background-color: transparent; }
+body.mesa [aria-pressed="true"]:is(.btn, .icon-btn, .live-ctl), body.mesa :is(#composer-speak, #composer-tools, #live-cam, #live-mute).on { color: var(--gold-hi); border-color: transparent; }
+body.mesa #composer-mic.on { border-color: transparent; }
 body.mesa :is(.filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.set, .look-swatch, .live-ctl, #composer-speak, #composer-tools):is(.on)::after,
 body.mesa [aria-pressed="true"]:is(.btn, .icon-btn, .live-ctl)::after,
 body.mesa .dock button.active::after {
@@ -150,41 +123,30 @@ body.mesa .dock button.active::after {
   background: var(--gold-hi);
   box-shadow: 0 0 calc(6px * var(--glow)) 1px color-mix(in srgb, var(--gold-hi) 80%, transparent);
 }
-body.mesa .look-swatch.on { box-shadow: 0 0 0 1px rgba(0, 0, 0, .55), 0 1px 2px rgba(0, 0, 0, .5); }
 body.mesa #live-mute.on { color: var(--warn); }
 body.mesa #live-mute.on::after { background: var(--warn); box-shadow: 0 0 calc(6px * var(--glow)) 1px var(--warn); }
 
-/* accent keys (Send, primary actions, End call): cast in the accent colour */
-body.mesa :is(.btn.primary, .icon-btn.send, .live-ctl.end, .btn.talk.on, #composer-mic.on) {
+/* accent keys (Send, primary actions, End call): the same molded key, cast in the accent colour */
+body.mesa :is(.btn.primary, .icon-btn.send, .live-ctl.end, #composer-mic.on) {
+  --top: color-mix(in srgb, var(--red) 72%, #fff);
+  --mid: var(--red);
+  --foot: color-mix(in srgb, var(--red) 55%, #000);
   color: #fff;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--red) 55%, #fff) 0%, var(--red) 22%, color-mix(in srgb, var(--red) 55%, #000) 65%, color-mix(in srgb, var(--red) 25%, #000) 100%);
 }
-body.mesa :is(.btn.primary, .icon-btn.send, .live-ctl.end, .btn.talk.on, #composer-mic.on)::before {
-  background: radial-gradient(120% 140% at 30% 0%, color-mix(in srgb, var(--red) 70%, #fff), var(--red) 55%, color-mix(in srgb, var(--red) 75%, #000));
-}
-body.mesa .btn.talk.on { color: #1a0d05; background: linear-gradient(180deg, color-mix(in srgb, var(--gold) 55%, #fff) 0%, var(--gold) 30%, color-mix(in srgb, var(--gold) 50%, #000) 100%); }
-body.mesa .btn.talk.on::before { background: radial-gradient(120% 140% at 30% 0%, color-mix(in srgb, var(--gold-hi) 80%, #fff), var(--gold) 55%, color-mix(in srgb, var(--gold) 70%, #000)); }
-body.mesa :is(.btn.primary, .icon-btn.send):hover { background: linear-gradient(180deg, color-mix(in srgb, var(--red-hover) 55%, #fff) 0%, var(--red-hover) 22%, color-mix(in srgb, var(--red-hover) 55%, #000) 65%, color-mix(in srgb, var(--red-hover) 25%, #000) 100%); }
+body.mesa :is(.btn.primary, .icon-btn.send):hover { --top: color-mix(in srgb, var(--red-hover) 70%, #fff); --mid: var(--red-hover); }
+body.mesa .btn.talk.on { --top: color-mix(in srgb, var(--gold-hi) 75%, #fff); --mid: var(--gold); --foot: color-mix(in srgb, var(--gold) 55%, #000); color: #1a0d05; }
 body.mesa .btn.danger { color: #ff7a7a; }
 body.mesa .btn:disabled, body.mesa .icon-btn:disabled { --hh: calc(var(--h) * var(--g) * .2); }
 
-/* the section dock: square tiles holding round caps, straight from the OP-XY's key bed */
-body.mesa .dock button { --hh: calc(var(--h) * var(--g) * .3); border-radius: 14px; padding: 8px 10px 6px; gap: 3px; }
-body.mesa .dock button::before { background: var(--face-lo); }
-body.mesa .dock button:hover { background: linear-gradient(180deg, var(--wall-hi) 0%, var(--wall) 18%, var(--wall-mid) 62%, var(--wall-lo) 100%); }
-body.mesa .dock button svg {
-  width: 32px;
-  height: 32px;
-  padding: 7px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 40% 30%, var(--wall), var(--wall-mid) 70%);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, .6), 0 -2px 4px var(--lip), 0 3px 4px rgba(0, 0, 0, .6), 0 6px 10px rgba(0, 0, 0, .4);
-  transition: transform .12s, box-shadow .12s;
-}
-body.mesa .dock button:active svg, body.mesa .dock button.active svg { transform: translateY(2px); box-shadow: 0 0 0 1px rgba(0, 0, 0, .6), 0 1px 2px rgba(0, 0, 0, .6); }
-body.mesa .dock button.active { color: var(--gold-hi); box-shadow: 0 0 0 1px rgba(0, 0, 0, .55), 0 2px 3px rgba(0, 0, 0, .5); }
+/* the section dock: a key bed of flat square tiles split by fine seams, each holding a round molded cap (OP-XY) */
+body.mesa .dock button { border-radius: 12px; padding: 8px 10px 6px; gap: 3px; background: color-mix(in srgb, var(--face) 55%, transparent); box-shadow: 0 0 0 1px rgba(0, 0, 0, .55), inset 0 1px 0 var(--lip); }
+body.mesa .dock button:hover { background: color-mix(in srgb, var(--face-hi) 60%, transparent); }
+body.mesa .dock button svg { --hh: calc(var(--h) * var(--g) * .65); width: 32px; height: 32px; padding: 7px; border-radius: 50%; }
+body.mesa .dock button:hover svg { --hh: calc(var(--h) * var(--g) * .8); }
+body.mesa .dock button:active svg, body.mesa .dock button.active svg { --hh: calc(var(--h) * var(--g) * .2); transform: translateY(1.5px); }
+body.mesa .dock button.active { color: var(--gold-hi); }
 body.mesa .dock button.voice { color: #fff; }
-body.mesa .dock button.voice svg { background: radial-gradient(circle at 40% 30%, color-mix(in srgb, var(--red) 80%, #fff 10%), var(--red-deep) 75%); }
+body.mesa .dock button.voice svg { --top: color-mix(in srgb, var(--red) 80%, #fff); --mid: var(--red); --foot: var(--red-deep); }
 body.mesa .dock button.live-btn svg { color: var(--gold-hi); }
 
 /* ---------- carved in ---------- */
