@@ -104,10 +104,13 @@ public class MainActivity extends Activity {
                 fileCallback = cb;
                 Intent i = new Intent(Intent.ACTION_GET_CONTENT);
                 i.addCategory(Intent.CATEGORY_OPENABLE);
-                i.setType("image/*");
+                // Pictures for photos; any file when the page asks for documents too (Knowledge).
+                boolean images = true;
+                for (String t : params.getAcceptTypes()) if (!t.isEmpty() && !t.startsWith("image/")) images = false;
+                i.setType(images ? "image/*" : "*/*");
                 i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, params.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE);
                 try {
-                    startActivityForResult(Intent.createChooser(i, "Choose a photo"), PICK_FILES);
+                    startActivityForResult(Intent.createChooser(i, images ? "Choose a photo" : "Choose a file"), PICK_FILES);
                 } catch (Exception e) {
                     fileCallback = null;
                     return false;

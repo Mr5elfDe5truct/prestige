@@ -522,3 +522,82 @@ function saveForm() {
   renderList();
   deps.toast(`Saved. ${m.enabled && m.next ? `It runs next ${at(m.next)}.` : ""}`);
 }
+
+// ---------- the phone (Missions on a paired phone; main.ts passes its requests here) ----------
+/** Missions as the phone shows them. */
+function phoneList() {
+  return {
+    missions: missions.map((m) => ({
+      id: m.id,
+      name: m.name,
+      enabled: m.enabled,
+      running: running === m.id,
+      when: [whenText(m.when), m.how === "research" ? "Deep Research" : "chat with tools", modelFor(m)?.name ?? "no model"].join(" · "),
+      next: m.enabled && m.next ? at(m.next) : "",
+      last: m.last ? `${at(m.last.at)} · ${m.last.ok ? "done" : m.last.skipped ? "skipped" : "didn't finish"} · ${m.last.note}` : "",
+      chatId: m.last?.chatId ?? null,
+    })),
+    templates: TEMPLATES.map((t, i) => ({ i, name: t.name, about: t.about })),
+  };
+}
+
+/** "list", switch one "on" or off, "run" it now, "stop" it, "delete" it, or "add" a template or a mission of your own. */
+export async function phoneMissions(action: string, a: any): Promise<unknown> {
+  const m = missions.find((x) => x.id === a.id);
+  if (["on", "run", "stop", "delete"].includes(action) && !m) throw new Error("That mission isn't there any more.");
+  switch (action) {
+    case "list":
+      break;
+    case "on":
+      m!.enabled = !!a.on;
+      m!.next = m!.enabled ? nextTime(m!.when, Date.now()) : undefined;
+      await save();
+      break;
+    case "run": {
+      if (!queue.includes(m!.id) && running !== m!.id) queue.unshift(m!.id);
+      const wait = waiting();
+      pump();
+      renderList();
+      return { ...phoneList(), message: wait ? `It starts when ${wait}.` : `Running "${m!.name}" on the PC.` };
+    }
+    case "stop":
+      if (running === m!.id) runCtrl?.abort();
+      break;
+    case "delete":
+      missions = missions.filter((x) => x !== m);
+      await save();
+      break;
+    case "add": {
+      // A template as it is, or a daily mission from a name, what to do and a time.
+      const t = a.template != null ? TEMPLATES[Number(a.template)] : null;
+      let n: Mission;
+      if (t) n = { ...structuredClone(t.m), id: "", enabled: true };
+      else {
+        const name = String(a.name ?? "").trim();
+        const prompt = String(a.prompt ?? "").trim();
+        if (!name || !prompt) throw new Error("Give the mission a name and say what it should do.");
+        const time = /^\d{2}:\d{2}$/.test(String(a.time)) ? String(a.time) : "08:00";
+        n = {
+          id: "",
+          name,
+          prompt,
+          how: a.how === "research" ? "research" : "chat",
+          groups: ["web", "workstation"],
+          when: { kind: "daily", time, days: [0, 1, 2, 3, 4, 5, 6], hours: 6 },
+          catchUp: false,
+          enabled: true,
+        };
+      }
+      n.id = `m-${Date.now().toString(36)}`;
+      n.next = nextTime(n.when, Date.now());
+      missions.push(n);
+      await save();
+      renderList();
+      return { ...phoneList(), message: `Added "${n.name}". It runs next ${at(n.next)}.` };
+    }
+    default:
+      throw new Error(`unknown Missions action ${action}`);
+  }
+  renderList();
+  return phoneList();
+}
