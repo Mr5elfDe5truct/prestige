@@ -944,3 +944,11 @@ body.cu-on { overflow: hidden; }
 .cu-stop { margin-top: auto; border-color: var(--red); color: #fff; background: var(--red-deep); font-weight: 600; padding: 10px; }
 .cu-stop:hover { background: var(--red); }
 .cu-model { margin: 0; font-size: 11px; color: var(--muted); text-align: center; }
+/* Director: the plan and each step's state while a music video is made. */
+.director-title { margin: 0 0 4px; }
+.director-steps { margin: 8px 0 10px; padding-left: 22px; font-size: 13px; color: var(--muted); display: grid; gap: 3px; }
+.director-steps li { overflow-wrap: anywhere; }
+.director-steps li.on { color: var(--fg); }
+.director-steps li.on::marker { color: var(--gold); }
+.director-steps li.done { color: var(--fg); opacity: .75; }
+.director-steps li.done::after { content: " ✓"; color: var(--ok); }

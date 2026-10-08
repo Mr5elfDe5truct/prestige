@@ -16,8 +16,9 @@ import { initSystem, onGpus, showSystem, unloadAll } from "./system";
 import { ollamaCtx, onPlanChange, readGpus, refreshPlan, shortName, type Gpu } from "./gpus";
 import {
   allowRenders, cancelRender, chatSettings, editLabel, editMedia, initStudio, modelLabel, openRender, renderMedia, renderMenu, renderModel, renderSong, renderTalk,
-  showStudio, songSeconds, talkSecs, type MediaKind,
+  renderShot, showStudio, songSeconds, talkSecs, videoQuality, type MediaKind,
 } from "./studio";
+import { DIRECTOR_ASK, DIRECTOR_CMD, SHOT_SECONDS, SONG_SECS, askedSeconds, directorSecs, lyricsSrt, planVideo } from "./director";
 import { askSpeech, speakLine } from "./talking";
 import { SONG_CMD, writeSong } from "./songwriter";
 import { onSettingsChange } from "./gensettings";
@@ -1416,6 +1417,142 @@ async function makeSong(text: string, request: string, hooks?: ReplyHooks) {
   }
 }
 
+/** The Director: one prompt becomes a short music video (director.ts). The chat model plans the song and the shots,
+ *  ACE-Step makes the song, LTX-2.5 renders each shot (one model at a time, through the render queue), Whisper times the
+ *  lyrics for subtitles, and ffmpeg joins it all. Each step shows in the reply as it happens. */
+async function makeDirector(text: string, idea: string, hooks?: ReplyHooks) {
+  if (!inTauri) {
+    toast("Music videos are made in the desktop app.");
+    return hooks?.onDone?.(false);
+  }
+  const model = current;
+  if (!model) {
+    toast("No model is available to plan the video. Start the services first.", "warn");
+    return hooks?.onDone?.(false);
+  }
+  if (chat.messages.length === 0) chat.title = text.replace(/\s+/g, " ").slice(0, 60);
+  chat.messages.push({ role: "user", content: text });
+  renderChat();
+  const reply: StoredMessage = { role: "assistant", content: "", model: "Director" };
+  const bubble = addAiBubble("Director", () => reply.content);
+  const body = $(".msg-body", bubble);
+  const replyChat = chat.id;
+  phoneReplyStart("Director", text);
+  body.innerHTML = `<div class="director"><div class="director-plan"></div><div class="render-progress"><div class="progress"><i></i></div><span class="status-line">Starting…</span></div></div>`;
+  const planEl = $(".director-plan", body);
+  let lastStatus = 0;
+  const status = (pct: number, label: string) => {
+    ($(".progress", body) as HTMLElement | null)?.style.setProperty("--v", String(pct));
+    const l = $(".status-line", body);
+    if (l) l.textContent = label;
+    if (Date.now() - lastStatus > 2000) {
+      lastStatus = Date.now();
+      phonePush({ type: "status", chatId: replyChat, text: `${label} (${Math.round(pct)}%)` });
+    }
+  };
+  scrollDown(true);
+  busy = new AbortController();
+  busy.signal.addEventListener("abort", () => (cancelRender(), cancelRender("Director")), { once: true });
+  setBusyUi(true);
+  const t0 = Date.now();
+  const seconds = askedSeconds(idea);
+  const quality = /\b(draft|quick|fast)\b/i.test(idea) ? "draft" : videoQuality();
+  const subtitles = !/\b(no|without)\s+(subtitles|captions|lyrics on screen)\b/i.test(idea);
+  try {
+    status(1, `${model.name} is planning the song and the shots…`);
+    const plan = await planVideo(model, idea, seconds, busy.signal, (n) => status(1, `${model.name} is planning the song and the shots… ${n} characters`));
+    const n = plan.shots.length;
+    // The time it'll take (measured; see director.ts), and each part's share of the progress bar.
+    const total = directorSecs(seconds, quality === "draft");
+    // The plan shows straight away: the title and style, then each shot with its state.
+    const esc = (t: string) => t.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+    planEl.innerHTML =
+      `<p class="director-title">🎬 <b>${esc(plan.title)}</b> · ${seconds} s · ${n} shots · about ${Math.max(1, Math.round(total / 60))} min${quality === "draft" ? " (draft)" : ""}</p>` +
+      `<p class="credit">${esc(plan.style)}</p>` +
+      `<ol class="director-steps"><li data-s="song">The song (ACE-Step)</li>${plan.shots.map((sh, i) => `<li data-s="${i}" title="${esc(sh.prompt)}">Shot ${i + 1}: ${esc(sh.action)}</li>`).join("")}${subtitles && plan.lyrics ? `<li data-s="subs">Lyrics as subtitles (Whisper)</li>` : ""}<li data-s="join">Joining it all (ffmpeg)</li></ol>`;
+    const step = (k: string, state: "on" | "done") => planEl.querySelector(`[data-s="${k}"]`)?.setAttribute("class", state);
+    scrollDown();
+    const span = (from: number, to: number) => (pct: number, label: string) => status(from + ((to - from) * pct) / 100, label);
+    // The song first: its length is the video's.
+    step("song", "on");
+    const songT = SONG_SECS / total;
+    const song = (await renderSong(plan.style, plan.lyrics, span(2, 2 + 90 * songT), { seconds, bpm: plan.bpm, key: plan.key, language: plan.language }))[0];
+    step("song", "done");
+    // Then each shot, one at a time.
+    const shots: string[] = [];
+    const shotT = (90 * (1 - songT)) / n;
+    for (let i = 0; i < n; i++) {
+      if (busy.signal.aborted) throw new Error("stopped");
+      step(String(i), "on");
+      const from = 2 + 90 * songT + shotT * i;
+      const got = await renderShot(plan.shots[i].prompt, SHOT_SECONDS, span(from, from + shotT), {
+        title: `${plan.title}: shot ${i + 1} of ${n}`,
+        note: `Shot ${i + 1} of ${n} · `,
+        quality,
+      });
+      shots.push(got[0].path);
+      step(String(i), "done");
+    }
+    // The lyrics, timed by Whisper (optional: the video is still made without them).
+    let srt = "";
+    if (subtitles && plan.lyrics) {
+      step("subs", "on");
+      status(93, "Timing the lyrics (Whisper)…");
+      try {
+        await allowRenders();
+        srt = await lyricsSrt(await (await fetch(convertFileSrc(song.path))).blob(), plan.lyrics, seconds);
+      } catch (e) {
+        toast(`The video is made without subtitles: couldn't time the lyrics (${errMsg(e)}).`, "warn");
+      }
+      step("subs", "done");
+    }
+    step("join", "on");
+    status(97, "Joining the shots, the song and the lyrics…");
+    const out = await invoke<string>("director_assemble", {
+      root: settings.stackRoot ?? null,
+      shots,
+      song: song.path,
+      seconds,
+      width: 768,
+      height: 512,
+      fps: 24,
+      srt: srt || null,
+      title: plan.title,
+    });
+    step("join", "done");
+    reply.render = { path: out, prompt: idea, seconds: Math.round((Date.now() - t0) / 1000), kind: "video", reply: true, title: plan.title };
+    reply.content =
+      `**${plan.title}** · ${seconds} s music video, ${n} shots\n\n*${plan.style}*\n\n` +
+      `${plan.look}\n\n` +
+      plan.shots.map((sh, i) => `${i + 1}. ${sh.action}`).join("\n") +
+      (plan.lyrics ? `\n\n**Lyrics**\n\n${lyricsMd(plan.lyrics)}` : "");
+    renderFigure(bubble, reply.render);
+    renderBody(body, reply.content);
+  } catch (e) {
+    if (busy?.signal.aborted) reply.content = "*(stopped)*";
+    else {
+      reply.error = true;
+      reply.content = `Couldn't make the music video: ${errMsg(e)}`;
+      bubble.classList.add("error");
+    }
+    body.innerHTML = md(reply.content);
+  } finally {
+    chat.messages.push(reply);
+    bubble.dataset.i = String(chat.messages.length - 1);
+    if (!reply.error) reactButton(bubble, reply);
+    busy = null;
+    setBusyUi(false);
+    scrollDown();
+    persist()
+      .catch((e) => toast(`Couldn't save this chat: ${e}`, "warn"))
+      .finally(() => phoneReplyEnd(replyChat));
+    if (hooks) {
+      hooks.onDelta?.(reply.render ? "Here's your music video." : "I couldn't make that music video.");
+      hooks.onDone?.(!!reply.render);
+    }
+  }
+}
+
 /** Deep Research: searches, reads pages and writes a cited report with the current model (research.ts). Each search and
  *  page read shows as a step in the reply, with its notes inside. */
 async function runResearch(text: string, question: string, hooks?: ReplyHooks) {
@@ -1825,6 +1962,16 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
       return;
     }
     return runComputer(text, task, opts.hooks);
+  }
+  // "/director a fox in a neon city" or "make me a music video about…": the Director plans, renders and joins it.
+  if (!live && !opts.images && !attachments.length && (DIRECTOR_CMD.test(text) || DIRECTOR_ASK.test(text))) {
+    const idea = text.replace(DIRECTOR_CMD, "").trim();
+    if (!idea) {
+      toast("Say what the music video is about after /director, e.g. /director a lonely robot finds a flower, 30 seconds");
+      opts.hooks?.onDone?.(false);
+      return;
+    }
+    return makeDirector(text, idea, opts.hooks);
   }
   // "/song …" or "write me a song about…": the chat model writes it and ACE-Step sings it. (Not with pictures attached,
   // unless asked for with /song: those messages are about the pictures.)

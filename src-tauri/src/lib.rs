@@ -10,6 +10,7 @@ mod phone;
 mod toolstore;
 mod vram;
 mod transcribe;
+mod director;
 mod studio;
 
 use serde::Serialize;
@@ -531,6 +532,7 @@ pub fn run() {
             toolstore::tools_setup,
             toolstore::tools_open_link,
             transcribe::transcribe_file,
+            director::director_assemble,
             transcribe::transcribe_bytes,
             transcribe::pick_media,
             computer::cu_screenshot,
