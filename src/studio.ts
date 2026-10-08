@@ -2593,12 +2593,33 @@ export async function renderShot(
   prompt: string,
   seconds: number,
   progress: (pct: number, label: string) => void,
-  how: { title?: string; note?: string; quality?: Quality } = {},
+  how: { title?: string; note?: string; quality?: Quality; frame?: string } = {},
 ): Promise<Asset[]> {
   await ensureWorkflows();
-  if (!workflows.video) throw new Error(`workflows\\${MODES.video.file} wasn't found (update the Workstation and add the video pack)`);
   const video: Partial<VideoSettings> = { seconds, res: "768x512", fps: 24, ...(how.quality ? { quality: how.quality } : {}) };
+  // A storyboard shot with its frame drawn: LTX-2.5 image-to-video, starting on that frame.
+  if (how.frame) {
+    if (!workflows.refvideo) throw new Error(`workflows\\${MODES.refvideo.file} wasn't found (update the Workstation and add the video pack)`);
+    const src: Source = items.find((x) => x.path === how.frame) ?? { path: how.frame, name: how.frame.split(/[\\/]/).pop() ?? "frame", kind: "image", mtime: 0, size: 0 };
+    return run("refvideo", prompt, src, { video }, progress, { from: "Director", title: how.title, note: how.note });
+  }
+  if (!workflows.video) throw new Error(`workflows\\${MODES.video.file} wasn't found (update the Workstation and add the video pack)`);
   return run("video", prompt, null, { video }, progress, { from: "Director", title: how.title, note: how.note });
+}
+
+/** Storyboard: a shot's frame, one picture from the image model at the video's shape (3:2, drawn at 1152×768 so it
+ *  stays sharp when LTX-2.5 starts from it). `title` is what the render queue shows. */
+export async function renderFrame(prompt: string, progress: (pct: number, label: string) => void, title?: string): Promise<Asset[]> {
+  await ensureWorkflows();
+  const gm = chatMode("image");
+  if (!workflows[gm]) throw new Error(`workflows\\${modeOf(gm).file} wasn't found`);
+  return run(gm, prompt, null, { override: { w: 1152, h: 768, count: 1 } }, progress, { from: "Storyboard", title });
+}
+
+/** The image model storyboard frames are drawn with. */
+export async function frameLabel() {
+  await ensureWorkflows();
+  return modeOf(chatMode("image")).label;
 }
 /** The saved Video quality ("draft" makes a Director's shots quicker). */
 export const videoQuality = () => settings().video.quality;

@@ -628,6 +628,31 @@
       </form>
     </dialog>
 
+    <dialog class="sheet storyboard" id="storyboard">
+      <form method="dialog" onsubmit="return false">
+        <h2>Storyboard</h2>
+        <div class="sb-top">
+          <label>Title<input id="sb-title" type="text" autocomplete="off" /></label>
+          <label>Music style<input id="sb-style" type="text" autocomplete="off" placeholder="genre, mood, instruments, vocals" /></label>
+        </div>
+        <div class="sb-top">
+          <label>The look, in front of every shot<textarea id="sb-look" rows="3" placeholder="Who or what it's about, how they look, and the visual style"></textarea></label>
+          <label>Lyrics<textarea id="sb-lyrics" rows="3" placeholder="Empty for an instrumental"></textarea></label>
+        </div>
+        <div class="sb-shots" id="sb-shots"></div>
+        <p class="muted" id="sb-summary"></p>
+        <div class="acts sb-acts">
+          <label class="check"><input id="sb-draft" type="checkbox" />Draft (quicker shots)</label>
+          <label class="check"><input id="sb-subs" type="checkbox" />Lyrics as subtitles</label>
+          <span class="grow"></span>
+          <button type="button" class="btn" id="sb-stop" hidden>Stop drawing</button>
+          <button type="button" class="btn" id="sb-draw-all">Draw missing frames</button>
+          <button type="button" class="btn" id="sb-close" title="The board is kept: /storyboard opens it again">Close</button>
+          <button type="button" class="btn primary" id="sb-render">Render the video</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog class="sheet" id="ask">
       <form method="dialog">
         <h2 id="ask-title"></h2>

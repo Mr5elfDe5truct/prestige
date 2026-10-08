@@ -27,7 +27,7 @@ export interface Shot {
  * song (ACE-Step loading after the chat model unloads, then rendering), each 5 s shot ~230 s at 768×512 (~145 s as a
  * draft, which skips the upscale pass but still loads the models), and ~15 s to time the lyrics and join it all. A
  * 20 s video took 1075 s; a 15 s draft 574 s. */
-const PLAN_SECS = 45;
+export const PLAN_SECS = 45;
 export const SONG_SECS = 95;
 const SHOT_SECS = { draft: 145, standard: 230 };
 const FINISH_SECS = 15;
