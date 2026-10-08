@@ -30,7 +30,7 @@ import {
   isVox, onSpeakingChange, onSpeechError, releaseSpeechGpu, setVoice, speak, speakDelta, speakEnd, stopSpeaking, DEFAULT_VOICE,
 } from "./speech";
 import { bestFor, capsFor, chipsHtml, supportsTools } from "./caps";
-import { initCatalog, openCatalog } from "./catalog";
+import { initCatalog, openCatalog, phoneCatalog } from "./catalog";
 import { checkForUpdates, initUpdates } from "./updates";
 import { GROUPS, describeCall, loadTools, runTool, toolContext, toolSpecs, type ToolDef, type ToolStep } from "./tools";
 import { errMsg, freeLlamaVram, nameFor, listModels, ping, streamChat, OLLAMA, LLAMA, type ChatMessage, type ModelInfo, type StreamStats } from "./backends";
@@ -40,11 +40,11 @@ import { applyCachedLook, applyLook, closeAppearance, initAppearance, openAppear
 import { pickReaction, reactFilter, reactedNote, showReaction, stripTags, REACT_HINT } from "./emotes";
 import { CANVAS_CMD, CANVAS_HINT, canvasOnChat, canvasReplyStart, findCanvas, initCanvas, openCanvas, openModel, streamCanvas, streamEnded, wantsCanvas } from "./canvas";
 import {
-  addDropped, addFiles, citeLabel, docById, hasDocs, initKnowledge, knowledgeFor, openKnowledge, openSource, readyDocs, type KbDoc, type Source,
+  addDropped, addFiles, citeLabel, docById, hasDocs, initKnowledge, knowledgeFor, openKnowledge, openSource, phoneKnowledge, readyDocs, type KbDoc, type Source,
 } from "./knowledge";
 import { RESEARCH_CMD, deepResearch } from "./research";
 import { TRANSCRIBE_CMD, clock, isMedia, summaryPrompt, transcribeMedia, transcriptMd, type MediaSource } from "./transcribe";
-import { initMissions } from "./missions";
+import { initMissions, phoneMissions } from "./missions";
 import { DO_CMD, brains, describe as describeAct, doItForMe } from "./computer";
 import {
   activeCharacter, characterById, characterMemory, characterPrompt, characters, faceScene, initCharacters, remember, renderPicker, setCharacterVoice, voiceOf, wantsFace,
@@ -2423,6 +2423,37 @@ async function phoneCharacters(action: string, a: any) {
   };
 }
 
+/** Settings on the phone: the tool groups models may use in chat, "use my files in every chat", and shared memory. */
+async function phoneSettings(action: string, a: any) {
+  if (action === "tool") {
+    const next = enabledGroups();
+    a.on ? next.add(String(a.id)) : next.delete(String(a.id));
+    settings.toolGroups = [...next];
+    saveSettings();
+    updateToolsButton();
+  } else if (action === "kbAll") {
+    settings.kbAll = a.on ? undefined : false;
+    saveSettings();
+  } else if (action === "remember") {
+    const cfg = memCfg();
+    if (!cfg) throw new Error("Shared memory isn't set up (Settings → Shared memory on the PC).");
+    const fact = String(a.fact ?? "").trim();
+    if (!fact) throw new Error("Say what to remember.");
+    await addMemory(cfg, fact);
+  } else if (action === "memories") {
+    const cfg = memCfg();
+    if (!cfg) return { memories: null };
+    return { memories: (await listMemories(cfg)).map((m) => m.content) };
+  } else if (action !== "list") throw new Error(`unknown Settings action ${action}`);
+  const on = enabledGroups();
+  const { tools } = await loadTools();
+  return {
+    tools: GROUPS.map((g) => ({ id: g.id, label: g.label, hint: g.hint, on: on.has(g.id), count: tools.filter((t) => t.group === g.id).length })),
+    kbAll: settings.kbAll !== false,
+    memory: !!memCfg(),
+  };
+}
+
 interface PhoneSend {
   chatId?: string | null;
   text: string;
@@ -3082,6 +3113,10 @@ async function main() {
     onPhoneAsk("studio", (action, args) => phoneStudio(action, args));
     onPhoneAsk("system", (action, args) => phoneSystem(action, args));
     onPhoneAsk("characters", phoneCharacters);
+    onPhoneAsk("knowledge", (action, args) => phoneKnowledge(action, args));
+    onPhoneAsk("missions", (action, args) => phoneMissions(action, args));
+    onPhoneAsk("catalog", (action, args) => phoneCatalog(action, args));
+    onPhoneAsk("settings", phoneSettings);
     onQueueChange(phoneQueueChanged);
   }
   updateToolsButton();

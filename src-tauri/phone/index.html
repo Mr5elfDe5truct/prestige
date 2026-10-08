@@ -194,6 +194,26 @@
       .mrow small { display: block; color: var(--muted); font-size: 11.5px; }
       .mrow.loaded b { color: var(--gold); }
       .mrow .btn { padding: 6px 12px; font-size: 13px; }
+      .more-head { display: flex; align-items: center; gap: 10px; }
+      .more-head h3 { margin: 0; font-size: 17px; flex: 1; }
+      .item-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); font-size: 14px; }
+      .item-row:first-child { border-top: 0; }
+      .item-row .t { flex: 1; min-width: 0; }
+      .item-row b { font-weight: 600; display: block; overflow-wrap: anywhere; }
+      .item-row small { display: block; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+      .item-row .acts { display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
+      .item-row .btn { padding: 6px 12px; font-size: 13px; }
+      .item-row.off b { color: var(--muted); }
+      .switch { position: relative; width: 44px; height: 26px; flex: none; }
+      .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+      .switch span { position: absolute; inset: 0; background: var(--line); border-radius: 999px; transition: background .15s; }
+      .switch span::after { content: ""; position: absolute; left: 3px; top: 3px; width: 20px; height: 20px; border-radius: 50%; background: var(--fg); transition: transform .15s; }
+      .switch input:checked + span { background: var(--red); }
+      .switch input:checked + span::after { transform: translateX(18px); }
+      .switch input:disabled + span { opacity: .4; }
+      .pbar { display: block; height: 4px; background: var(--line); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+      .pbar i { display: block; height: 100%; background: var(--red); }
+      .pane input[type=text], .pane input[type=time] { width: 100%; background: var(--panel-2); color: var(--fg); border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; font: 15px var(--body); }
       .sheet-menu .title { font-size: 12px; color: var(--muted); padding: 6px 12px; }
       .toast { position: fixed; z-index: 30; left: 50%; bottom: 90px; transform: translateX(-50%); background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; font-size: 13px; max-width: 90vw; }
     </style>
@@ -261,6 +281,13 @@
       <div class="card ram" id="sys-ram" hidden></div>
       <div class="card"><b>Models</b><div id="sys-models"><p class="muted">Loading…</p></div></div>
       <div class="card"><b>Services</b><div class="svc" id="sys-svc"></div></div>
+    </section>
+
+    <!-- More: Knowledge, Missions, Tools, Models and Memory, opened from the menu. -->
+    <section class="pane" id="more" hidden>
+      <div class="more-head"><button type="button" class="icon" id="more-back" aria-label="Back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5l-7 7 7 7" /></svg></button><h3 id="more-title"></h3></div>
+      <div id="more-body" style="display:flex;flex-direction:column;gap:12px"></div>
+      <input type="file" id="doc-file" accept=".pdf,.docx,.txt,.md,.markdown,.html,.htm,.csv,.json,.xml,.log,.py,.js,.ts,.java,.c,.cpp,.cs,.rs,.go,.rb,.php,.sh,.ps1,.yaml,.yml,.toml,.ini,text/*,application/pdf" hidden />
     </section>
 
     <!-- Renders: everything in ComfyUI's output folder on the PC. -->
@@ -331,6 +358,13 @@
         <div class="list" id="chats"></div>
         <span class="grow"></span>
         <button class="btn" id="drawer-persona">Characters</button>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px" id="drawer-more">
+          <button class="btn" data-more="knowledge">Knowledge</button>
+          <button class="btn" data-more="missions">Missions</button>
+          <button class="btn" data-more="tools">Tools</button>
+          <button class="btn" data-more="models">Models</button>
+          <button class="btn" data-more="memory" style="grid-column:1/-1">Shared memory</button>
+        </div>
         <button class="btn" id="change-pc" hidden>Connect to another PC</button>
         <button class="btn" id="unpair">Unpair this phone</button>
       </div>
@@ -400,7 +434,7 @@
 
       // ---------- pairing ----------
       function showPair() {
-        ["#top", "#tabs", "#thread", "#bottom", "#studio", "#renders", "#system"].forEach((s) => ($(s).hidden = true));
+        ["#top", "#tabs", "#thread", "#bottom", "#studio", "#renders", "#system", "#more"].forEach((s) => ($(s).hidden = true));
         $("#pair").hidden = false;
         const m = location.hash.match(/code=(\d{6})/);
         if (m) $("#code").value = m[1];
@@ -1443,6 +1477,8 @@
         $("#studio").hidden = t !== "studio";
         $("#renders").hidden = t !== "renders";
         $("#system").hidden = t !== "system";
+        $("#more").hidden = true;
+        clearInterval(moreTimer);
         clearInterval(sysTimer);
         if (t === "system") {
           loadSystem();
@@ -2018,6 +2054,183 @@
           toast(e.message);
         }
       }
+
+      // ---------- More: Knowledge, Missions, Tools, Models and Memory ----------
+      let moreTimer = 0;
+      let moreWhat = "";
+      const TITLES = { knowledge: "Knowledge", missions: "Missions", tools: "Tools", models: "Get more models", memory: "Shared memory" };
+      function openMore(what) {
+        $("#drawer").hidden = true;
+        ["#thread", "#bottom", "#studio", "#renders", "#system"].forEach((s) => ($(s).hidden = true));
+        clearInterval(sysTimer);
+        clearInterval(moreTimer);
+        document.querySelectorAll("#tabs button").forEach((b) => b.classList.remove("sel"));
+        moreWhat = what;
+        $("#more-title").textContent = TITLES[what];
+        $("#more-body").innerHTML = `<p class="muted">Loading…</p>`;
+        $("#more").hidden = false;
+        loadMore();
+        // Downloads and file reading move on by themselves: look again every few seconds.
+        if (what === "models" || what === "knowledge" || what === "missions") moreTimer = setInterval(() => !document.hidden && loadMore(true), 3000);
+      }
+      $("#drawer-more").addEventListener("click", (e) => {
+        const b = e.target.closest("[data-more]");
+        if (b) openMore(b.dataset.more);
+      });
+      $("#more-back").addEventListener("click", () => showTab(tab));
+      let moreBusy = false;
+      async function loadMore(quiet) {
+        if (moreBusy) return;
+        // Not while something is being typed there (a new mission, a memory): redrawing would lose it.
+        if (quiet && [...document.querySelectorAll("#more-body input[type=text], #more-body textarea")].some((x) => x.value.trim() || x === document.activeElement)) return;
+        moreBusy = true;
+        const what = moreWhat;
+        try {
+          const r =
+            what === "knowledge" ? await ask("knowledge.list")
+            : what === "missions" ? await ask("missions.list")
+            : what === "models" ? await ask("catalog.list")
+            : what === "memory" ? await ask("settings.memories")
+            : await ask("settings.list");
+          if (what === moreWhat && !$("#more").hidden) drawMore(what, r);
+        } catch (e) {
+          if (!quiet) $("#more-body").innerHTML = `<p class="muted">${esc(e.message)}</p>`;
+        } finally {
+          moreBusy = false;
+        }
+      }
+      /** Runs a request from a More screen and shows its answer. */
+      async function moreAct(action, args, then) {
+        try {
+          const r = await ask(action, args);
+          if (r.message) toast(r.message);
+          if (then) then(r);
+          else drawMore(moreWhat, r);
+        } catch (e) {
+          toast(e.message);
+        }
+      }
+      const toggle = (on, disabled = false) => `<label class="switch"><input type="checkbox"${on ? " checked" : ""}${disabled ? " disabled" : ""} /><span></span></label>`;
+      function rowEl(title, sub, right = "", cls = "") {
+        const d = document.createElement("div");
+        d.className = `item-row ${cls}`;
+        d.innerHTML = `<span class="t"><b></b><small></small></span>${right}`;
+        d.querySelector("b").textContent = title;
+        d.querySelector("small").textContent = sub;
+        return d;
+      }
+      function drawMore(what, r) {
+        const body = $("#more-body");
+        body.innerHTML = "";
+        const card = (title) => {
+          const c = document.createElement("div");
+          c.className = "card";
+          if (title) c.innerHTML = `<b>${esc(title)}</b>`;
+          body.appendChild(c);
+          return c;
+        };
+        if (what === "tools") {
+          const c = card("");
+          c.innerHTML = `<p class="muted">What models may use in chat, on the PC and from here. Anything that changes something asks first on the PC.</p>`;
+          for (const g of r.tools) {
+            const row = rowEl(g.label, g.count ? `${g.hint} · ${g.count} tools` : `${g.hint} · not available`, toggle(g.on, !g.count));
+            row.querySelector("input").addEventListener("change", (e) => moreAct("settings.tool", { id: g.id, on: e.target.checked }));
+            c.appendChild(row);
+          }
+          const k = card("");
+          const row = rowEl("Use my files in every chat", "Close matches from everything in Knowledge come into every chat", toggle(r.kbAll));
+          row.querySelector("input").addEventListener("change", (e) => moreAct("settings.kbAll", { on: e.target.checked }));
+          k.appendChild(row);
+        } else if (what === "memory") {
+          const c = card("");
+          if (r.memories === null) {
+            c.innerHTML = `<p class="muted">Shared memory isn't set up. Add Open WebUI's API key in Settings → Shared memory on the PC.</p>`;
+            return;
+          }
+          c.innerHTML = `<p class="muted">What every model in Prestige and Open WebUI knows about you. In chat, "remember that…" adds to it too.</p><input type="text" id="mem-new" placeholder="Something to remember…" /><button type="button" class="btn primary" id="mem-add">Remember</button>`;
+          $("#mem-add").addEventListener("click", () => {
+            const fact = $("#mem-new").value.trim();
+            if (fact) moreAct("settings.remember", { fact }, () => (toast("Remembered."), loadMore()));
+          });
+          const list = card(`${r.memories.length} ${r.memories.length === 1 ? "memory" : "memories"}`);
+          for (const m of r.memories) list.appendChild(rowEl(m, ""));
+        } else if (what === "knowledge") {
+          const c = card("");
+          c.innerHTML = `<p class="muted">Files models can read and cite in chat. They're read and kept on the PC.</p><button type="button" class="btn primary" id="kb-add">Add a file from this phone</button>`;
+          $("#kb-add").addEventListener("click", () => $("#doc-file").click());
+          if (!r.ready) c.insertAdjacentHTML("beforeend", `<p class="warn">Get the embedding model first: Knowledge on the PC, one click.</p>`);
+          const list = card(r.docs.length ? `${r.docs.length} files` : "");
+          if (!r.docs.length) list.innerHTML = `<p class="muted">No files yet.</p>`;
+          for (const d of r.docs) {
+            const row = rowEl(d.name, [d.folder, d.what].filter(Boolean).join(" · "), `<button type="button" class="linkish">remove</button>`, d.state === "error" ? "off" : "");
+            row.querySelector("button").addEventListener("click", () => confirm(`Remove ${d.name} from Knowledge?`) && moreAct("knowledge.remove", { id: d.id }));
+            list.appendChild(row);
+          }
+        } else if (what === "missions") {
+          const list = card("");
+          if (!r.missions.length) list.innerHTML = `<p class="muted">No missions yet. Start from a template below, or make your own.</p>`;
+          for (const m of r.missions) {
+            const sub = [m.when, m.running ? "Running now…" : m.next ? `next ${m.next}` : m.enabled ? "" : "off", m.last ? `Last: ${m.last}` : "Hasn't run yet"].filter(Boolean).join(" · ");
+            const row = rowEl(m.name, sub, `<span class="acts">${toggle(m.enabled)}<span><button type="button" class="linkish" data-a="${m.running ? "stop" : "run"}">${m.running ? "stop" : "run now"}</button> ${m.chatId ? `<button type="button" class="linkish" data-a="open">result</button> ` : ""}<button type="button" class="linkish" data-a="delete">delete</button></span></span>`, m.enabled ? "" : "off");
+            row.querySelector("input").addEventListener("change", (e) => moreAct("missions.on", { id: m.id, on: e.target.checked }));
+            row.querySelectorAll("[data-a]").forEach((b) =>
+              b.addEventListener("click", () => {
+                const a = b.dataset.a;
+                if (a === "open") {
+                  showTab("chat");
+                  return loadChat(m.chatId);
+                }
+                if (a === "delete" && !confirm(`Delete the mission "${m.name}"? Its past results stay in Past chats.`)) return;
+                moreAct(`missions.${a}`, { id: m.id });
+              }),
+            );
+            list.appendChild(row);
+          }
+          const tpl = card("Templates");
+          for (const t of r.templates) {
+            const row = rowEl(t.name, t.about, `<button type="button" class="btn">Add</button>`);
+            row.querySelector("button").addEventListener("click", () => moreAct("missions.add", { template: t.i }));
+            tpl.appendChild(row);
+          }
+          const own = card("Your own (daily)");
+          own.insertAdjacentHTML(
+            "beforeend",
+            `<input type="text" id="ms-name" placeholder="Name, e.g. Morning briefing" /><textarea id="ms-prompt" rows="3" placeholder="What to do, e.g. Check r/LocalLLaMA's top posts today and summarise the most important ones with links."></textarea><div class="row"><input type="time" id="ms-time" value="08:00" style="flex:1" /><select id="ms-how"><option value="chat">Chat with tools</option><option value="research">Deep Research</option></select></div><button type="button" class="btn primary" id="ms-add">Add mission</button>`,
+          );
+          $("#ms-add").addEventListener("click", () => moreAct("missions.add", { name: $("#ms-name").value, prompt: $("#ms-prompt").value, time: $("#ms-time").value, how: $("#ms-how").value }));
+        } else if (what === "models") {
+          const c = card("");
+          c.innerHTML = `<p class="muted">Models checked to run on the PC. Downloading happens on the PC; it shows in the model menu when it's done.</p>`;
+          const FIT = { gpu: "fits the GPU", split: "part in RAM", big: "too big for the GPU" };
+          for (const m of r.models) {
+            const right = m.installed ? `<span class="muted">Installed</span>` : m.busy ? `<button type="button" class="btn">Cancel</button>` : `<button type="button" class="btn primary">Download</button>`;
+            const row = rowEl(`${m.name} · ${m.maker}`, `${m.about} ${m.size}${FIT[m.fits] ? ` · ${FIT[m.fits]}` : ""} · ${m.caps.join(", ")}`, right);
+            if (m.busy) row.querySelector(".t").insertAdjacentHTML("beforeend", `<span class="pbar"><i style="width:${m.busy.pct}%"></i></span><small>${esc(m.busy.label)}</small>`);
+            const b = row.querySelector("button");
+            if (b) b.addEventListener("click", () => moreAct(m.busy ? "catalog.cancel" : "catalog.install", { key: m.key }));
+            c.appendChild(row);
+          }
+        }
+      }
+      // A document from the phone for Knowledge (read on the PC).
+      $("#doc-file").addEventListener("change", async () => {
+        const f = $("#doc-file").files[0];
+        $("#doc-file").value = "";
+        if (!f) return;
+        if (f.size > 16 * 1024 * 1024) return toast("Files over 16 MB can't be sent from the phone. Add it on the PC.");
+        toast(`Sending ${f.name} to the PC…`);
+        const b64 = await new Promise((res, rej) => {
+          const rd = new FileReader();
+          rd.onload = () => res(String(rd.result).split(",")[1] || "");
+          rd.onerror = () => rej(rd.error);
+          rd.readAsDataURL(f);
+        }).catch(() => null);
+        if (b64 == null) return toast("Couldn't read that file.");
+        moreAct("knowledge.add", { name: f.name, b64 }, (r) => {
+          toast(`Reading ${f.name} on the PC…`);
+          if (moreWhat === "knowledge") drawMore("knowledge", r);
+        });
+      });
 
       function start() {
         $("#pair").hidden = true;

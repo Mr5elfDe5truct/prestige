@@ -451,3 +451,25 @@ export function libraryNote() {
 export function openSource(s: Source) {
   invoke("kb_open", { id: s.doc }).catch((e) => deps.toast(errMsg(e), "warn"));
 }
+
+// ---------- the phone (Knowledge on a paired phone; main.ts passes its requests here) ----------
+/** "list" the files, "add" one sent from the phone (base64), or "remove" one. */
+export async function phoneKnowledge(action: string, a: any): Promise<unknown> {
+  if (action === "add") {
+    const name = String(a.name ?? "file").replace(/[\\/:*?"<>|]/g, "_").slice(0, 120);
+    const bin = atob(String(a.b64 ?? ""));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    if (!(await modelOrAsk())) throw new Error(ollamaUp ? "Get the embedding model first (one click in Knowledge on the PC)." : "Ollama isn't running on the PC, so files can't be read yet.");
+    const added = await addFiles([{ file: new File([bytes], name) }]);
+    if (!added.length) throw new Error(`Couldn't add ${name}.`);
+  } else if (action === "remove") {
+    await invoke("kb_remove", { ids: [String(a.id)] });
+    await refreshDocs();
+  } else if (action === "list") await refreshDocs();
+  else throw new Error(`unknown Knowledge action ${action}`);
+  return {
+    docs: docs.map((d) => ({ id: d.id, name: d.name, folder: d.folder ?? "", state: d.state, what: stateText(d), added: d.added })),
+    ready: !!embedModel,
+  };
+}
