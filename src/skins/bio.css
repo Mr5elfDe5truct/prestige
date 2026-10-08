@@ -1,0 +1,19 @@
+/* Biological: membrane panels that slowly breathe; they swell from a single cell with a wobble. */
+body[data-style="bio"] {
+  --pn: radial-gradient(120% 120% at 30% 20%, color-mix(in srgb, var(--panel-2) 75%, transparent), color-mix(in srgb, var(--panel) 88%, transparent));
+  --edge: color-mix(in srgb, var(--ac) 35%, transparent);
+  --edge2: color-mix(in srgb, var(--ac2) 30%, transparent);
+  --bt: radial-gradient(circle at 35% 30%, color-mix(in srgb, var(--line) 90%, transparent), color-mix(in srgb, var(--panel) 95%, transparent));
+  --me: radial-gradient(circle at 30% 30%, color-mix(in srgb, color-mix(in srgb, var(--ac) 20%, var(--line)) 90%, transparent), color-mix(in srgb, var(--panel-2) 90%, transparent));
+  --aib: color-mix(in srgb, var(--bg) 35%, transparent);
+  --well: color-mix(in srgb, var(--bg) 60%, #000);
+  --rp: 30px;
+  --rs: 999px;
+  --dsp: "Quicksand", sans-serif;
+  --shp: inset 0 0 24px color-mix(in srgb, var(--ac) 18%, transparent), 0 0 calc(30px * var(--glow)) color-mix(in srgb, var(--ac) 12%, transparent);
+  --shb: inset 0 0 8px color-mix(in srgb, var(--ac2) 20%, transparent);
+  --grow: bio-in 1.2s cubic-bezier(.3, 1.6, .4, 1);
+}
+body[data-style="bio"]:not(.still) :is(.card, .create, .rq, .update-banner, .offline, .cu-card, .cam-pop, .canvas-card, .cu-next, .tool-confirm, dialog.sheet, .model-menu, .tools-pop, .history, .ctx-menu):not(.skin-grow) { animation: bio-breathe 7s ease-in-out infinite; }
+@keyframes bio-breathe { 0%, 100% { border-radius: 30px 34px 28px 36px; } 33% { border-radius: 38px 26px 34px 28px; } 66% { border-radius: 26px 36px 30px 32px; } }
+@keyframes bio-in { 0% { opacity: 0; scale: .05; } 50% { opacity: 1; scale: 1.04 .96; } 100% { opacity: 1; scale: 1; } }

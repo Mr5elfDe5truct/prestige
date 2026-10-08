@@ -7,6 +7,19 @@ import "@fontsource/ibm-plex-sans/400.css";
 import "@fontsource/ibm-plex-sans/500.css";
 import "@fontsource/ibm-plex-sans/600.css";
 import "@fontsource/jetbrains-mono/400.css";
+// the living styles' display fonts (Settings → Appearance → Style), bundled so they work offline
+import "@fontsource/share-tech-mono/400.css";
+import "@fontsource/chakra-petch/500.css";
+import "@fontsource/chakra-petch/600.css";
+import "@fontsource/fraunces/500.css";
+import "@fontsource/fraunces/600.css";
+import "@fontsource/quicksand/500.css";
+import "@fontsource/quicksand/600.css";
+import "@fontsource/cinzel/600.css";
+import "@fontsource/jura/500.css";
+import "@fontsource/jura/600.css";
+import "@fontsource/marcellus/400.css";
+import "@fontsource/space-mono/400.css";
 import "./styles.css";
 import markSvg from "./assets/rg-mark.svg?raw";
 import { marked } from "marked";
@@ -38,6 +51,17 @@ import { addMemory, memoryContext, listMemories, rememberRequest, DEFAULT_OWUI, 
 import { addStache } from "./talk";
 import { applyCachedLook, applyLook, closeAppearance, initAppearance, openAppearance, type Look } from "./theme";
 import { initMesa } from "./mesa";
+// the living styles: their shared hooks, then each one (theme.ts lists them; skins/backgrounds.ts draws behind them)
+import "./skins/living.css";
+import "./skins/matrix.css";
+import "./skins/cyber.css";
+import "./skins/nature.css";
+import "./skins/electric.css";
+import "./skins/waves.css";
+import "./skins/bio.css";
+import "./skins/clock.css";
+import "./skins/cosmic.css";
+import "./skins/crystal.css";
 import { pickReaction, reactFilter, reactedNote, showReaction, stripTags, REACT_HINT } from "./emotes";
 import { CANVAS_CMD, CANVAS_HINT, canvasOnChat, canvasReplyStart, findCanvas, initCanvas, openCanvas, openModel, streamCanvas, streamEnded, wantsCanvas } from "./canvas";
 import {

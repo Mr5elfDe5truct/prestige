@@ -320,7 +320,20 @@
           <label>Trim<input id="look-trim" type="color" title="The top hat, names and highlights" /></label>
         </div>
         <label><span class="look-glow-head"><span>Glow and bloom</span><b id="look-glow-val">100%</b></span><input id="look-glow" type="range" min="0" max="150" step="5" aria-label="Glow and bloom" /></label>
-        <label class="check"><input id="look-embers" type="checkbox" /> Ember drift: embers rise behind the app and flare when Prestige talks</label>
+        <label class="check"><input id="look-motion" type="checkbox" /> Background animation: the style's moving background, ember drift and a video background. Off keeps the background still (it's also still when Windows asks for less motion)</label>
+        <label class="check"><input id="look-embers" type="checkbox" /> Ember drift (Molded and Classic): embers rise behind the app and flare when Prestige talks</label>
+        <span class="look-label">Background</span>
+        <div class="look-bg">
+          <span id="look-bg-what"></span>
+          <button class="btn" type="button" id="look-bg-pick">Choose a picture or video…</button>
+          <button class="linkish" type="button" id="look-bg-clear">Remove (back to the style's background)</button>
+          <input type="file" id="look-bg-file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif,video/mp4,video/webm,.jpg,.jpeg,.png,.webp,.gif,.avif,.mp4,.webm" hidden />
+        </div>
+        <small class="muted" id="look-bg-note"></small>
+        <div class="look-bg-tune" id="look-bg-tune">
+          <label><span class="look-glow-head"><span>Darken</span><b id="look-bg-dim-val">55%</b></span><input id="look-bg-dim" type="range" min="0" max="90" step="5" aria-label="Darken the background" /></label>
+          <label><span class="look-glow-head"><span>Blur</span><b id="look-bg-blur-val">Off</b></span><input id="look-bg-blur" type="range" min="0" max="20" step="1" aria-label="Blur the background" /></label>
+        </div>
         <label class="check"><input id="look-emotes" type="checkbox" /> Emote reactions: react to replies, and Prestige reacts to your messages</label>
         <button class="linkish" id="look-reset" type="button">Back to the Dragon look</button>
         <h2 class="sub">Workstation</h2>

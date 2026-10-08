@@ -1,0 +1,86 @@
+/* The living styles' shared surface hooks (body[data-living], set by theme.ts for Living Matrix, Cyberpunk, Earth &
+   Nature, Energy, Frequency, Biological, Clockwork, Cosmic and Crystal). Each style's own file fills the variables:
+   --pn panel, --edge / --edge2 panel and button edges, --bt button, --me your messages, --aib Prestige's replies,
+   --well text boxes, --rp / --rs panel and button corners, --shp / --shb their shadows, --bf a backdrop blur, --dsp the
+   display font, --grow how things grow into place. They are built from the theme's colours (--red is the accent,
+   --gold the trim, --panel, --bg…), so every theme and Accent/Trim recolours every style. The moving background is
+   skins/backgrounds.ts. */
+body[data-living] {
+  --ac: var(--red);
+  --ac2: var(--gold);
+  --onac: color-mix(in srgb, var(--bg) 80%, #000);
+  --pn: var(--panel);
+  --edge: var(--line);
+  --edge2: var(--line);
+  --bt: var(--panel-2);
+  --me: var(--panel-2);
+  --aib: transparent;
+  --well: color-mix(in srgb, var(--bg) 70%, #000);
+  --rp: 14px;
+  --rs: 10px;
+  --shp: none;
+  --shb: none;
+  --dsp: var(--display);
+  --grow: skin-fade .5s ease-out;
+  background: var(--bg);
+}
+canvas.livebg { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: -3; pointer-events: none; }
+
+/* panels */
+body[data-living] :is(.hud, .composer-dock, .dock, .history, .card, .create, .rq, .update-banner, .offline, .live-bar, .cu-card, .cam-pop, .emote-pick, .ctx-menu, .canvas, .phone-box, .canvas-card, .cu-next, .tool-confirm, dialog.sheet, .model-menu, .tools-pop) {
+  background: var(--pn);
+  border: 1px solid var(--edge);
+  border-radius: var(--rp);
+  box-shadow: var(--shp);
+  backdrop-filter: var(--bf, none);
+}
+body[data-living] .hud { top: 8px; margin-top: 8px; padding: 8px 14px; }
+body[data-living] .hud-line { display: none; }
+body[data-living] .update-banner { margin-top: 8px; }
+body[data-living] .composer-dock { bottom: 96px; padding: 12px; margin-top: 6px; }
+body[data-living] .history-head, body[data-living] .canvas-head { border-color: var(--edge2); }
+body[data-living] :is(.mrow, .cat-card, .ms-row, .thumb, .kb-model, .chat-render.song, .chat-render.model .model-card, .ref-add, .ms-tpl) { background: var(--bt); border: 1px solid var(--edge2); border-radius: var(--rs); box-shadow: var(--shb); }
+body[data-living] :is(.history-item, .model-menu button, .ch-list button):hover { background: var(--bt); }
+
+/* keys */
+body[data-living] :is(.btn, .icon-btn:not(.ghost), .model-btn, .suggests button, .filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.pick, .live-ctl, .sources button, .chat-files .cf, .look-swatch) {
+  background: var(--bt);
+  border: 1px solid var(--edge2);
+  border-radius: var(--rs);
+  box-shadow: var(--shb);
+  color: var(--fg);
+  transition: transform .12s, filter .2s, background .2s, box-shadow .2s, border-color .2s;
+}
+body[data-living] :is(.btn, .icon-btn:not(.ghost), .model-btn, .suggests button, .filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.pick, .live-ctl, .sources button, .chat-files .cf, .look-swatch):not(:disabled):hover { border-color: var(--ac); filter: brightness(1.15); }
+body[data-living] :is(.btn, .icon-btn:not(.ghost), .model-btn, .suggests button, .filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.pick, .live-ctl, .sources button, .chat-files .cf, .look-swatch):not(:disabled):active { scale: .96; }
+body[data-living] .dock button { border: 1px solid transparent; border-radius: var(--rs); }
+body[data-living] .dock button:hover { background: var(--bt); }
+body[data-living] :is(.filters button.on, .gen-tabs button.on, .cat-filters button.on, .canvas-tabs button.on, .modes button.on, .seg button.on, .opt.set.on, .look-swatch.on, .live-ctl.on, #composer-speak.on, #composer-tools.on, [aria-pressed="true"]:is(.btn, .icon-btn, .live-ctl), .dock button.active, .history-item.sel, .model-menu button.sel, .ch-list button.sel) { color: var(--ac); border-color: var(--ac); background: var(--bt); box-shadow: var(--shb); }
+body[data-living] :is(.btn.primary, .icon-btn.send, .live-ctl.end, .btn.talk.on) { background: var(--ac); border-color: var(--ac); color: var(--onac); }
+body[data-living] :is(.btn.primary, .icon-btn.send):hover { background: var(--ac); filter: brightness(1.15); }
+body[data-living] .seg { border-color: var(--edge2); border-radius: var(--rs); gap: 3px; padding: 2px; overflow: visible; }
+body[data-living] .seg button + button { border-left: 1px solid var(--edge2); }
+
+/* messages: yours stand on a panel of their own; Prestige's sit on the background */
+body[data-living] .msg.you { background: var(--me); border: 1px solid var(--edge2); border-radius: var(--rp); }
+body[data-living] .msg.ai { background: var(--aib); border-radius: var(--rp); padding: 10px 14px; }
+
+/* text boxes */
+body[data-living] .composer { background: var(--well); border: 1px solid var(--edge2); border-radius: var(--rp); box-shadow: none; }
+body[data-living] .composer:focus-within { border-color: var(--ac); box-shadow: 0 0 calc(14px * var(--glow)) color-mix(in srgb, var(--ac) 25%, transparent); }
+body[data-living] :is(input:not([type="checkbox"], [type="radio"], [type="color"], [type="range"], [type="file"]), select, textarea:not(#prompt)) { background: var(--well); border-color: var(--edge2); border-radius: var(--rs); }
+
+/* the display font */
+body[data-living] :is(h1, h2, h3, .msg-who, .eyebrow, .look-label, .dock button, .sheet label, .live-status, .voice-status) { font-family: var(--dsp); }
+
+/* growing into place (mesa.ts): panels, popovers and new messages use the style's own --grow */
+body[data-living] .skin-grow { animation: var(--grow) both; animation-delay: calc(var(--i, 0) * 100ms); }
+body[data-living] .msg.mesa-in { animation: var(--grow) both; animation-delay: calc(var(--k, 0) * 120ms); }
+body[data-living] .mesa-sub { animation: mesa-sub .45s cubic-bezier(.2, .9, .3, 1) both; animation-delay: calc(240ms + var(--k, 0) * 60ms); }
+body[data-living] .skin-out[hidden] { display: var(--mesa-d, block) !important; pointer-events: none; animation: skin-fade .2s ease-in reverse both; }
+@keyframes skin-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes mesa-sub { from { opacity: 0; translate: 0 8px; } to { opacity: 1; translate: 0 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  body[data-living] :is(.skin-grow, .mesa-sub, .mesa-in) { animation: none !important; }
+}

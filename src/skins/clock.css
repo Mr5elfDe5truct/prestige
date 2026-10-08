@@ -1,0 +1,20 @@
+/* Clockwork: brass-framed walnut plates with rivets; they swing up on a hinge from their bottom edge. */
+body[data-style="clock"] {
+  --rivet: color-mix(in srgb, var(--ac) 85%, #000);
+  --pn: linear-gradient(170deg, var(--panel), color-mix(in srgb, var(--panel) 60%, var(--bg)));
+  --edge: color-mix(in srgb, var(--ac) 55%, var(--panel));
+  --edge2: color-mix(in srgb, var(--ac) 40%, var(--panel));
+  --bt: linear-gradient(180deg, color-mix(in srgb, var(--ac) 30%, var(--panel-2)), var(--panel));
+  --me: linear-gradient(180deg, var(--panel-2), var(--panel));
+  --aib: rgba(0, 0, 0, .25);
+  --well: color-mix(in srgb, var(--bg) 70%, #000);
+  --rp: 10px;
+  --rs: 6px;
+  --dsp: "Cinzel", serif;
+  --shp: inset 0 0 0 3px color-mix(in srgb, var(--panel) 60%, var(--bg)), inset 0 0 0 4px color-mix(in srgb, var(--ac) 75%, #000), 0 10px 24px rgba(0, 0, 0, .55);
+  --shb: inset 0 1px 0 color-mix(in srgb, var(--ac) 35%, transparent), 0 2px 3px rgba(0, 0, 0, .5);
+  --grow: cl-in .9s cubic-bezier(.3, 1.3, .4, 1);
+}
+body[data-style="clock"] :is(.hud, .composer-dock, .dock, .history, .card, .create, .rq, .update-banner, .offline, .live-bar, .cu-card, .cam-pop, .emote-pick, .ctx-menu, .canvas, .phone-box, .canvas-card, .cu-next, .tool-confirm, dialog.sheet, .model-menu, .tools-pop) { background: radial-gradient(circle at 10px 10px, var(--rivet) 2.5px, transparent 3.5px), radial-gradient(circle at calc(100% - 10px) 10px, var(--rivet) 2.5px, transparent 3.5px), radial-gradient(circle at 10px calc(100% - 10px), var(--rivet) 2.5px, transparent 3.5px), radial-gradient(circle at calc(100% - 10px) calc(100% - 10px), var(--rivet) 2.5px, transparent 3.5px), var(--pn); }
+body[data-style="clock"] .skin-grow { transform-origin: 50% 100%; }
+@keyframes cl-in { 0% { opacity: 0; scale: 1 .05; } 100% { opacity: 1; scale: 1; } }

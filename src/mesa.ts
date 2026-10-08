@@ -1,5 +1,6 @@
-// Mesa, molded: things grow into place. The look itself is mesa.css (the Molded style: body[data-style="molded"], which
-// theme.ts sets from Settings → Appearance → Style); this adds the motion. Panels rise out of the ground when the launch screen lifts and
+// Things grow into place, in every style but Classic. Molded's look is mesa.css (body[data-style="molded"]) and the living
+// styles' is skins/ (body[data-living]); theme.ts sets them from Settings → Appearance → Style. This adds the motion,
+// in Molded's way (rising out of the ground, growing from the button) or with the living style's own --grow. Panels rise out of the ground when the launch screen lifts and
 // when a section opens, popovers and dialogs grow open from the button that opened them (and fold back into it when
 // they close), and new messages grow into the thread. It only watches the page: the rest of the app opens and closes
 // things as it always has, by their `hidden` attribute or dialog.showModal().
@@ -17,7 +18,11 @@ const POPOVERS: [string, string][] = [
 /** Panels that rise into place when a section opens. */
 const PANELS = ".composer-dock, .card, .create, .rq, .gallery, .voice-stage, .update-banner, .offline";
 
-const on = () => document.body.dataset.style === "molded" && !matchMedia("(prefers-reduced-motion: reduce)").matches;
+const style = () => document.body.dataset.style;
+const on = () => !!style() && style() !== "classic" && !matchMedia("(prefers-reduced-motion: reduce)").matches;
+/** The animation classes for the style: Molded's own, or the living style's --grow (skins/living.css). */
+const anim = () =>
+  style() === "molded" ? { rise: "mesa-rise", pop: "mesa-pop", out: "mesa-out", ms: 900 } : { rise: "skin-grow", pop: "skin-grow", out: "skin-out", ms: 1300 };
 
 /** Plays one of mesa.css's animation classes, and takes it off again when it ends (the last frame clips the shadows). */
 const runs = new WeakMap<HTMLElement, Record<string, number>>();
@@ -45,7 +50,7 @@ function rise(els: HTMLElement[]) {
   if (!on()) return;
   els.forEach((el, i) => {
     el.style.setProperty("--i", String(i));
-    play(el, "mesa-rise", 900 + i * 90);
+    play(el, anim().rise, anim().ms + i * 100);
   });
 }
 
@@ -93,16 +98,17 @@ function watchPopover(sel: string, opener: string) {
       // it changed
       open = !el.hidden;
       if (open) {
-        el.classList.remove("mesa-out");
+        el.classList.remove("mesa-out", "skin-out");
         if (!on()) return;
         el.style.setProperty("--mesa-d", getComputedStyle(el).display);
         const from = middle(document.querySelector(opener)) ?? middle(el)!;
         origin(el, from);
-        play(el, "mesa-pop", 750);
+        el.style.setProperty("--i", "0");
+        play(el, anim().pop, anim().ms);
         riseInside(el);
       } else if (on() && el.style.getPropertyValue("--mesa-d")) {
-        el.classList.remove("mesa-pop");
-        play(el, "mesa-out", 400);
+        el.classList.remove("mesa-pop", "skin-grow");
+        play(el, anim().out, 400);
       }
     }
   }).observe(el, { attributes: true, attributeFilter: ["hidden"] });
@@ -117,7 +123,8 @@ function watchDialogs() {
     new MutationObserver(() => {
       if (!d.open || !on()) return;
       origin(d, lastPress ?? middle(d)!);
-      play(d, "mesa-pop", 750);
+      d.style.setProperty("--i", "0");
+      play(d, anim().pop, anim().ms);
       riseInside(d);
     }).observe(d, { attributes: true, attributeFilter: ["open"] });
   }
