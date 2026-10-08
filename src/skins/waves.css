@@ -1,0 +1,21 @@
+/* Frequency: frosted panels over sound waves; they open as a ripple, and keys ripple when pressed. */
+body[data-style="waves"] {
+  --pn: color-mix(in srgb, var(--panel) 80%, transparent);
+  --edge: color-mix(in srgb, var(--ac) 30%, transparent);
+  --edge2: color-mix(in srgb, var(--ac2) 30%, transparent);
+  --bt: color-mix(in srgb, var(--panel-2) 90%, transparent);
+  --me: color-mix(in srgb, color-mix(in srgb, var(--ac) 18%, var(--panel-2)) 90%, transparent);
+  --aib: transparent;
+  --well: rgba(0, 0, 0, .45);
+  --rp: 20px;
+  --rs: 999px;
+  --dsp: "Space Mono", monospace;
+  --bf: blur(6px);
+  --shp: 0 8px 24px rgba(0, 0, 0, .4);
+  --grow: wa-in .9s cubic-bezier(.2, .8, .2, 1);
+}
+body[data-style="waves"] :is(.btn, .icon-btn:not(.ghost), .model-btn, .suggests button, .filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.pick, .live-ctl, .sources button, .chat-files .cf, .look-swatch) { position: relative; overflow: hidden; }
+body[data-style="waves"] :is(.btn, .icon-btn:not(.ghost), .model-btn, .suggests button, .modes button, .opt.pick)::after { content: ""; position: absolute; inset: -40%; border-radius: 50%; border: 2px solid var(--ac); opacity: 0; scale: .2; pointer-events: none; }
+body[data-style="waves"] :is(.btn, .icon-btn:not(.ghost), .model-btn, .suggests button, .modes button, .opt.pick):active::after { animation: wa-ripple .5s ease-out; }
+@keyframes wa-ripple { from { opacity: .9; scale: .2; } to { opacity: 0; scale: 1.2; } }
+@keyframes wa-in { from { clip-path: circle(0 at 50% 50%); } to { clip-path: circle(120% at 50% 50%); } }

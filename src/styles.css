@@ -676,6 +676,15 @@ canvas.embers { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index:
 .look-style[data-style="molded"] i { background: radial-gradient(circle at 45% 30%, var(--wall-hi), var(--face) 60%, var(--wall-lo)); box-shadow: 0 0 0 1px rgba(0, 0, 0, .6), 0 3px 5px rgba(0, 0, 0, .6), 0 -1px 3px color-mix(in srgb, var(--gold-hi) 12%, transparent); }
 .look-style[data-style="classic"] i { background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--line); }
 .look-colors { display: flex; flex-wrap: wrap; gap: 6px 22px; }
+.look-bg { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 6px; font-size: 13px; }
+.look-bg-tune { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0 18px; }
+.look-bg-tune[hidden] { display: none; }
+#look-bg-note:empty { display: none; }
+/* your own background (theme.ts): cover-fit behind everything, darkened and blurred so text stays readable */
+#user-bg { position: fixed; inset: 0; z-index: -3; overflow: hidden; pointer-events: none; background: var(--bg); }
+#user-bg img, #user-bg video { position: absolute; inset: calc(-2 * var(--bg-blur, 0px)); width: calc(100% + 4 * var(--bg-blur, 0px)); height: calc(100% + 4 * var(--bg-blur, 0px)); object-fit: cover; filter: blur(var(--bg-blur, 0px)); }
+#user-bg::after { content: ""; position: absolute; inset: 0; background: color-mix(in srgb, var(--bg) calc(var(--bg-dim, .55) * 100%), transparent); }
+body.has-bg { background: var(--bg); }
 .sheet .look-colors label { flex-direction: row; align-items: center; gap: 8px; }
 .sheet input[type="color"] { width: 40px; height: 28px; padding: 2px; border-radius: 6px; cursor: pointer; }
 .sheet input[type="range"] { padding: 0; border: 0; background: none; accent-color: var(--red); }

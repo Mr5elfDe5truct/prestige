@@ -1,0 +1,22 @@
+/* Crystal: faceted glass panels with light sliding across; they open outward from a point like a cut gem. */
+body[data-style="crystal"] {
+  --pn: linear-gradient(135deg, color-mix(in srgb, var(--ac) 16%, transparent), color-mix(in srgb, var(--panel-2) 50%, transparent) 40%, color-mix(in srgb, var(--ac2) 12%, transparent));
+  --edge: color-mix(in srgb, var(--fg) 45%, transparent);
+  --edge2: color-mix(in srgb, var(--fg) 30%, transparent);
+  --bt: linear-gradient(135deg, color-mix(in srgb, var(--ac) 20%, transparent), color-mix(in srgb, var(--panel-2) 60%, transparent));
+  --me: linear-gradient(135deg, color-mix(in srgb, var(--ac2) 20%, transparent), color-mix(in srgb, var(--panel-2) 60%, transparent));
+  --aib: transparent;
+  --well: rgba(0, 0, 0, .45);
+  --rp: 4px;
+  --rs: 3px;
+  --dsp: "Marcellus", serif;
+  --bf: blur(8px);
+  --shp: inset 0 1px 0 rgba(255, 255, 255, .35), inset 1px 0 0 rgba(255, 255, 255, .15), 0 12px 30px rgba(0, 0, 0, .5);
+  --shb: inset 0 1px 0 rgba(255, 255, 255, .3);
+  --grow: cr-in .9s cubic-bezier(.2, .8, .2, 1);
+}
+body[data-style="crystal"] :is(.card, .create, .rq, .update-banner, .offline, .cu-card, .cam-pop, .canvas-card, .cu-next, .tool-confirm, dialog.sheet, .model-menu, .tools-pop, .history, .ctx-menu) { clip-path: polygon(18px 0, calc(100% - 18px) 0, 100% 18px, 100% calc(100% - 18px), calc(100% - 18px) 100%, 18px 100%, 0 calc(100% - 18px), 0 18px); }
+@keyframes cr-in {
+  0% { clip-path: polygon(50% 50%, 50% 50%, 50% 50%, 50% 50%, 50% 50%, 50% 50%, 50% 50%, 50% 50%); filter: brightness(2.5); }
+  100% { clip-path: polygon(18px 0, calc(100% - 18px) 0, 100% 18px, 100% calc(100% - 18px), calc(100% - 18px) 100%, 18px 100%, 0 calc(100% - 18px), 0 18px); filter: none; }
+}

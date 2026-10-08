@@ -1,0 +1,19 @@
+/* Energy: dark steel panels with plasma edges that hum; they flicker on like a fluorescent tube. */
+body[data-style="electric"] {
+  --pn: color-mix(in srgb, var(--panel) 86%, transparent);
+  --edge: color-mix(in srgb, var(--ac) 55%, transparent);
+  --edge2: color-mix(in srgb, var(--ac) 30%, transparent);
+  --bt: color-mix(in srgb, var(--panel-2) 90%, transparent);
+  --me: color-mix(in srgb, color-mix(in srgb, var(--ac) 15%, var(--panel-2)) 90%, transparent);
+  --aib: transparent;
+  --well: color-mix(in srgb, var(--bg) 70%, transparent);
+  --rp: 12px;
+  --rs: 8px;
+  --dsp: "Oxanium", sans-serif;
+  --shp: 0 0 calc(14px * var(--glow)) color-mix(in srgb, var(--ac) 35%, transparent), inset 0 0 14px color-mix(in srgb, var(--ac) 12%, transparent);
+  --shb: 0 0 calc(8px * var(--glow)) color-mix(in srgb, var(--ac) 25%, transparent);
+  --grow: el-in .7s ease-out;
+}
+body[data-style="electric"]:not(.still) :is(.hud, .composer-dock, .dock, .history, .card, .create, .rq, .update-banner, .offline, .live-bar, .cu-card, .cam-pop, .emote-pick, .ctx-menu, .canvas, .phone-box, .canvas-card, .cu-next, .tool-confirm, dialog.sheet, .model-menu, .tools-pop):not(.skin-grow) { animation: el-hum 3s ease-in-out infinite; }
+@keyframes el-hum { 50% { box-shadow: 0 0 calc(22px * var(--glow)) color-mix(in srgb, var(--ac) 55%, transparent), inset 0 0 18px color-mix(in srgb, var(--ac) 20%, transparent); } }
+@keyframes el-in { 0% { opacity: 0; filter: brightness(4) blur(3px); } 10% { opacity: 1; } 20% { opacity: .2; } 30% { opacity: 1; filter: brightness(3); } 100% { filter: none; opacity: 1; } }

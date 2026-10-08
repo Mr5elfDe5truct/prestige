@@ -2,6 +2,7 @@
 // launching the workstation's start-all.ps1, and the Studio gallery (studio.rs). All chat traffic goes from the UI to
 // Ollama / llama.cpp / Open WebUI on 127.0.0.1 through the HTTP plugin.
 
+mod background;
 mod canvas;
 mod computer;
 mod knowledge;
@@ -538,7 +539,10 @@ pub fn run() {
             transcribe::pick_media,
             computer::cu_screenshot,
             computer::cu_act,
-            computer::cu_panel
+            computer::cu_panel,
+            background::background_set,
+            background::background_path,
+            background::background_prune
         ])
         .build(tauri::generate_context!())
         .expect("error while building Prestige")

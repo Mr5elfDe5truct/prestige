@@ -1,0 +1,18 @@
+/* Living Matrix: green-glass terminal panels with scanlines over code rain; panels print in line by line. */
+body[data-style="matrix"] {
+  --pn: color-mix(in srgb, var(--panel) 80%, transparent);
+  --edge: color-mix(in srgb, var(--ac) 45%, transparent);
+  --edge2: color-mix(in srgb, var(--ac) 25%, transparent);
+  --bt: color-mix(in srgb, var(--panel-2) 75%, transparent);
+  --me: color-mix(in srgb, var(--panel-2) 85%, transparent);
+  --aib: transparent;
+  --well: rgba(0, 0, 0, .6);
+  --rp: 3px;
+  --rs: 2px;
+  --dsp: "Share Tech Mono", monospace;
+  --shp: 0 0 calc(18px * var(--glow)) color-mix(in srgb, var(--ac) 15%, transparent), inset 0 0 20px color-mix(in srgb, var(--ac) 6%, transparent);
+  --grow: mx-in .8s steps(8, end);
+  font-family: "Share Tech Mono", "JetBrains Mono", monospace;
+}
+body[data-style="matrix"] :is(.hud, .composer-dock, .dock, .history, .card, .create, .rq, .update-banner, .offline, .live-bar, .cu-card, .cam-pop, .emote-pick, .ctx-menu, .canvas, .phone-box, .canvas-card, .cu-next, .tool-confirm, dialog.sheet, .model-menu, .tools-pop) { background-image: repeating-linear-gradient(0deg, color-mix(in srgb, var(--ac) 4%, transparent) 0 1px, transparent 1px 3px); }
+@keyframes mx-in { from { clip-path: inset(0 0 100% 0); filter: brightness(2.5); } to { clip-path: inset(0 0 0 0); filter: none; } }

@@ -1,0 +1,18 @@
+/* Cosmic: frosted glass floating over a nebula; panels come out of a blur into focus. */
+body[data-style="cosmic"] {
+  --pn: color-mix(in srgb, var(--panel) 55%, transparent);
+  --edge: color-mix(in srgb, var(--ac) 22%, transparent);
+  --edge2: color-mix(in srgb, var(--ac) 20%, transparent);
+  --bt: color-mix(in srgb, var(--panel-2) 55%, transparent);
+  --me: color-mix(in srgb, color-mix(in srgb, var(--ac) 20%, var(--line)) 60%, transparent);
+  --aib: transparent;
+  --well: rgba(0, 0, 0, .4);
+  --rp: 18px;
+  --rs: 12px;
+  --dsp: "Jura", sans-serif;
+  --bf: blur(10px) saturate(1.3);
+  --shp: 0 0 calc(40px * var(--glow)) color-mix(in srgb, var(--ac) 12%, transparent), inset 0 1px 0 rgba(255, 255, 255, .08);
+  --shb: inset 0 1px 0 rgba(255, 255, 255, .1);
+  --grow: co-in 1.2s cubic-bezier(.2, .8, .2, 1);
+}
+@keyframes co-in { from { opacity: 0; filter: blur(12px); scale: 1.06; } to { opacity: 1; filter: none; scale: 1; } }
