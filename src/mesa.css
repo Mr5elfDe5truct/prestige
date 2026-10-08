@@ -1,0 +1,244 @@
+/* Prestige · Mesa, molded. Every panel, key and button is cast from the same ground and rises out of it like a key on
+   a cast keybed: a lit top lip, side walls falling into shadow, a top face set in from the walls (the rounded shoulder)
+   and a soft fillet of shadow where it meets the ground. Text boxes and Prestige's replies are carved in instead.
+   Only applies while body.mesa is on (Settings → Appearance → Molded surfaces); the colours come from theme.ts.
+   --h is how tall raised things stand; --g (0 to 1) is how far they have risen, so they can grow into place (mesa.ts). */
+@property --g { syntax: "<number>"; inherits: true; initial-value: 1; }
+
+body.mesa {
+  --h: 10;
+  --lip: color-mix(in srgb, var(--gold-hi) 9%, transparent);
+  background: radial-gradient(120% 90% at 30% 0%, color-mix(in srgb, var(--wall-hi) 22%, transparent), transparent 60%), var(--grain, none), var(--ground);
+}
+
+/* ---------- what is raised ---------- */
+/* panels: the HUD strip, the composer, the section dock, the history drawer, cards, popovers, menus, dialogs */
+body.mesa :is(.hud, .composer-dock, .dock, .history, .card, .create, .rq, .update-banner, .offline, .live-bar, .cu-card, .cam-pop, .emote-pick, .ctx-menu, .canvas, .phone-box, .canvas-card, .cu-next, .tool-confirm),
+/* low tiles: rows in lists and grids */
+body.mesa :is(.mrow, .cat-card, .ms-row, .thumb, .kb-model, .history-item, .model-menu button, .ch-list button, .ch-fact, .chat-render.song, .chat-render.model .model-card, .look-swatch, .ref-add, .ms-tpl),
+/* keys */
+body.mesa :is(.btn, .icon-btn, .model-btn, .suggests button, .filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.pick, .live-ctl, .sources button, .chat-files .cf, .dock button),
+/* your messages stand up; Prestige's are carved in (below) */
+body.mesa .msg.you {
+  --hh: calc(var(--h) * var(--g));
+  isolation: isolate;
+  border-color: transparent;
+  background: linear-gradient(180deg, var(--wall-hi) 0%, var(--wall) 18%, var(--wall-mid) 62%, var(--wall-lo) 100%);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, .55),
+    0 calc(var(--hh) * -.12px) calc(var(--hh) * .7px) calc(var(--hh) * .05px) var(--lip),
+    0 calc(var(--hh) * .3px) calc(var(--hh) * .45px) rgba(0, 0, 0, .55),
+    0 calc(var(--hh) * 1px) calc(var(--hh) * 2.4px) calc(var(--hh) * .2px) rgba(0, 0, 0, .5);
+  transition: transform .12s, box-shadow .15s, color .15s;
+}
+/* the flat top face, set in from the walls so the shoulder shows */
+body.mesa :is(.hud, .composer-dock, .dock, .history, .card, .create, .rq, .update-banner, .offline, .live-bar, .cu-card, .cam-pop, .emote-pick, .ctx-menu, .canvas, .phone-box, .canvas-card, .cu-next, .tool-confirm)::before,
+body.mesa :is(.mrow, .cat-card, .ms-row, .thumb, .kb-model, .history-item, .model-menu button, .ch-list button, .ch-fact, .chat-render.song, .chat-render.model .model-card, .look-swatch, .ref-add, .ms-tpl)::before,
+body.mesa :is(.btn, .icon-btn, .model-btn, .suggests button, .filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.pick, .live-ctl, .sources button, .chat-files .cf, .dock button)::before,
+body.mesa .msg.you::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: calc(1px + var(--hh) * .12px) calc(1px + var(--hh) * .14px) calc(2px + var(--hh) * .35px);
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(120% 140% at 30% 0%, var(--face-hi), var(--face) 55%, var(--face-lo));
+  box-shadow: 0 0 calc(var(--hh) * .4px) calc(var(--hh) * .15px) rgba(0, 0, 0, .35), inset 0 1px 0 var(--lip);
+  transition: inset .15s;
+}
+/* static things need a box for the face; fixed, sticky and absolute ones already are one */
+body.mesa :is(.card, .create, .rq, .update-banner, .offline, .live-bar, .cu-card, .phone-box, .canvas-card, .cu-next, .tool-confirm, .mrow, .cat-card, .ms-row, .thumb, .kb-model, .history-item, .model-menu button, .ch-list button, .ch-fact, .chat-render.song, .chat-render.model .model-card, .look-swatch, .ref-add, .ms-tpl, .btn, .icon-btn, .model-btn, .suggests button, .filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.pick, .live-ctl, .sources button, .chat-files .cf, .dock button, .msg.you) {
+  position: relative;
+}
+
+/* Things that scroll can't carry a face that would scroll away with them: their walls are drawn inside instead. */
+body.mesa :is(dialog.sheet, .model-menu, .tools-pop) {
+  --hh: calc(var(--h) * var(--g));
+  border-color: transparent;
+  border-radius: 22px;
+  background: radial-gradient(120% 140% at 30% 0%, var(--face-hi), var(--face) 55%, var(--face-lo));
+  box-shadow:
+    inset 0 calc(1px + var(--hh) * .12px) calc(var(--hh) * .1px) var(--wall-hi),
+    inset calc(1px + var(--hh) * .14px) 0 calc(var(--hh) * .2px) var(--wall),
+    inset calc(-1px - var(--hh) * .14px) 0 calc(var(--hh) * .2px) var(--wall),
+    inset 0 calc(-2px - var(--hh) * .35px) calc(var(--hh) * .25px) var(--wall-lo),
+    0 0 0 1px rgba(0, 0, 0, .55),
+    0 calc(var(--hh) * -.12px) calc(var(--hh) * .7px) calc(var(--hh) * .05px) var(--lip),
+    0 calc(var(--hh) * .3px) calc(var(--hh) * .45px) rgba(0, 0, 0, .55),
+    0 calc(var(--hh) * 2px) calc(var(--hh) * 4px) calc(var(--hh) * .4px) rgba(0, 0, 0, .55);
+}
+
+/* ---------- panels ---------- */
+body.mesa :is(.hud, .composer-dock, .dock, .history, .card, .create, .live-bar, .canvas, .cam-pop, .ctx-menu, .update-banner, .offline) { border-radius: 22px; }
+body.mesa :is(.rq, .cu-card, .phone-box, .canvas-card, .cu-next, .tool-confirm, .emote-pick) { border-radius: 16px; }
+body.mesa .emote-pick { border-radius: 999px; }
+body.mesa .hud { top: 8px; margin-top: 8px; padding: 8px 14px; }
+body.mesa .hud-line { display: none; }
+body.mesa .update-banner { margin-top: 8px; }
+body.mesa .offline { border-color: transparent; color: var(--fg); }
+body.mesa .offline b { color: var(--warn); }
+body.mesa .screen { padding-bottom: 112px; }
+body.mesa .composer-dock { bottom: 110px; padding: 12px; margin-top: 6px; }
+body.mesa .dock { bottom: 16px; gap: 6px; padding: 8px; backdrop-filter: none; }
+body.mesa .dock .sep { width: 2px; margin: 8px 3px; border-radius: 1px; background: var(--wall-lo); box-shadow: 1px 0 0 var(--lip); }
+body.mesa .history { top: 72px; }
+body.mesa .history-head { border-bottom: 0; }
+body.mesa .card, body.mesa .create { padding: 18px; }
+body.mesa .canvas-head { border-bottom-color: transparent; box-shadow: 0 1px 0 rgba(0, 0, 0, .5), 0 2px 0 var(--lip); }
+body.mesa .gen-settings { border-top: 0; box-shadow: inset 0 1px 0 rgba(0, 0, 0, .5), inset 0 2px 0 var(--lip); }
+body.mesa .ctx-menu hr, body.mesa .model-menu button.more { border-color: rgba(0, 0, 0, .5); }
+
+/* low tiles stand a little above the panel they sit on */
+body.mesa :is(.mrow, .cat-card, .ms-row, .thumb, .kb-model, .chat-render.song, .chat-render.model .model-card, .ref-add, .ms-tpl) { --hh: calc(var(--h) * var(--g) * .5); border-radius: 14px; border-style: solid; }
+body.mesa :is(.history-item, .model-menu button, .ch-list button, .ch-fact) { --hh: calc(var(--h) * var(--g) * .3); border-radius: 12px; }
+body.mesa :is(.history-list, .ch-list) { gap: 6px; padding: 8px; }
+body.mesa .model-menu { padding: 10px 10px 14px; display: flex; flex-direction: column; gap: 6px; }
+body.mesa .model-menu button { display: grid; }
+body.mesa :is(.history-item, .model-menu button, .ch-list button):hover { --hh: calc(var(--h) * var(--g) * .5); background: linear-gradient(180deg, var(--wall-hi) 0%, var(--wall) 18%, var(--wall-mid) 62%, var(--wall-lo) 100%); }
+body.mesa :is(.history-item.sel, .model-menu button.sel, .ch-list button.sel) { --hh: calc(var(--h) * var(--g) * .15); box-shadow: 0 0 0 1px rgba(0, 0, 0, .55), 0 1px 2px rgba(0, 0, 0, .5); color: var(--gold-hi); }
+body.mesa :is(.history-item.sel, .ch-list button.sel)::after, body.mesa .model-menu button.sel::after { content: ""; position: absolute; left: 6px; top: 50%; width: 5px; height: 5px; margin-top: -2.5px; border-radius: 50%; background: var(--gold-hi); box-shadow: 0 0 calc(6px * var(--glow)) 1px color-mix(in srgb, var(--gold-hi) 80%, transparent); }
+body.mesa .history-item.sel .open, body.mesa .model-menu button.sel { padding-left: 16px; }
+body.mesa .thumb { border-radius: 14px; }
+body.mesa .thumb:hover { --hh: calc(var(--h) * var(--g) * .8); }
+body.mesa .mrow.loaded::before { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--red) 45%, transparent), 0 0 calc(var(--hh) * .4px) rgba(0, 0, 0, .35); }
+body.mesa .ms-row.running::before { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 60%, transparent); }
+body.mesa .cat-card.installed::before { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ok) 40%, transparent); }
+
+/* ---------- keys ---------- */
+/* small keys: lower and rounder, pill-shaped at about half a panel's height */
+body.mesa :is(.btn, .icon-btn, .model-btn, .suggests button, .filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.pick, .live-ctl, .sources button, .chat-files .cf) {
+  --hh: calc(var(--h) * var(--g) * .55);
+  border-radius: 999px;
+}
+body.mesa :is(.btn, .model-btn, .suggests button, .filters button, .gen-tabs button, .cat-filters button, .modes button, .opt.pick):not(:disabled):hover,
+body.mesa :is(.icon-btn, .live-ctl, .sources button):not(:disabled):hover { --hh: calc(var(--h) * var(--g) * .75); border-color: transparent; }
+body.mesa .icon-btn.ghost { --hh: calc(var(--h) * var(--g) * .4); color: var(--muted); }
+body.mesa .icon-btn.ghost:hover { color: var(--fg); }
+body.mesa .live-ctl { border-radius: 16px; }
+body.mesa :is(.suggests button, .filters button, .gen-tabs button, .cat-filters button, .sources button) { padding-inline: 13px; }
+body.mesa :is(.modes, .filters, .gen-tabs, .cat-filters, .canvas-tabs, .suggests) { gap: 8px; }
+body.mesa .modes button { padding: 7px 14px; color: var(--muted); }
+body.mesa .canvas-tabs { border: 0; overflow: visible; gap: 6px; }
+/* segmented choices: separate keys set in a carved track */
+body.mesa .seg { border: 0; overflow: visible; gap: 4px; padding: 3px; border-radius: 999px; background: var(--well); box-shadow: inset 0 2px 4px rgba(0, 0, 0, .7), inset 0 -1px 0 var(--lip); }
+body.mesa .seg button + button { border-left: 0; }
+body.mesa .seg button { --hh: calc(var(--h) * var(--g) * .4); }
+
+/* press: the key sinks back into the surface. On (toggled): it stays down and a gold LED lights above it. */
+body.mesa :is(.btn, .icon-btn, .model-btn, .suggests button, .filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.pick, .live-ctl, .sources button, .look-swatch):not(:disabled):active,
+body.mesa :is(.filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.set, .look-swatch, .live-ctl, #composer-speak, #composer-tools, #composer-mic):is(.on),
+body.mesa [aria-pressed="true"]:is(.btn, .icon-btn, .live-ctl),
+body.mesa .model-btn[aria-expanded="true"] {
+  --hh: calc(var(--h) * var(--g) * .22);
+  transform: translateY(calc(var(--h) * .18px));
+}
+body.mesa :is(.btn, .icon-btn, .model-btn, .suggests button, .filters button, .gen-tabs button, .cat-filters button, .modes button, .seg button, .opt.pick, .live-ctl, .sources button):not(:disabled):active::before { inset: 2px; }
+body.mesa :is(.filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.set, .look-swatch, .live-ctl, #composer-speak, #composer-tools):is(.on),
+body.mesa [aria-pressed="true"]:is(.btn, .icon-btn, .live-ctl) { color: var(--gold-hi); background-color: transparent; }
+body.mesa :is(.filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.set, .look-swatch, .live-ctl, #composer-speak, #composer-tools):is(.on)::after,
+body.mesa [aria-pressed="true"]:is(.btn, .icon-btn, .live-ctl)::after,
+body.mesa .dock button.active::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: var(--gold-hi);
+  box-shadow: 0 0 calc(6px * var(--glow)) 1px color-mix(in srgb, var(--gold-hi) 80%, transparent);
+}
+body.mesa .look-swatch.on { box-shadow: 0 0 0 1px rgba(0, 0, 0, .55), 0 1px 2px rgba(0, 0, 0, .5); }
+body.mesa #live-mute.on { color: var(--warn); }
+body.mesa #live-mute.on::after { background: var(--warn); box-shadow: 0 0 calc(6px * var(--glow)) 1px var(--warn); }
+
+/* accent keys (Send, primary actions, End call): cast in the accent colour */
+body.mesa :is(.btn.primary, .icon-btn.send, .live-ctl.end, .btn.talk.on, #composer-mic.on) {
+  color: #fff;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--red) 55%, #fff) 0%, var(--red) 22%, color-mix(in srgb, var(--red) 55%, #000) 65%, color-mix(in srgb, var(--red) 25%, #000) 100%);
+}
+body.mesa :is(.btn.primary, .icon-btn.send, .live-ctl.end, .btn.talk.on, #composer-mic.on)::before {
+  background: radial-gradient(120% 140% at 30% 0%, color-mix(in srgb, var(--red) 70%, #fff), var(--red) 55%, color-mix(in srgb, var(--red) 75%, #000));
+}
+body.mesa .btn.talk.on { color: #1a0d05; background: linear-gradient(180deg, color-mix(in srgb, var(--gold) 55%, #fff) 0%, var(--gold) 30%, color-mix(in srgb, var(--gold) 50%, #000) 100%); }
+body.mesa .btn.talk.on::before { background: radial-gradient(120% 140% at 30% 0%, color-mix(in srgb, var(--gold-hi) 80%, #fff), var(--gold) 55%, color-mix(in srgb, var(--gold) 70%, #000)); }
+body.mesa :is(.btn.primary, .icon-btn.send):hover { background: linear-gradient(180deg, color-mix(in srgb, var(--red-hover) 55%, #fff) 0%, var(--red-hover) 22%, color-mix(in srgb, var(--red-hover) 55%, #000) 65%, color-mix(in srgb, var(--red-hover) 25%, #000) 100%); }
+body.mesa .btn.danger { color: #ff7a7a; }
+body.mesa .btn:disabled, body.mesa .icon-btn:disabled { --hh: calc(var(--h) * var(--g) * .2); }
+
+/* the section dock: square tiles holding round caps, straight from the OP-XY's key bed */
+body.mesa .dock button { --hh: calc(var(--h) * var(--g) * .3); border-radius: 14px; padding: 8px 10px 6px; gap: 3px; }
+body.mesa .dock button::before { background: var(--face-lo); }
+body.mesa .dock button:hover { background: linear-gradient(180deg, var(--wall-hi) 0%, var(--wall) 18%, var(--wall-mid) 62%, var(--wall-lo) 100%); }
+body.mesa .dock button svg {
+  width: 32px;
+  height: 32px;
+  padding: 7px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 30%, var(--wall), var(--wall-mid) 70%);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .6), 0 -2px 4px var(--lip), 0 3px 4px rgba(0, 0, 0, .6), 0 6px 10px rgba(0, 0, 0, .4);
+  transition: transform .12s, box-shadow .12s;
+}
+body.mesa .dock button:active svg, body.mesa .dock button.active svg { transform: translateY(2px); box-shadow: 0 0 0 1px rgba(0, 0, 0, .6), 0 1px 2px rgba(0, 0, 0, .6); }
+body.mesa .dock button.active { color: var(--gold-hi); box-shadow: 0 0 0 1px rgba(0, 0, 0, .55), 0 2px 3px rgba(0, 0, 0, .5); }
+body.mesa .dock button.voice { color: #fff; }
+body.mesa .dock button.voice svg { background: radial-gradient(circle at 40% 30%, color-mix(in srgb, var(--red) 80%, #fff 10%), var(--red-deep) 75%); }
+body.mesa .dock button.live-btn svg { color: var(--gold-hi); }
+
+/* ---------- carved in ---------- */
+body.mesa .composer {
+  border: 0;
+  border-radius: 18px;
+  background: var(--well);
+  box-shadow: inset 0 3px 6px rgba(0, 0, 0, .75), inset 0 -1px 0 var(--lip);
+}
+body.mesa .composer:focus-within { box-shadow: inset 0 3px 6px rgba(0, 0, 0, .75), inset 0 -1px 0 var(--lip), inset 0 0 0 1px color-mix(in srgb, var(--red) calc(45% * var(--glow)), transparent), 0 0 calc(22px * var(--glow)) color-mix(in srgb, var(--red) calc(14% * var(--glow)), transparent); }
+body.mesa :is(input:not([type="checkbox"], [type="radio"], [type="color"], [type="range"], [type="file"]), select, textarea):not(#prompt) {
+  border-color: transparent;
+  background-color: var(--well);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, .75), inset 0 -1px 0 var(--lip);
+}
+body.mesa :is(input:not([type="checkbox"], [type="radio"], [type="color"], [type="range"], [type="file"]), select, textarea):not(#prompt):focus { box-shadow: inset 0 2px 5px rgba(0, 0, 0, .75), inset 0 0 0 1px var(--gold); }
+body.mesa :is(.bar, .progress, .vram-stack, .voice-level, .live-level) { background: var(--well); border-color: transparent; box-shadow: inset 0 1px 2px rgba(0, 0, 0, .8), 0 1px 0 var(--lip); }
+body.mesa :is(.voice-stage, .live-stage, .cam-view, .lb-media, .cu-shot) { border-color: transparent; box-shadow: inset 0 3px 8px rgba(0, 0, 0, .8), 0 0 0 1px rgba(0, 0, 0, .6), 0 -1px 0 var(--lip); }
+/* Prestige's replies are carved into the ground; yours stand up from it */
+body.mesa .msg.ai { padding: 12px 16px; border-radius: 16px; background: color-mix(in srgb, var(--wall-lo) 45%, transparent); box-shadow: inset 0 2px 5px rgba(0, 0, 0, .55), inset 0 -1px 0 var(--lip); }
+body.mesa .msg.you { --hh: calc(var(--h) * var(--g) * .45); border-radius: 16px 16px 6px 16px; padding: 10px 15px 12px; }
+body.mesa .msg-body pre { border-color: transparent; background: var(--well); box-shadow: inset 0 2px 5px rgba(0, 0, 0, .6); }
+body.mesa .chat-render .pic, body.mesa .chat-render video { border: 2px solid var(--wall); box-shadow: 0 0 0 1px rgba(0, 0, 0, .6), 0 4px 6px rgba(0, 0, 0, .5), 0 12px 24px rgba(0, 0, 0, .45); }
+body.mesa .live { background: radial-gradient(ellipse at 50% 42%, color-mix(in srgb, var(--red-deep) calc(30% * var(--glow)), transparent), transparent 62%), var(--grain, none), var(--ground); }
+
+/* ---------- growing into place (mesa.ts adds these) ---------- */
+/* panels rise out of the ground: a seam opens from the middle, then they stand up */
+body.mesa .mesa-rise { animation: mesa-rise .9s cubic-bezier(.2, .8, .2, 1) both; animation-delay: calc(var(--i, 0) * 90ms); }
+@keyframes mesa-rise {
+  0% { --g: 0; clip-path: inset(46% 46% 46% 46% round 22px); filter: brightness(.4); }
+  45% { --g: 0; clip-path: inset(0 0 0 0 round 22px); filter: brightness(.7); }
+  100% { --g: 1; clip-path: inset(-80px -80px -80px -80px round 22px); filter: none; }
+}
+/* popovers and dialogs grow open from the button that opened them (--ox, --oy), then rise */
+body.mesa .mesa-pop { animation: mesa-pop .75s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes mesa-pop {
+  0% { --g: 0; clip-path: circle(0 at var(--ox, 50%) var(--oy, 100%)); }
+  50% { --g: .1; clip-path: circle(calc(var(--or, 900px) * .75) at var(--ox, 50%) var(--oy, 100%)); }
+  100% { --g: 1; clip-path: circle(var(--or, 900px) at var(--ox, 50%) var(--oy, 100%)); }
+}
+/* closing runs it backwards; it stays drawn (though hidden to the code) until it has folded away */
+body.mesa .mesa-out[hidden] { display: var(--mesa-d, block) !important; pointer-events: none; animation: mesa-pop .4s ease-in reverse both; }
+/* what's inside rises in one after another */
+body.mesa .mesa-sub { animation: mesa-sub .5s cubic-bezier(.2, .9, .3, 1) both; animation-delay: calc(240ms + var(--k, 0) * 60ms); }
+@keyframes mesa-sub { from { opacity: 0; translate: 0 8px; filter: brightness(.5); } to { opacity: 1; translate: 0 0; filter: none; } }
+/* a new message grows in */
+body.mesa .msg.mesa-in { animation: mesa-msg .6s cubic-bezier(.2, .9, .3, 1) both; animation-delay: calc(var(--k, 0) * 120ms); }
+body.mesa .msg.you.mesa-in { transform-origin: 100% 100%; }
+body.mesa .msg.ai.mesa-in { transform-origin: 0 0; }
+@keyframes mesa-msg { from { opacity: 0; scale: .9; --g: 0; } to { opacity: 1; scale: 1; --g: 1; } }
+
+@media (max-width: 760px) {
+  body.mesa .dock button svg { width: 28px; height: 28px; padding: 6px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  body.mesa :is(.mesa-rise, .mesa-pop, .mesa-sub, .mesa-in) { animation: none !important; }
+}
