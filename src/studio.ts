@@ -2605,7 +2605,7 @@ export async function chatSettings(el: HTMLElement, kind: MediaKind) {
   await ensureWorkflows();
   const gm = chatMode(kind);
   if (!workflows[gm]) {
-    el.innerHTML = `<p class="credit">workflows\${esc(modeOf(gm).file)} wasn't found, so chat can't make ${kind === "video" ? "videos" : kind === "audio" ? "songs" : "images"} yet.</p>`;
+    el.innerHTML = `<p class="credit">workflows\\${esc(modeOf(gm).file)} wasn't found, so chat can't make ${kind === "video" ? "videos" : kind === "audio" ? "songs" : "images"} yet.</p>`;
     return;
   }
   settingsForm(el, gm, true);

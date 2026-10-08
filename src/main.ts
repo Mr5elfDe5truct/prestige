@@ -37,6 +37,7 @@ import { errMsg, freeLlamaVram, nameFor, listModels, ping, streamChat, OLLAMA, L
 import { addMemory, memoryContext, listMemories, rememberRequest, DEFAULT_OWUI, type MemoryConfig } from "./memory";
 import { addStache } from "./talk";
 import { applyCachedLook, applyLook, closeAppearance, initAppearance, openAppearance, type Look } from "./theme";
+import { initMesa } from "./mesa";
 import { pickReaction, reactFilter, reactedNote, showReaction, stripTags, REACT_HINT } from "./emotes";
 import { CANVAS_CMD, CANVAS_HINT, canvasOnChat, canvasReplyStart, findCanvas, initCanvas, openCanvas, openModel, streamCanvas, streamEnded, wantsCanvas } from "./canvas";
 import {
@@ -80,6 +81,8 @@ const $$ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = docu
   addStache(sym);
   // Last run's colours, before the launch screen shows (the saved settings are applied again once they load).
   applyCachedLook();
+  // Molded surfaces: panels rise into place and popovers grow from their buttons (mesa.ts).
+  initMesa();
 }
 
 // ---------- state ----------

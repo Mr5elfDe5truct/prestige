@@ -1,0 +1,206 @@
+/* Prestige · Mesa, molded. Every panel, key and button is cast from the same ground and swells out of it as one piece,
+   like the keys of a Teenage Engineering OP-XY: a soft fillet where it meets the ground, a rounded shoulder and a
+   matte top. Text boxes and Prestige's replies are carved in instead.
+   The Molded style: only applies under body[data-style="molded"] (Settings → Appearance → Style); colours come from theme.ts.
+   --h is how tall raised things stand; --g (0 to 1) is how far they have risen, so they can grow into place (mesa.ts). */
+@property --g { syntax: "<number>"; inherits: true; initial-value: 1; }
+
+body[data-style="molded"] {
+  --h: 10;
+  --lip: color-mix(in srgb, var(--gold-hi) 9%, transparent);
+  background: radial-gradient(120% 90% at 30% 0%, color-mix(in srgb, var(--wall-hi) 22%, transparent), transparent 60%), var(--grain, none), var(--ground);
+}
+
+/* ---------- what is raised ---------- */
+/* One molded piece, not a stack: the surface bends up into a soft fillet (the crease at its foot, the lit slope behind,
+   the shade in front), rolls over a rounded shoulder (light on the top edge, shade under the bottom one) onto a matte
+   top. Everything is drawn with the element's own background and shadows, so nothing scrolls away inside a scroller. */
+body[data-style="molded"] :is(.hud, .composer-dock, .dock, .history, .card, .create, .rq, .update-banner, .offline, .live-bar, .cu-card, .cam-pop, .emote-pick, .ctx-menu, .canvas, .phone-box, .canvas-card, .cu-next, .tool-confirm, dialog.sheet, .model-menu, .tools-pop),
+body[data-style="molded"] :is(.mrow, .cat-card, .ms-row, .thumb, .kb-model, .history-item, .model-menu button, .ch-list button, .ch-fact, .chat-render.song, .chat-render.model .model-card, .look-swatch, .ref-add, .ms-tpl),
+body[data-style="molded"] :is(.btn, .icon-btn, .model-btn, .suggests button, .filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.pick, .live-ctl, .sources button, .chat-files .cf),
+body[data-style="molded"] .msg.you,
+body[data-style="molded"] .dock button svg {
+  --hh: calc(var(--h) * var(--g));
+  --top: color-mix(in srgb, var(--face-hi) 75%, var(--wall-hi));
+  --mid: var(--face);
+  --foot: var(--face-lo);
+  border-color: transparent;
+  background: radial-gradient(130% 90% at 50% 0%, color-mix(in srgb, var(--top) 60%, transparent), transparent 70%), linear-gradient(180deg, var(--top), var(--mid) 45%, var(--foot));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--gold-hi) 11%, transparent),
+    inset 0 calc(var(--hh) * .35px) calc(var(--hh) * .6px) calc(var(--hh) * -.2px) color-mix(in srgb, var(--wall-hi) 60%, transparent),
+    inset 0 calc(var(--hh) * -.5px) calc(var(--hh) * .8px) calc(var(--hh) * -.2px) rgba(0, 0, 0, .6),
+    0 0 calc(1px + var(--hh) * .12px) rgba(0, 0, 0, .75),
+    0 calc(var(--hh) * .4px) calc(var(--hh) * .8px) calc(var(--hh) * .05px) rgba(0, 0, 0, .55),
+    0 calc(var(--hh) * 1.2px) calc(var(--hh) * 2.8px) calc(var(--hh) * .3px) rgba(0, 0, 0, .4),
+    0 calc(var(--hh) * -.4px) calc(var(--hh) * 1.2px) calc(var(--hh) * .1px) color-mix(in srgb, var(--wall-hi) 22%, transparent);
+  transition: transform .12s, box-shadow .15s, color .15s;
+}
+body[data-style="molded"] :is(.card, .create, .rq, .update-banner, .offline, .live-bar, .cu-card, .phone-box, .canvas-card, .cu-next, .tool-confirm, .mrow, .cat-card, .ms-row, .thumb, .kb-model, .history-item, .model-menu button, .ch-list button, .ch-fact, .chat-render.song, .chat-render.model .model-card, .look-swatch, .ref-add, .ms-tpl, .btn, .icon-btn, .model-btn, .suggests button, .filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.pick, .live-ctl, .sources button, .chat-files .cf, .dock button, .msg.you) {
+  position: relative;
+}
+body[data-style="molded"] :is(dialog.sheet, .model-menu, .tools-pop) { border-radius: 22px; }
+
+/* ---------- panels ---------- */
+body[data-style="molded"] :is(.hud, .composer-dock, .dock, .history, .card, .create, .live-bar, .canvas, .cam-pop, .ctx-menu, .update-banner, .offline) { border-radius: 22px; }
+body[data-style="molded"] :is(.rq, .cu-card, .phone-box, .canvas-card, .cu-next, .tool-confirm, .emote-pick) { border-radius: 16px; }
+body[data-style="molded"] .emote-pick { border-radius: 999px; }
+body[data-style="molded"] .hud { top: 8px; margin-top: 8px; padding: 8px 14px; }
+body[data-style="molded"] .hud-line { display: none; }
+body[data-style="molded"] .update-banner { margin-top: 8px; }
+body[data-style="molded"] .offline { border-color: transparent; color: var(--fg); }
+body[data-style="molded"] .offline b { color: var(--warn); }
+body[data-style="molded"] .screen { padding-bottom: 112px; }
+body[data-style="molded"] .composer-dock { bottom: 110px; padding: 12px; margin-top: 6px; }
+body[data-style="molded"] .dock { bottom: 16px; gap: 6px; padding: 8px; backdrop-filter: none; }
+body[data-style="molded"] .dock .sep { width: 2px; margin: 8px 3px; border-radius: 1px; background: var(--wall-lo); box-shadow: 1px 0 0 var(--lip); }
+body[data-style="molded"] .history { top: 72px; }
+body[data-style="molded"] .history-head { border-bottom: 0; }
+body[data-style="molded"] .card, body[data-style="molded"] .create { padding: 18px; }
+body[data-style="molded"] .canvas-head { border-bottom-color: transparent; box-shadow: 0 1px 0 rgba(0, 0, 0, .5), 0 2px 0 var(--lip); }
+body[data-style="molded"] .gen-settings { border-top: 0; box-shadow: inset 0 1px 0 rgba(0, 0, 0, .5), inset 0 2px 0 var(--lip); }
+body[data-style="molded"] .ctx-menu hr, body[data-style="molded"] .model-menu button.more { border-color: rgba(0, 0, 0, .5); }
+
+/* low tiles stand a little above the panel they sit on */
+body[data-style="molded"] :is(.mrow, .cat-card, .ms-row, .thumb, .kb-model, .chat-render.song, .chat-render.model .model-card, .ref-add, .ms-tpl) { --hh: calc(var(--h) * var(--g) * .5); border-radius: 14px; border-style: solid; }
+body[data-style="molded"] :is(.history-item, .model-menu button, .ch-list button, .ch-fact) { --hh: calc(var(--h) * var(--g) * .3); border-radius: 12px; }
+body[data-style="molded"] :is(.history-list, .ch-list) { gap: 6px; padding: 8px; }
+body[data-style="molded"] .model-menu { padding: 10px 10px 14px; display: flex; flex-direction: column; gap: 6px; }
+body[data-style="molded"] .model-menu button { display: grid; }
+body[data-style="molded"] :is(.history-item, .model-menu button, .ch-list button):hover { --hh: calc(var(--h) * var(--g) * .5); }
+body[data-style="molded"] :is(.history-item.sel, .model-menu button.sel, .ch-list button.sel) { --hh: calc(var(--h) * var(--g) * .12); color: var(--gold-hi); }
+body[data-style="molded"] :is(.history-item.sel, .ch-list button.sel)::after, body[data-style="molded"] .model-menu button.sel::after { content: ""; position: absolute; left: 6px; top: 50%; width: 5px; height: 5px; margin-top: -2.5px; border-radius: 50%; background: var(--gold-hi); box-shadow: 0 0 calc(6px * var(--glow)) 1px color-mix(in srgb, var(--gold-hi) 80%, transparent); }
+body[data-style="molded"] .history-item.sel .open, body[data-style="molded"] .model-menu button.sel { padding-left: 16px; }
+body[data-style="molded"] .thumb { border-radius: 14px; }
+body[data-style="molded"] .thumb:hover { --hh: calc(var(--h) * var(--g) * .8); }
+body[data-style="molded"] .mrow.loaded { outline: 1px solid color-mix(in srgb, var(--red) 45%, transparent); outline-offset: -3px; }
+body[data-style="molded"] .ms-row.running { outline: 1px solid color-mix(in srgb, var(--gold) 60%, transparent); outline-offset: -3px; }
+body[data-style="molded"] .cat-card.installed { outline: 1px solid color-mix(in srgb, var(--ok) 40%, transparent); outline-offset: -3px; }
+
+/* ---------- keys ---------- */
+/* small keys: lower and rounder, pill-shaped at about half a panel's height */
+body[data-style="molded"] :is(.btn, .icon-btn, .model-btn, .suggests button, .filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.pick, .live-ctl, .sources button, .chat-files .cf) {
+  --hh: calc(var(--h) * var(--g) * .55);
+  border-radius: 999px;
+}
+body[data-style="molded"] :is(.btn, .model-btn, .suggests button, .filters button, .gen-tabs button, .cat-filters button, .modes button, .opt.pick):not(:disabled):hover,
+body[data-style="molded"] :is(.icon-btn, .live-ctl, .sources button):not(:disabled):hover { --hh: calc(var(--h) * var(--g) * .75); border-color: transparent; }
+body[data-style="molded"] .icon-btn.ghost { --hh: calc(var(--h) * var(--g) * .4); color: var(--muted); }
+body[data-style="molded"] .icon-btn.ghost:hover { color: var(--fg); }
+body[data-style="molded"] .live-ctl { border-radius: 16px; }
+body[data-style="molded"] :is(.suggests button, .filters button, .gen-tabs button, .cat-filters button, .sources button) { padding-inline: 13px; }
+body[data-style="molded"] :is(.modes, .filters, .gen-tabs, .cat-filters, .canvas-tabs, .suggests) { gap: 8px; }
+body[data-style="molded"] .modes button { padding: 7px 14px; color: var(--muted); }
+body[data-style="molded"] .canvas-tabs { border: 0; overflow: visible; gap: 6px; }
+/* segmented choices: separate keys set in a carved track */
+body[data-style="molded"] .seg { border: 0; overflow: visible; gap: 4px; padding: 3px; border-radius: 999px; background: var(--well); box-shadow: inset 0 2px 4px rgba(0, 0, 0, .7), inset 0 -1px 0 var(--lip); }
+body[data-style="molded"] .seg button + button { border-left: 0; }
+body[data-style="molded"] .seg button { --hh: calc(var(--h) * var(--g) * .4); }
+
+/* press: the key sinks back into the surface. On (toggled): it stays down and a gold LED lights above it. */
+body[data-style="molded"] :is(.btn, .icon-btn, .model-btn, .suggests button, .filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.pick, .live-ctl, .sources button, .look-swatch):not(:disabled):active,
+body[data-style="molded"] :is(.filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.set, .look-swatch, .live-ctl, #composer-speak, #composer-tools, #composer-mic):is(.on),
+body[data-style="molded"] [aria-pressed="true"]:is(.btn, .icon-btn, .live-ctl),
+body[data-style="molded"] .model-btn[aria-expanded="true"] {
+  --hh: calc(var(--h) * var(--g) * .22);
+  transform: translateY(calc(var(--h) * .18px));
+}
+body[data-style="molded"] :is(.filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.set, .look-swatch, .live-ctl, #composer-speak, #composer-tools):is(.on),
+body[data-style="molded"] [aria-pressed="true"]:is(.btn, .icon-btn, .live-ctl), body[data-style="molded"] :is(#composer-speak, #composer-tools, #live-cam, #live-mute).on { color: var(--gold-hi); border-color: transparent; }
+body[data-style="molded"] #composer-mic.on { border-color: transparent; }
+body[data-style="molded"] :is(.filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.set, .look-swatch, .live-ctl, #composer-speak, #composer-tools):is(.on)::after,
+body[data-style="molded"] [aria-pressed="true"]:is(.btn, .icon-btn, .live-ctl)::after,
+body[data-style="molded"] .dock button.active::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: var(--gold-hi);
+  box-shadow: 0 0 calc(6px * var(--glow)) 1px color-mix(in srgb, var(--gold-hi) 80%, transparent);
+}
+body[data-style="molded"] #live-mute.on { color: var(--warn); }
+body[data-style="molded"] #live-mute.on::after { background: var(--warn); box-shadow: 0 0 calc(6px * var(--glow)) 1px var(--warn); }
+
+/* accent keys (Send, primary actions, End call): the same molded key, cast in the accent colour */
+body[data-style="molded"] :is(.btn.primary, .icon-btn.send, .live-ctl.end, #composer-mic.on) {
+  --top: color-mix(in srgb, var(--red) 72%, #fff);
+  --mid: var(--red);
+  --foot: color-mix(in srgb, var(--red) 55%, #000);
+  color: #fff;
+}
+body[data-style="molded"] :is(.btn.primary, .icon-btn.send):hover { --top: color-mix(in srgb, var(--red-hover) 70%, #fff); --mid: var(--red-hover); }
+body[data-style="molded"] .btn.talk.on { --top: color-mix(in srgb, var(--gold-hi) 75%, #fff); --mid: var(--gold); --foot: color-mix(in srgb, var(--gold) 55%, #000); color: #1a0d05; }
+body[data-style="molded"] .btn.danger { color: #ff7a7a; }
+body[data-style="molded"] .btn:disabled, body[data-style="molded"] .icon-btn:disabled { --hh: calc(var(--h) * var(--g) * .2); }
+
+/* the section dock: a key bed of flat square tiles split by fine seams, each holding a round molded cap (OP-XY) */
+body[data-style="molded"] .dock button { border-radius: 12px; padding: 8px 10px 6px; gap: 3px; background: color-mix(in srgb, var(--face) 55%, transparent); box-shadow: 0 0 0 1px rgba(0, 0, 0, .55), inset 0 1px 0 var(--lip); }
+body[data-style="molded"] .dock button:hover { background: color-mix(in srgb, var(--face-hi) 60%, transparent); }
+body[data-style="molded"] .dock button svg { --hh: calc(var(--h) * var(--g) * .65); width: 32px; height: 32px; padding: 7px; border-radius: 50%; }
+body[data-style="molded"] .dock button:hover svg { --hh: calc(var(--h) * var(--g) * .8); }
+body[data-style="molded"] .dock button:active svg, body[data-style="molded"] .dock button.active svg { --hh: calc(var(--h) * var(--g) * .2); transform: translateY(1.5px); }
+body[data-style="molded"] .dock button.active { color: var(--gold-hi); }
+body[data-style="molded"] .dock button.voice { color: #fff; }
+body[data-style="molded"] .dock button.voice svg { --top: color-mix(in srgb, var(--red) 80%, #fff); --mid: var(--red); --foot: var(--red-deep); }
+body[data-style="molded"] .dock button.live-btn svg { color: var(--gold-hi); }
+
+/* ---------- carved in ---------- */
+body[data-style="molded"] .composer {
+  border: 0;
+  border-radius: 18px;
+  background: var(--well);
+  box-shadow: inset 0 3px 6px rgba(0, 0, 0, .75), inset 0 -1px 0 var(--lip);
+}
+body[data-style="molded"] .composer:focus-within { box-shadow: inset 0 3px 6px rgba(0, 0, 0, .75), inset 0 -1px 0 var(--lip), inset 0 0 0 1px color-mix(in srgb, var(--red) calc(45% * var(--glow)), transparent), 0 0 calc(22px * var(--glow)) color-mix(in srgb, var(--red) calc(14% * var(--glow)), transparent); }
+body[data-style="molded"] :is(input:not([type="checkbox"], [type="radio"], [type="color"], [type="range"], [type="file"]), select, textarea):not(#prompt) {
+  border-color: transparent;
+  background-color: var(--well);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, .75), inset 0 -1px 0 var(--lip);
+}
+body[data-style="molded"] :is(input:not([type="checkbox"], [type="radio"], [type="color"], [type="range"], [type="file"]), select, textarea):not(#prompt):focus { box-shadow: inset 0 2px 5px rgba(0, 0, 0, .75), inset 0 0 0 1px var(--gold); }
+body[data-style="molded"] :is(.bar, .progress, .vram-stack, .voice-level, .live-level) { background: var(--well); border-color: transparent; box-shadow: inset 0 1px 2px rgba(0, 0, 0, .8), 0 1px 0 var(--lip); }
+body[data-style="molded"] :is(.voice-stage, .live-stage, .cam-view, .lb-media, .cu-shot) { border-color: transparent; box-shadow: inset 0 3px 8px rgba(0, 0, 0, .8), 0 0 0 1px rgba(0, 0, 0, .6), 0 -1px 0 var(--lip); }
+/* Prestige's replies are carved into the ground; yours stand up from it */
+body[data-style="molded"] .msg.ai { padding: 12px 16px; border-radius: 16px; background: color-mix(in srgb, var(--wall-lo) 45%, transparent); box-shadow: inset 0 2px 5px rgba(0, 0, 0, .55), inset 0 -1px 0 var(--lip); }
+body[data-style="molded"] .msg.you { --hh: calc(var(--h) * var(--g) * .45); border-radius: 16px 16px 6px 16px; padding: 10px 15px 12px; }
+body[data-style="molded"] .msg-body pre { border-color: transparent; background: var(--well); box-shadow: inset 0 2px 5px rgba(0, 0, 0, .6); }
+body[data-style="molded"] .chat-render .pic, body[data-style="molded"] .chat-render video { border: 2px solid var(--wall); box-shadow: 0 0 0 1px rgba(0, 0, 0, .6), 0 4px 6px rgba(0, 0, 0, .5), 0 12px 24px rgba(0, 0, 0, .45); }
+body[data-style="molded"] .live { background: radial-gradient(ellipse at 50% 42%, color-mix(in srgb, var(--red-deep) calc(30% * var(--glow)), transparent), transparent 62%), var(--grain, none), var(--ground); }
+
+/* ---------- growing into place (mesa.ts adds these) ---------- */
+/* panels rise out of the ground: a seam opens from the middle, then they stand up */
+body[data-style="molded"] .mesa-rise { animation: mesa-rise .9s cubic-bezier(.2, .8, .2, 1) both; animation-delay: calc(var(--i, 0) * 90ms); }
+@keyframes mesa-rise {
+  0% { --g: 0; clip-path: inset(46% 46% 46% 46% round 22px); filter: brightness(.4); }
+  45% { --g: 0; clip-path: inset(0 0 0 0 round 22px); filter: brightness(.7); }
+  100% { --g: 1; clip-path: inset(-80px -80px -80px -80px round 22px); filter: none; }
+}
+/* popovers and dialogs grow open from the button that opened them (--ox, --oy), then rise */
+body[data-style="molded"] .mesa-pop { animation: mesa-pop .75s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes mesa-pop {
+  0% { --g: 0; clip-path: circle(0 at var(--ox, 50%) var(--oy, 100%)); }
+  50% { --g: .1; clip-path: circle(calc(var(--or, 900px) * .75) at var(--ox, 50%) var(--oy, 100%)); }
+  100% { --g: 1; clip-path: circle(var(--or, 900px) at var(--ox, 50%) var(--oy, 100%)); }
+}
+/* closing runs it backwards; it stays drawn (though hidden to the code) until it has folded away */
+body[data-style="molded"] .mesa-out[hidden] { display: var(--mesa-d, block) !important; pointer-events: none; animation: mesa-pop .4s ease-in reverse both; }
+/* what's inside rises in one after another */
+body[data-style="molded"] .mesa-sub { animation: mesa-sub .5s cubic-bezier(.2, .9, .3, 1) both; animation-delay: calc(240ms + var(--k, 0) * 60ms); }
+@keyframes mesa-sub { from { opacity: 0; translate: 0 8px; filter: brightness(.5); } to { opacity: 1; translate: 0 0; filter: none; } }
+/* a new message grows in */
+body[data-style="molded"] .msg.mesa-in { animation: mesa-msg .6s cubic-bezier(.2, .9, .3, 1) both; animation-delay: calc(var(--k, 0) * 120ms); }
+body[data-style="molded"] .msg.you.mesa-in { transform-origin: 100% 100%; }
+body[data-style="molded"] .msg.ai.mesa-in { transform-origin: 0 0; }
+@keyframes mesa-msg { from { opacity: 0; scale: .9; --g: 0; } to { opacity: 1; scale: 1; --g: 1; } }
+
+@media (max-width: 760px) {
+  body[data-style="molded"] .dock button svg { width: 28px; height: 28px; padding: 6px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  body[data-style="molded"] :is(.mesa-rise, .mesa-pop, .mesa-sub, .mesa-in) { animation: none !important; }
+}

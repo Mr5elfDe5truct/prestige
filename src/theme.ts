@@ -1,5 +1,5 @@
-// Appearance: the colour theme (a preset, or your own accent and trim colours), how strongly things glow, the ember
-// drift behind the app and emote reactions. Changes show at once while Settings is open; Cancel puts them back.
+// Appearance: the style (how surfaces are built: Molded, Classic…), the colour theme (a preset, or your own accent and
+// trim colours), how strongly things glow, the ember drift behind the app and emote reactions. Changes show at once while Settings is open; Cancel puts them back.
 // The look is also kept in this window's local storage, so the launch screen already has it before settings load.
 import { setEmbers } from "./embers";
 
@@ -10,7 +10,21 @@ export interface Look {
   glow?: number; // glow and bloom, 0 (off) to 150 (%)
   embers?: boolean; // false = no ember drift
   emotes?: boolean; // false = no emote reactions
+  style?: string; // a STYLES id; unset = the first (Molded)
+  molded?: boolean; // before styles: false meant flat panels, now the Classic style (read once, never written)
 }
+
+/**
+ * Styles: how surfaces are built, separate from the colours. Each one is body[data-style="<id>"] and its own CSS file
+ * (imported in main.ts) that draws only from the theme's colour variables, so every theme and Accent/Trim works in it.
+ * Classic is styles.css alone. To add one: an entry here and a CSS file scoped to its data-style.
+ */
+export const STYLES: { id: string; name: string; about: string }[] = [
+  { id: "molded", name: "Molded", about: "Panels and keys rise out of one surface like a cast keybed, and grow into place" },
+  { id: "classic", name: "Classic", about: "Flat black-lacquer panels with fine borders" },
+];
+/** The style a look uses (a look saved with the old Molded switch off is Classic). */
+export const styleOf = (look: Look) => STYLES.find((s) => s.id === look.style)?.id ?? (look.molded === false ? "classic" : STYLES[0].id);
 
 interface Preset {
   id: string;
@@ -27,7 +41,12 @@ export const PRESETS: Preset[] = [
     name: "Dragon",
     accent: "#d6202b",
     trim: "#d9a441",
-    exact: { bg: "#0a0707", panel: "#120c0c", "panel-2": "#1a1111", line: "#2c1c1c", fg: "#efe4d6", muted: "#9c8a7f", "red-deep": "#7a0d12" },
+    exact: {
+      bg: "#0a0707", panel: "#120c0c", "panel-2": "#1a1111", line: "#2c1c1c", fg: "#efe4d6", muted: "#9c8a7f", "red-deep": "#7a0d12",
+      // the molded surfaces (mesa.css): the ground, a raised thing's walls (lit top to shadowed foot), its top face, carved wells
+      ground: "#170e0b", "wall-hi": "#6b4232", wall: "#3a241c", "wall-mid": "#22140f", "wall-lo": "#0e0706",
+      "face-hi": "#3e261d", face: "#2a1913", "face-lo": "#22130e", well: "#110907", "gold-hi": "#f3cf7a",
+    },
   },
   { id: "sapphire", name: "Sapphire", accent: "#2f6fe0", trim: "#c8d2e0" },
   { id: "emerald", name: "Emerald", accent: "#17a35e", trim: "#d9b44a" },
@@ -72,7 +91,7 @@ export function colorsOf(look: Look): { accent: string; trim: string; preset?: P
 function palette(look: Look): Record<string, string> {
   const { accent, trim, preset } = colorsOf(look);
   const [h, s, l] = hsl(hex(accent));
-  const [th, ts] = hsl(hex(trim));
+  const [th, ts, tl] = hsl(hex(trim));
   const vars: Record<string, string> = {
     red: accent,
     gold: trim,
@@ -84,6 +103,17 @@ function palette(look: Look): Record<string, string> {
     fg: css(th, Math.min(ts * 0.7, 47), 89),
     muted: css(th, Math.min(ts, 13), 55),
     "red-deep": css(h, Math.min(s + 7, 100), 26),
+    // molded surfaces: stone tinted with the accent's hue at the lightness of Dragon's red-brown stone
+    ground: css(h, Math.min(s, 35), 7),
+    "wall-hi": css(h, Math.min(s, 36), 31),
+    wall: css(h, Math.min(s, 35), 17),
+    "wall-mid": css(h, Math.min(s, 38), 10),
+    "wall-lo": css(h, Math.min(s, 40), 4),
+    "face-hi": css(h, Math.min(s, 36), 18),
+    face: css(h, Math.min(s, 38), 12),
+    "face-lo": css(h, Math.min(s, 42), 9),
+    well: css(h, Math.min(s, 40), 5),
+    "gold-hi": css(th, Math.min(ts + 15, 100), Math.min(tl + 16, 90)),
   };
   return preset?.exact ? { ...vars, ...preset.exact } : vars;
 }
@@ -106,6 +136,7 @@ export function applyLook(look: Look = {}) {
   root.setProperty("--glow", String(glow));
   document.body.classList.toggle("no-glow", glow === 0);
   document.body.classList.toggle("no-emotes", look.emotes === false);
+  document.body.dataset.style = styleOf(look);
   setEmbers(look.embers !== false);
   try {
     localStorage.setItem("prestige-look", JSON.stringify(look));
@@ -172,6 +203,21 @@ function renderAppearance() {
   $("#look-glow-val").textContent = g === 0 ? "Off" : `${g}%`;
   ($("#look-embers") as HTMLInputElement).checked = draft.embers !== false;
   ($("#look-emotes") as HTMLInputElement).checked = draft.emotes !== false;
+  const styles = $("#look-styles");
+  const curStyle = styleOf(draft);
+  styles.innerHTML = "";
+  for (const st of STYLES) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = `look-swatch look-style${st.id === curStyle ? " on" : ""}`;
+    b.dataset.style = st.id;
+    b.title = st.about;
+    b.setAttribute("aria-pressed", String(st.id === curStyle));
+    b.innerHTML = `<i></i><span></span>`;
+    b.lastElementChild!.textContent = st.name;
+    b.addEventListener("click", () => update({ style: st.id === STYLES[0].id ? undefined : st.id, molded: undefined }));
+    styles.appendChild(b);
+  }
 }
 
 export function initAppearance() {
@@ -185,5 +231,7 @@ export function initAppearance() {
   $("#look-glow").addEventListener("input", (e) => update({ glow: Number((e.target as HTMLInputElement).value) }));
   $("#look-embers").addEventListener("change", (e) => update({ embers: (e.target as HTMLInputElement).checked ? undefined : false }));
   $("#look-emotes").addEventListener("change", (e) => update({ emotes: (e.target as HTMLInputElement).checked ? undefined : false }));
-  $("#look-reset").addEventListener("click", () => update({ theme: undefined, accent: undefined, trim: undefined, glow: undefined, embers: undefined, emotes: undefined }));
+  $("#look-reset").addEventListener("click", () =>
+    update({ theme: undefined, accent: undefined, trim: undefined, glow: undefined, embers: undefined, emotes: undefined, style: undefined, molded: undefined }),
+  );
 }
