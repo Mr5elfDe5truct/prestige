@@ -259,7 +259,7 @@ public class MainActivity extends Activity {
             });
         }
 
-        /** Saves a render to the phone: Pictures/Prestige, or Movies/Prestige for a video. */
+        /** Saves a render to the phone: Pictures, Movies (videos), Music (songs) or Download (3D models), in Prestige. */
         @JavascriptInterface
         public void save(String url, String name) {
             if (!url.startsWith(RELAY)) return;
@@ -285,18 +285,40 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** Saves a render into the phone's own folders: pictures, videos, songs (Music) or 3D models (Download). */
     private String download(String url, String name) throws IOException {
         String lower = name.toLowerCase();
-        boolean video = lower.endsWith(".mp4") || lower.endsWith(".webm") || lower.endsWith(".mov");
-        String mime = video ? (lower.endsWith(".webm") ? "video/webm" : lower.endsWith(".mov") ? "video/quicktime" : "video/mp4")
-                : lower.endsWith(".png") ? "image/png" : lower.endsWith(".webp") ? "image/webp" : "image/jpeg";
+        String ext = lower.substring(lower.lastIndexOf('.') + 1);
+        String mime, folder;
+        Uri collection;
+        switch (ext) {
+            case "mp4": case "webm": case "mov":
+                mime = ext.equals("webm") ? "video/webm" : ext.equals("mov") ? "video/quicktime" : "video/mp4";
+                folder = Environment.DIRECTORY_MOVIES;
+                collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
+                break;
+            case "mp3": case "flac": case "ogg": case "opus": case "wav":
+                mime = ext.equals("mp3") ? "audio/mpeg" : ext.equals("flac") ? "audio/flac" : ext.equals("wav") ? "audio/wav" : "audio/ogg";
+                folder = Environment.DIRECTORY_MUSIC;
+                collection = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI;
+                break;
+            case "png": case "jpg": case "jpeg": case "webp": case "gif":
+                mime = ext.equals("png") ? "image/png" : ext.equals("webp") ? "image/webp" : ext.equals("gif") ? "image/gif" : "image/jpeg";
+                folder = Environment.DIRECTORY_PICTURES;
+                collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
+                break;
+            default: // a 3D model (.glb) and anything else
+                mime = ext.equals("glb") ? "model/gltf-binary" : "application/octet-stream";
+                folder = Environment.DIRECTORY_DOWNLOADS;
+                collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI;
+        }
         ContentValues v = new ContentValues();
         v.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
         v.put(MediaStore.MediaColumns.MIME_TYPE, mime);
-        v.put(MediaStore.MediaColumns.RELATIVE_PATH, (video ? Environment.DIRECTORY_MOVIES : Environment.DIRECTORY_PICTURES) + "/Prestige");
+        v.put(MediaStore.MediaColumns.RELATIVE_PATH, folder + "/Prestige");
         v.put(MediaStore.MediaColumns.IS_PENDING, 1);
         ContentResolver cr = getContentResolver();
-        Uri dest = cr.insert(video ? MediaStore.Video.Media.EXTERNAL_CONTENT_URI : MediaStore.Images.Media.EXTERNAL_CONTENT_URI, v);
+        Uri dest = cr.insert(collection, v);
         if (dest == null) throw new IOException("no room in the gallery");
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         try (InputStream in = c.getInputStream(); OutputStream out = cr.openOutputStream(dest)) {
@@ -313,6 +335,6 @@ public class MainActivity extends Activity {
         v.clear();
         v.put(MediaStore.MediaColumns.IS_PENDING, 0);
         cr.update(dest, v, null, null);
-        return "Saved to " + (video ? "Movies" : "Pictures") + "/Prestige";
+        return "Saved to " + folder + "/Prestige";
     }
 }

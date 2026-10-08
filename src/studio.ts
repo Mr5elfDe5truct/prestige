@@ -47,7 +47,7 @@ import {
   type SettingsKey,
   type VideoSettings,
 } from "./gensettings";
-import { CONSENT, bindRefChoices, hasFiles, imageIn, loadReference, onRefPrefsChange, refChoicesHtml, refPrefs, refPrompt, sceneOf, setRefPrefs, uploadReference, type RefKind, type Reference } from "./reference";
+import { CONSENT, bindRefChoices, hasFiles, imageIn, loadReference, onRefPrefsChange, refChoicesHtml, refPrefs, refPrompt, referenceFromBase64, sceneOf, setRefPrefs, uploadReference, type RefKind, type Reference } from "./reference";
 import { characterById, characters, faceBlob, onCharactersChange } from "./characters";
 import { initInpaint, openInpaint, type SelectQuery } from "./inpaint";
 
@@ -917,19 +917,7 @@ export function initStudio(d: Deps) {
       settingsOpen = !settingsOpen;
       return renderCreate();
     }
-    if (!t.closest(".opt.model")) return;
-    if (mode === "video") {
-      animateMode = animateMode === "long" ? "animate" : "long";
-      try {
-        localStorage.setItem("studio.animateModel", animateMode);
-      } catch {}
-      return renderCreate();
-    }
-    imageMode = imageMode === "fast" ? "image" : "fast";
-    try {
-      localStorage.setItem("studio.imageModel", imageMode);
-    } catch {}
-    renderCreate();
+    if (t.closest(".opt.model")) flipModel(mode === "video");
   });
   onSettingsChange(() => renderCreate());
   initSongWriter();
@@ -1039,35 +1027,13 @@ function renderCreate() {
   $("#create").classList.toggle("disabled", !wf);
   ($("#gen-btn") as HTMLButtonElement).disabled = !wf;
   // While something renders, the button adds to the queue.
-  ($("#gen-btn") as HTMLButtonElement).textContent =
-    job || starting || current ? "Add to queue" : gm === "animate" || gm === "long" ? "Animate" : gm === "edit" ? "Edit" : gm === "song" ? "Make song" : "Generate";
-  ($("#gen-prompt") as HTMLInputElement).placeholder =
-    gm === "song"
-      ? "Describe the style… e.g. dreamy indie pop, soft female vocals, warm guitars, summer night"
-      : gm === "image" || gm === "fast"
-      ? "Describe an image… e.g. a red and gold dragon coiled around a glowing GPU"
-      : gm === "ref" || gm === "reffast"
-        ? "Describe the new scene… e.g. sitting at a café in Paris at golden hour, laughing"
-        : gm === "edit"
-          ? "Say what to change… e.g. make it night, swap the car for a horse, remove the sign"
-          : gm === "animate"
-            ? "Describe the motion… e.g. slow push-in, snow falling, warm light flickering"
-            : gm === "long"
-              ? settings().long.shots > 1
-                ? "One prompt per shot, split with | … e.g. slow push-in | pans right along the porch | tilts up to the peaks"
-                : "Describe the motion… e.g. slow push-in, snow falling, warm light flickering"
-            : gm === "refvideo" && !chain
-              ? "Describe the motion and sound… e.g. turns to the camera and waves, birds singing"
-              : `Describe a ${settings().video.seconds}-second scene${gm === "refvideo" ? " with your reference in it" : ""}, including any sound…`;
+  ($("#gen-btn") as HTMLButtonElement).textContent = buttonText(gm);
+  ($("#gen-prompt") as HTMLInputElement).placeholder = promptHint(gm);
   // In Image mode the model chip switches between Qwen-Image-2.1 and its faster turbo (or Z-Image-Turbo);
   // when animating a picture, between one Wan 2.2 clip and a long Wan 2.2 SVI video.
   const animating = gm === "animate" || gm === "long";
-  const canPick =
-    ((gm === "image" || gm === "fast") && workflows.fast && workflows.image && active.image !== ZIMAGE) ||
-    ((gm === "ref" || gm === "reffast") && workflows.ref && workflows.reffast) ||
-    (animating && workflows.animate && workflows.long);
   const label = chain ? `${modeOf(first).label} → ${m.label}` : m.label;
-  const chip = canPick
+  const chip = canPick(gm)
     ? `<button type="button" class="opt pick model" title="${animating ? "Switch between one clip and a long video" : "Switch image model"}"><b>${label}</b> ⇄</button>`
     : `<span class="opt"><b>${label}</b></span>`;
   const p = plan(gm);
@@ -1084,6 +1050,56 @@ function renderCreate() {
   const panel = $("#gen-settings");
   panel.hidden = !wf || !settingsOpen;
   if (!panel.hidden) settingsForm(panel, gm, false);
+}
+
+/** The create button's words: "Add to queue" while something renders. */
+const buttonText = (gm: GenMode) =>
+  job || starting || current ? "Add to queue" : gm === "animate" || gm === "long" ? "Animate" : gm === "edit" ? "Edit" : gm === "song" ? "Make song" : "Generate";
+
+/** Whether the model chip can switch: Qwen-Image-2.1 and its turbo, or one Wan 2.2 clip and a long SVI video. */
+const canPick = (gm: GenMode) =>
+  !!(
+    ((gm === "image" || gm === "fast") && workflows.fast && workflows.image && active.image !== ZIMAGE) ||
+    ((gm === "ref" || gm === "reffast") && workflows.ref && workflows.reffast) ||
+    ((gm === "animate" || gm === "long") && workflows.animate && workflows.long)
+  );
+
+/** The model chip: switches the image model, or one clip and a long video (Studio and the phone). */
+function flipModel(video: boolean) {
+  if (video) {
+    animateMode = animateMode === "long" ? "animate" : "long";
+    try {
+      localStorage.setItem("studio.animateModel", animateMode);
+    } catch {}
+  } else {
+    imageMode = imageMode === "fast" ? "image" : "fast";
+    try {
+      localStorage.setItem("studio.imageModel", imageMode);
+    } catch {}
+  }
+  renderCreate();
+}
+
+/** What the prompt box asks for in a mode. */
+function promptHint(gm: GenMode) {
+  const chain = chained(gm);
+  return gm === "song"
+      ? "Describe the style… e.g. dreamy indie pop, soft female vocals, warm guitars, summer night"
+      : gm === "image" || gm === "fast"
+      ? "Describe an image… e.g. a red and gold dragon coiled around a glowing GPU"
+      : gm === "ref" || gm === "reffast"
+        ? "Describe the new scene… e.g. sitting at a café in Paris at golden hour, laughing"
+        : gm === "edit"
+          ? "Say what to change… e.g. make it night, swap the car for a horse, remove the sign"
+          : gm === "animate"
+            ? "Describe the motion… e.g. slow push-in, snow falling, warm light flickering"
+            : gm === "long"
+              ? settings().long.shots > 1
+                ? "One prompt per shot, split with | … e.g. slow push-in | pans right along the porch | tilts up to the peaks"
+                : "Describe the motion… e.g. slow push-in, snow falling, warm light flickering"
+            : gm === "refvideo" && !chain
+              ? "Describe the motion and sound… e.g. turns to the camera and waves, birds singing"
+              : `Describe a ${settings().video.seconds}-second scene${gm === "refvideo" ? " with your reference in it" : ""}, including any sound…`;
 }
 
 // ---------- song lyrics ----------
@@ -1202,15 +1218,18 @@ function renderRefSlot(gm: GenMode, webcam: boolean) {
   }
   if (!ref) return;
   ($("#ref-img") as HTMLImageElement).src = ref.url;
-  $("#ref-what").textContent =
-    gm === "refvideo"
-      ? chained(gm)
-        ? `Reference: ${modeOf(refImageMode()).label} puts it in the first frame, then ${modeOf(gm).label} animates it`
-        : `Reference: ${modeOf(gm).label} animates this picture as it is`
-      : `Reference: ${modeOf(gm).label} puts it in the scene you describe`;
+  $("#ref-what").textContent = refWhat(gm);
   $("#ref-picks").innerHTML = refChoicesHtml(gm === "refvideo");
   $("#ref-consent").textContent = CONSENT;
 }
+
+/** What happens to the reference in this mode. */
+const refWhat = (gm: GenMode) =>
+  gm === "refvideo"
+    ? chained(gm)
+      ? `Reference: ${modeOf(refImageMode()).label} puts it in the first frame, then ${modeOf(gm).label} animates it`
+      : `Reference: ${modeOf(gm).label} animates this picture as it is`
+    : `Reference: ${modeOf(gm).label} puts it in the scene you describe`;
 
 /** The settings as chips: size, steps, length, seed and a time estimate. */
 function summary(gm: GenMode, p: Plan): string[] {
@@ -1265,67 +1284,96 @@ function loadSviModels() {
   })());
 }
 
+/** One setting in the form: a pick from a list (Studio's panel, chat's popover and the phone draw it). */
+interface Field {
+  k: string;
+  label: string;
+  options: [string | number, string][];
+  value: string | number;
+  hint?: string;
+}
+
+/** The settings a mode has, as data. `src` is the picture it starts from (Wan's "Match the picture" and SVI's sizes). */
+function settingsFields(gm: GenMode, src: Source | null = srcAsset): Field[] {
+  const m = modeOf(gm);
+  const s = settings()[settingsKey(gm)];
+  const f: Field[] = [];
+  const field = (label: string, k: string, options: Field["options"], value: string | number, hint = "") => f.push({ k, label, options, value, hint });
+  if (m.family === "image") {
+    const img = settings().image;
+    field("Shape", "aspect", ASPECTS, img.aspect);
+    field("Size", "size", SIZES.map(([v, l]) => [v, `${l} · ${imageDims(img.aspect, v).join(" × ")}`]), img.size);
+  }
+  if (m.family === "ltx" || m.family === "ltx1") {
+    const v = settings().video;
+    field("Resolution", "res", LTX_RES, v.res);
+    field("Length", "seconds", LTX_SECONDS.map((n) => [n, `${n} seconds`]), v.seconds);
+    field("Frame rate", "fps", LTX_FPS.map((n) => [n, `${n} fps`]), v.fps, `${ltxFrames(v.seconds, v.fps)} frames`);
+  }
+  if (m.family === "wan") {
+    const v = settings().animate;
+    const auto = wanAuto(src?.width, src?.height).join(" × ");
+    field("Resolution", "res", WAN_RES.map(([r, l]) => [r, r === "auto" ? `${l} (${auto})` : l]), v.res);
+    field("Length", "seconds", WAN_SECONDS.map((n) => [n, `${n} seconds`]), v.seconds, `${wanFrames(v.seconds)} frames at 16 fps, Wan's own rate`);
+  }
+  if (m.family === "svi") {
+    const v = settings().long;
+    const dims = (n: number) => sviDims(n, src?.width, src?.height).join(" × ");
+    field("Size", "size", SVI_SIZES.map((n) => [n, `${dims(n)} · saved at 2×`]), v.size);
+    field("Shots", "shots", SVI_SHOTS.map((n) => [n, n === 1 ? "1 shot" : `${n} shots`]), v.shots, "Each continues the last; split the prompt with | to give each its own");
+    field("Shot length", "frames", SVI_FRAMES.map((n) => [n, `${n} frames · ${sviSeconds(n, 1)} s`]), v.frames, `${sviSeconds(v.frames, v.shots)} s in all, at ${SVI_FPS * 2} fps after FILM`);
+    const models = sviModels ?? [];
+    const pick = (label: string, k: "high" | "low", which: string) =>
+      field(
+        label,
+        k,
+        [
+          ["", `Stock Wan 2.2 4-step (${which})`],
+          ...models.map((n): [string, string] => [n, n]),
+          ...(v[k] && !models.includes(v[k]!) ? [[v[k]!, `${v[k]} (not found)`] as [string, string]] : []),
+        ],
+        v[k] ?? "",
+        k === "high" ? "From ComfyUI's model folders; kept on this PC only" : "",
+      );
+    pick("High-noise model", "high", "high noise");
+    pick("Low-noise model", "low", "low noise");
+  }
+  if (m.family === "song") {
+    const v = settings().music;
+    field("Length", "seconds", SONG_SECONDS.map((n) => [n, songLength(n)]), v.seconds);
+    field("Tempo", "bpm", SONG_BPMS.map((n) => [n, `${n} bpm`]), v.bpm);
+    field("Key", "key", SONG_KEYS.map((k) => [k, k]), v.key);
+    field("Meter", "meter", SONG_METERS, v.meter);
+    field("Lyrics language", "language", SONG_LANGUAGES, v.language, "Chat's /song picks the tempo, key and language for each song");
+  }
+  const quality = "quality" in s ? s.quality : "standard";
+  if (m.family === "ltx") field("Quality", "quality", [["draft", "Draft · half size, one pass"], ["standard", "Standard · upscaled 2×"]], quality === "draft" ? "draft" : "standard");
+  else if (m.steps) {
+    const q = m.steps[quality] != null ? quality : "standard";
+    field("Quality", "quality", levels(m).map((l) => [l, `${QUALITY_NAMES[l]} · ${m.steps![l]} steps`]), q);
+  }
+  if (m.family === "image") field("How many", "count", [1, 2, 3, 4].map((n) => [n, n === 1 ? "1 image" : `${n} images`]), settings().image.count);
+  return f;
+}
+
+/** A picked option as the setting's value. Numbers stay numbers (length, fps, count, the long video's size…); words
+ *  stay words. "size" is both: the long video's longest side, and an image's Small / Standard / Large, which Number()
+ *  turned into NaN (saved as null). A song's meter is a digit too, but ACE-Step takes it as text ("4", "6"). */
+function fieldValue(k: string, raw: string) {
+  const model = k === "high" || k === "low";
+  return /^\d+$/.test(raw) && k !== "meter" ? Number(raw) : model ? raw || null : raw;
+}
+
 /** The settings form for a mode (Studio's panel and chat's popover). Changes are saved and shared. */
 function settingsForm(el: HTMLElement, gm: GenMode, withWarn: boolean) {
   const m = modeOf(gm);
   const key = settingsKey(gm);
   const s = settings()[key];
   const p = plan(gm);
-  const field = (label: string, k: string, opts: string, hint = "") =>
-    `<label class="field">${label}<select data-k="${k}">${opts}</select>${hint ? `<small>${hint}</small>` : ""}</label>`;
-  const f: string[] = [];
-  if (m.family === "image") {
-    const img = settings().image;
-    f.push(field("Shape", "aspect", optionList(ASPECTS, img.aspect)));
-    f.push(field("Size", "size", optionList(SIZES.map(([v, l]) => [v, `${l} · ${imageDims(img.aspect, v).join(" × ")}`]), img.size)));
-  }
-  if (m.family === "ltx" || m.family === "ltx1") {
-    const v = settings().video;
-    f.push(field("Resolution", "res", optionList(LTX_RES, v.res)));
-    f.push(field("Length", "seconds", optionList(LTX_SECONDS.map((n) => [n, `${n} seconds`]), v.seconds)));
-    f.push(field("Frame rate", "fps", optionList(LTX_FPS.map((n) => [n, `${n} fps`]), v.fps), `${ltxFrames(v.seconds, v.fps)} frames`));
-  }
-  if (m.family === "wan") {
-    const v = settings().animate;
-    const auto = wanAuto(srcAsset?.width, srcAsset?.height).join(" × ");
-    f.push(field("Resolution", "res", optionList(WAN_RES.map(([r, l]) => [r, r === "auto" ? `${l} (${auto})` : l]), v.res)));
-    f.push(field("Length", "seconds", optionList(WAN_SECONDS.map((n) => [n, `${n} seconds`]), v.seconds), `${wanFrames(v.seconds)} frames at 16 fps, Wan's own rate`));
-  }
-  if (m.family === "svi") {
-    const v = settings().long;
-    const dims = (n: number) => sviDims(n, srcAsset?.width, srcAsset?.height).join(" × ");
-    f.push(field("Size", "size", optionList(SVI_SIZES.map((n) => [n, `${dims(n)} · saved at 2×`]), v.size)));
-    f.push(field("Shots", "shots", optionList(SVI_SHOTS.map((n) => [n, n === 1 ? "1 shot" : `${n} shots`]), v.shots), "Each continues the last; split the prompt with | to give each its own"));
-    f.push(field("Shot length", "frames", optionList(SVI_FRAMES.map((n) => [n, `${n} frames · ${sviSeconds(n, 1)} s`]), v.frames), `${sviSeconds(v.frames, v.shots)} s in all, at ${SVI_FPS * 2} fps after FILM`));
-    const models = sviModels ?? [];
-    const pick = (label: string, k: "high" | "low", which: string) =>
-      field(
-        label,
-        k,
-        `<option value="">Stock Wan 2.2 4-step (${which})</option>` + optionList(models.map((n) => [n, n]), v[k] ?? "") +
-          (v[k] && !models.includes(v[k]!) ? `<option value="${esc(v[k]!)}" selected>${esc(v[k]!)} (not found)</option>` : ""),
-        k === "high" ? "From ComfyUI's model folders; kept on this PC only" : "",
-      );
-    f.push(pick("High-noise model", "high", "high noise"));
-    f.push(pick("Low-noise model", "low", "low noise"));
-    if (!sviModels && !sviModelsLoading) loadSviModels().then(() => sviModels && el.isConnected && settingsForm(el, gm, withWarn));
-  }
-  if (m.family === "song") {
-    const v = settings().music;
-    f.push(field("Length", "seconds", optionList(SONG_SECONDS.map((n) => [n, songLength(n)]), v.seconds)));
-    f.push(field("Tempo", "bpm", optionList(SONG_BPMS.map((n) => [n, `${n} bpm`]), v.bpm)));
-    f.push(field("Key", "key", optionList(SONG_KEYS.map((k) => [k, k]), v.key)));
-    f.push(field("Meter", "meter", optionList(SONG_METERS, v.meter)));
-    f.push(field("Lyrics language", "language", optionList(SONG_LANGUAGES, v.language), "Chat's /song picks the tempo, key and language for each song"));
-  }
-  const quality = "quality" in s ? s.quality : "standard";
-  if (m.family === "ltx")
-    f.push(field("Quality", "quality", optionList([["draft", "Draft · half size, one pass"], ["standard", "Standard · upscaled 2×"]], quality === "draft" ? "draft" : "standard")));
-  else if (m.steps) {
-    const q = m.steps[quality] != null ? quality : "standard";
-    f.push(field("Quality", "quality", optionList(levels(m).map((l) => [l, `${QUALITY_NAMES[l]} · ${m.steps![l]} steps`]), q)));
-  }
-  if (m.family === "image") f.push(field("How many", "count", optionList([1, 2, 3, 4].map((n) => [n, n === 1 ? "1 image" : `${n} images`]), settings().image.count)));
+  const f = settingsFields(gm).map(
+    (x) => `<label class="field">${x.label}<select data-k="${x.k}">${optionList(x.options, x.value)}</select>${x.hint ? `<small>${x.hint}</small>` : ""}</label>`,
+  );
+  if (m.family === "svi" && !sviModels && !sviModelsLoading) loadSviModels().then(() => sviModels && el.isConnected && settingsForm(el, gm, withWarn));
   const last = lastSeed(key);
   f.push(
     `<label class="field seed">Seed<span class="seed-row"><input type="number" min="0" step="1" data-k="seed" placeholder="random" value="${s.seed ?? ""}" />` +
@@ -1341,12 +1389,7 @@ function settingsForm(el: HTMLElement, gm: GenMode, withWarn: boolean) {
   $$<HTMLSelectElement>("select", el).forEach((sel) =>
     sel.addEventListener("change", () => {
       const k = sel.dataset.k!;
-      // Numbers stay numbers (length, fps, count, the long video's size…); words stay words. "size" is both: the long
-      // video's longest side, and an image's Small / Standard / Large, which Number() turned into NaN (saved as null).
-      // A song's meter is a digit too, but ACE-Step takes it as text ("4", "6").
-      const model = k === "high" || k === "low";
-      const value = /^\d+$/.test(sel.value) && k !== "meter" ? Number(sel.value) : model ? sel.value || null : sel.value;
-      update(key, { [k]: value } as any);
+      update(key, { [k]: fieldValue(k, sel.value) } as any);
     }),
   );
   const seedIn = $<HTMLInputElement>("input[data-k=seed]", el);
@@ -1799,10 +1842,15 @@ function reusePrompt(a: Asset) {
 
 /** Fixes the seed for the next render of this kind, to vary a render you liked. */
 function reuseSeed(a: Asset) {
+  deps.toast(fixSeed(a));
+}
+
+/** Fixes the next render's seed to this render's, and says so. */
+function fixSeed(a: Asset) {
   const key: SettingsKey =
     a.kind === "image" ? "image" : a.kind === "audio" ? "music" : /svi-long/i.test(a.name) ? "long" : /wan/i.test(a.model ?? a.name) ? "animate" : "video";
   update(key, { seed: a.seed ?? null });
-  deps.toast(`The next ${key === "image" ? "image" : key === "music" ? "song" : "video"} uses seed ${a.seed}. Pick Random in Settings to go back.`);
+  return `The next ${key === "image" ? "image" : key === "music" ? "song" : "video"} uses seed ${a.seed}. Pick Random in Settings to go back.`;
 }
 
 const revealFile = (a: Asset) => invoke("reveal", { path: a.path }).catch((e) => deps.toast(errMsg(e), "warn"));
@@ -1837,17 +1885,22 @@ async function deleteRender(a: Asset) {
   await new Promise((r) => dlg.addEventListener("close", r, { once: true }));
   if (dlg.returnValue !== "delete") return;
   try {
-    await invoke("delete_render", { root: deps.root(), path: a.path, mtime: a.mtime });
+    await removeRender(a);
   } catch (e) {
     deps.toast(`Couldn't delete ${a.name}: ${errMsg(e)}`, "warn");
     return;
   }
+  deps.toast(`Moved ${a.name} to the Recycle Bin.`);
+}
+
+/** Moves a render to the Recycle Bin and takes it out of the gallery and chats (asked first, here or on the phone). */
+async function removeRender(a: Asset) {
+  await invoke("delete_render", { root: deps.root(), path: a.path, mtime: a.mtime });
   if (lbAsset?.path === a.path) closeLightbox();
   items = items.filter((x) => x.path !== a.path);
   render();
   // Chat messages that showed it say it's gone instead of a broken picture.
   $$<HTMLElement>("figure.chat-render").forEach((f) => f.dataset.path === a.path && f.classList.add("missing"));
-  deps.toast(`Moved ${a.name} to the Recycle Bin.`);
 }
 
 // ---------- right-click menu ----------
@@ -2235,8 +2288,13 @@ const ago = (ms: number) => {
   return s >= 60 ? `${Math.floor(s / 60)} min ${s % 60} s` : `${s} s`;
 };
 
+const queueListeners = new Set<() => void>();
+/** Runs whenever the render queue changes (a render added, its progress, finished), for phones. */
+export const onQueueChange = (f: () => void) => queueListeners.add(f);
+
 /** The queue under the create bar, and the count on the Studio button. */
 function renderQueue() {
+  queueListeners.forEach((f) => f());
   const live = rq.filter((j) => j.state === "waiting" || j.state === "running");
   const badge = document.getElementById("studio-count");
   if (badge) badge.textContent = live.length ? String(live.length) : "";
@@ -2589,6 +2647,263 @@ export async function renderMenu(e: MouseEvent, path: string) {
   }
   if (a) showMenu(e, a);
   else deps.toast("That file isn't in ComfyUI's output folder any more.", "warn");
+}
+
+// ---------- the phone: Studio, Renders and the queue on a paired phone (main.ts passes its requests here) ----------
+// The phone keeps its own create bar (mode, picture, reference, prompt) and asks for what that would make; the
+// settings, the model picks and the reference choices are the PC's, shared with Studio and chat. Renders it starts go
+// into the same queue as the PC's, marked "phone".
+type PhoneMode = "image" | "video" | "music";
+interface PhoneCreate {
+  mode: PhoneMode;
+  src?: string | null; // a render to edit (Image) or animate (Video)
+  ref?: { w: number; h: number } | null; // a reference picture's size, when one is set
+}
+
+/** A render by path (looking again when it's new). */
+async function findItem(path: string) {
+  let a = items.find((x) => x.path === path);
+  if (!a) {
+    await refresh();
+    a = items.find((x) => x.path === path);
+  }
+  if (!a) throw new Error("That render isn't in ComfyUI's output folder any more.");
+  return a;
+}
+
+/** The workflow the phone's create bar runs, as currentMode() does for Studio's. */
+function phoneGm(c: PhoneCreate, src: Asset | null): GenMode {
+  if (c.mode === "music") return "song";
+  if (c.mode === "video") return src ? animatePick() : c.ref ? "refvideo" : "video";
+  if (src) return "edit";
+  if (c.ref) return refImageMode();
+  return workflows[imageMode] ? imageMode : "fast";
+}
+
+/** The render queue for phones: the last 20, newest last. */
+export function phoneQueue() {
+  const live = (j: QJob) => j.state === "waiting" || j.state === "running";
+  return rq.slice(-20).map((j) => ({
+    id: j.id,
+    prompt: j.prompt,
+    label: j.label,
+    from: j.from,
+    state: j.state,
+    pct: Math.round(j.pct),
+    status: j.state === "waiting" ? `Waiting · ${rq.filter((x) => live(x) && rq.indexOf(x) < rq.indexOf(j)).length} ahead` : j.status,
+    error: j.error ?? null,
+    took: j.took ?? null,
+    result: (j.result ?? []).map((a) => ({ path: a.path, kind: a.kind, mtime: a.mtime, name: a.name })),
+  }));
+}
+
+/** What the phone can do with a render, by what's installed. */
+function actsFor(a: Asset): string[] {
+  const out: string[] = [];
+  const short = a.width && a.height ? Math.min(a.width, a.height) : 0;
+  if (a.kind === "image") {
+    if (workflows.edit) out.push("edit");
+    if (workflows.animate || workflows.long) out.push("animate");
+    if (workflows.ref || workflows.reffast) out.push("reference");
+    if (workflows.upimage && short < 1080) out.push("up1080");
+    if (workflows.upimage && short < 2160) out.push("up4k");
+    if (workflows.model3d) out.push("model3d");
+    if (workflows.cutout) out.push("removebg");
+    if (workflows.talk) out.push("talk");
+  }
+  if (a.kind === "video") {
+    if (workflows.upvideo && short < 1080) out.push("up1080");
+    if (workflows.vidcut) out.push("vidcut");
+  }
+  if (a.seed != null && a.kind !== "model") out.push("seed");
+  out.push("delete");
+  return out;
+}
+
+/** A character's face, small, for the phone's picker (faces are up to 2048 px). */
+const faceThumbs = new Map<string, string>();
+async function faceThumb(c: Parameters<typeof faceBlob>[0]) {
+  const key = `${c.id}:${c.face!.length}`;
+  let t = faceThumbs.get(key);
+  if (!t) {
+    const bmp = await createImageBitmap(faceBlob(c));
+    const k = Math.min(1, 160 / Math.max(bmp.width, bmp.height));
+    const cv = document.createElement("canvas");
+    cv.width = Math.round(bmp.width * k);
+    cv.height = Math.round(bmp.height * k);
+    cv.getContext("2d")!.drawImage(bmp, 0, 0, cv.width, cv.height);
+    bmp.close();
+    t = cv.toDataURL("image/jpeg", 0.8).split(",")[1];
+    faceThumbs.set(key, t);
+  }
+  return t;
+}
+
+/** What the phone's create bar would make: the model, the settings as chips and as a form, the warning, the words. */
+async function phoneInfo(c: PhoneCreate) {
+  await ensureWorkflows();
+  const src = c.src ? await findItem(c.src) : null;
+  const gm = phoneGm(c, src);
+  const m = modeOf(gm);
+  if (m.family === "svi" && !sviModels) await loadSviModels().catch(() => {});
+  // The picture it starts from, for sizes that follow it (only its size matters here).
+  const from: Source | null = src ?? (c.ref ? ({ path: "", name: "", kind: "image", mtime: 0, size: 0, width: c.ref.w, height: c.ref.h } as Asset) : null);
+  const chain = chained(gm);
+  const first = refImageMode();
+  const missing = !workflows[gm] ? m.file : chain && !workflows[first] ? modeOf(first).file : "";
+  const p = plan(gm, from);
+  const shown = chain ? { ...p, secs: p.secs + plan(first, from, frameSize()).secs } : p;
+  const key = settingsKey(gm);
+  return {
+    gm,
+    key,
+    label: chain ? `${modeOf(first).label} → ${m.label}` : m.label,
+    canPick: canPick(gm),
+    missing,
+    chips: missing ? [] : summary(gm, shown),
+    warn: p.warn,
+    cards: p.cards ?? "",
+    fields: settingsFields(gm, from),
+    seed: settings()[key].seed,
+    lastSeed: lastSeed(key) ?? null,
+    button: buttonText(gm),
+    placeholder: promptHint(gm),
+    refOk: !!(workflows.ref || workflows.reffast) && !src && c.mode !== "music",
+    refWhat: c.ref ? refWhat(gm) : "",
+    refPrefs: refPrefs(),
+    refVideo: gm === "refvideo",
+    consent: CONSENT,
+    faces: await Promise.all(
+      characters()
+        .filter((x) => x.face)
+        .map(async (x) => ({ id: x.id, name: x.name, thumb: await faceThumb(x).catch(() => "") })),
+    ),
+    srcWhat: src ? `${gm === "edit" ? "Editing" : "Animating"} this picture with ${m.label}` : "",
+    song: !!workflows.song,
+    queue: phoneQueue(),
+  };
+}
+
+/** Queues what the phone's create bar asked for. A reference is a base64 JPEG from the phone, or a character's face. */
+async function phoneGenerate(a: any) {
+  await ensureWorkflows();
+  const prompt = String(a.prompt ?? "").trim();
+  if (!prompt) throw new Error("Describe what to make first.");
+  const src = a.src ? await findItem(a.src) : null;
+  let r: Reference | null = null;
+  let kind: RefKind = refPrefs().kind;
+  if (!src && a.mode !== "music") {
+    if (a.ref) r = await referenceFromBase64(String(a.ref));
+    else if (a.character) {
+      const c = characterById(String(a.character));
+      if (!c?.face) throw new Error("That character has no face picture.");
+      r = await loadReference(faceBlob(c));
+      kind = "character"; // a character's face is always a Character
+    }
+  }
+  const gm = phoneGm({ mode: a.mode, ref: r ? { w: r.width, h: r.height } : null }, src);
+  for (const need of chained(gm) ? [gm, refImageMode()] : [gm]) if (!workflows[need]) throw new Error(`workflows\\${modeOf(need).file} wasn't found on the PC`);
+  const ahead = rq.filter((j) => j.state === "waiting" || j.state === "running").length;
+  if (chained(gm)) refVideo(prompt, r!, kind, undefined, "phone").catch(() => {}); // the queue shows how it went
+  else {
+    const from = gm === "ref" || gm === "reffast" || gm === "refvideo" ? r : src;
+    enqueue(gm, prompt, from, { kind, lyrics: gm === "song" ? String(a.lyrics ?? "") : undefined }, { from: "phone" });
+  }
+  return { ok: true, ahead, queue: phoneQueue() };
+}
+
+/** A render action from the phone's viewer: upscale, 3D, remove the background, cut out of a video, seed, delete. */
+async function phoneAct(path: string, what: string, text: string) {
+  await ensureWorkflows();
+  const a = await findItem(path);
+  const queued = (j: QJob) => ({ ok: true, queued: j.id, queue: phoneQueue() });
+  switch (what) {
+    case "up1080":
+    case "up4k": {
+      const size: UpscaleSize = what === "up4k" ? 2160 : 1080;
+      const video = a.kind === "video";
+      if (!workflows[video ? "upvideo" : "upimage"]) throw new Error("Upscaling needs the Workstation's upscale pack.");
+      return queued(enqueue(video ? "upvideo" : "upimage", a.prompt || a.name, a, { upscale: size }, { from: "phone", title: `${a.name} to ${size === 1080 ? "1080p" : "4K"}` }));
+    }
+    case "model3d":
+      if (!workflows.model3d) throw new Error("Picture to 3D needs the Workstation's 3d pack.");
+      return queued(enqueue("model3d", `3D model of ${a.name}`, a, {}, { from: "phone" }));
+    case "removebg":
+      if (!workflows.cutout) throw new Error("Remove background needs the Workstation's select pack.");
+      return queued(enqueue("cutout", `${a.name} without its background`, a, {}, { from: "phone" }));
+    case "vidcut":
+      if (!workflows.vidcut) throw new Error("Cutting out of a video needs the Workstation's select pack.");
+      if (!text.trim()) throw new Error("Say what should stay.");
+      return queued(enqueue("vidcut", text.trim(), a, {}, { from: "phone", title: `${text.trim()}, cut out of ${a.name}` }));
+    case "seed":
+      return { ok: true, message: fixSeed(a) };
+    case "delete":
+      await removeRender(a);
+      return { ok: true, message: `Moved ${a.name} to the Recycle Bin on the PC.` };
+  }
+  throw new Error(`unknown action ${what}`);
+}
+
+/** The gallery for phones, newest first, a page at a time. */
+async function phoneGallery(filter: string, offset: number, limit: number) {
+  if (offset === 0) await refresh();
+  const list = items.filter((a) => filter === "all" || a.kind === filter);
+  return {
+    total: list.length,
+    items: list.slice(offset, offset + limit).map((a) => ({ ...a, acts: actsFor(a) })),
+  };
+}
+
+/** A request from a paired phone (phone.rs → main.ts). Throws with words the phone shows. */
+export async function phoneStudio(action: string, a: any = {}): Promise<unknown> {
+  switch (action) {
+    case "info":
+      return phoneInfo(a);
+    case "set": {
+      const key = a.key as SettingsKey;
+      if (!(key in settings())) throw new Error("unknown settings");
+      if (a.reset) reset(key);
+      else if (a.k === "seed") {
+        const n = Math.floor(Number(a.value));
+        update(key, { seed: a.value === "last" ? (lastSeed(key) ?? null) : a.value == null || a.value === "" || !Number.isFinite(n) || n < 0 ? null : n });
+      } else {
+        const k = String(a.k);
+        if (!["aspect", "size", "quality", "count", "res", "seconds", "fps", "shots", "frames", "high", "low", "bpm", "key", "meter", "language"].includes(k)) throw new Error(`unknown setting ${k}`);
+        update(key, { [k]: fieldValue(k, String(a.value ?? "")) } as any);
+      }
+      return phoneInfo(a.create ?? { mode: "image" });
+    }
+    case "pick":
+      flipModel(a.create?.mode === "video");
+      return phoneInfo(a.create ?? { mode: "image" });
+    case "refPrefs":
+      setRefPrefs({ ...(a.kind ? { kind: a.kind } : {}), ...(a.frame ? { frame: a.frame } : {}) });
+      return phoneInfo(a.create ?? { mode: "image" });
+    case "generate":
+      return phoneGenerate(a);
+    case "lyrics": {
+      const style = String(a.style ?? "").trim();
+      if (!style) throw new Error("Describe the song's style or what it's about first.");
+      return { lyrics: await deps.writeLyrics(style, settings().music.seconds, AbortSignal.timeout(280_000)) };
+    }
+    case "queue":
+      return { queue: phoneQueue() };
+    case "cancel":
+    case "retry":
+    case "clear": {
+      if (action === "clear") for (let i = rq.length - 1; i >= 0; i--) if (!["waiting", "running"].includes(rq[i].state)) rq.splice(i, 1);
+      const j = rq.find((x) => x.id === Number(a.id));
+      if (j && action === "cancel") cancelJob(j);
+      if (j && action === "retry" && (j.state === "failed" || j.state === "stopped")) retryJob(j);
+      renderQueue();
+      return { queue: phoneQueue() };
+    }
+    case "gallery":
+      return phoneGallery(String(a.filter ?? "all"), Math.max(0, Number(a.offset) || 0), Math.min(120, Math.max(1, Number(a.limit) || 48)));
+    case "act":
+      return phoneAct(String(a.path ?? ""), String(a.what ?? ""), String(a.text ?? ""));
+  }
+  throw new Error(`unknown Studio action ${action}`);
 }
 
 export type { Asset };
