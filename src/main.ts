@@ -12,11 +12,11 @@ import markSvg from "./assets/rg-mark.svg?raw";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import { initSystem, onGpus, showSystem, unloadAll } from "./system";
+import { initSystem, onGpus, phoneSystem, showSystem, unloadAll } from "./system";
 import { ollamaCtx, onPlanChange, readGpus, refreshPlan, shortName, type Gpu } from "./gpus";
 import {
   allowRenders, cancelRender, chatSettings, editLabel, editMedia, initStudio, modelLabel, openRender, renderMedia, renderMenu, renderModel, renderSong, renderTalk,
-  onQueueChange, phoneQueue, phoneStudio, renderShot, showStudio, songSeconds, talkSecs, videoQuality, type MediaKind,
+  faceThumb, onQueueChange, phoneQueue, phoneStudio, renderShot, showStudio, songSeconds, talkSecs, videoQuality, type MediaKind,
 } from "./studio";
 import { DIRECTOR_ASK, DIRECTOR_CMD, SHOT_SECONDS, SONG_SECS, askedSeconds, directorSecs, lyricsSrt, planVideo } from "./director";
 import { askSpeech, speakLine } from "./talking";
@@ -47,7 +47,7 @@ import { TRANSCRIBE_CMD, clock, isMedia, summaryPrompt, transcribeMedia, transcr
 import { initMissions } from "./missions";
 import { DO_CMD, brains, describe as describeAct, doItForMe } from "./computer";
 import {
-  activeCharacter, characterById, characterMemory, characterPrompt, faceScene, initCharacters, remember, renderPicker, setCharacterVoice, voiceOf, wantsFace,
+  activeCharacter, characterById, characterMemory, characterPrompt, characters, faceScene, initCharacters, remember, renderPicker, setCharacterVoice, voiceOf, wantsFace,
 } from "./characters";
 import type { RefKind } from "./reference";
 import { initPhone, onPhoneAsk, phoneOn, phonePush, phoneState, refreshPhone } from "./phone";
@@ -295,6 +295,7 @@ function syncPhone() {
     models: models.map((m) => ({ key: m.key, name: m.name, role: m.role })),
     model: current?.key ?? null,
     character: activeCharacter()?.name ?? null,
+    characterId: activeCharacter()?.id ?? null,
     busy: !!busy,
     chatId: chat.id,
     // The phone speaks replies with the PC's voice (the character's, if one is on), and offers Live when a Live model is installed.
@@ -2399,6 +2400,29 @@ function phoneQueueChanged() {
   else queueTimer = window.setTimeout(send, 1000 - (Date.now() - queueSent));
 }
 
+/** Characters on the phone: who there is to talk to (with a small face), and picking one (or Prestige, with no id). */
+async function phoneCharacters(action: string, a: any) {
+  if (action === "choose") {
+    if (a.id && !characterById(String(a.id))) throw new Error("That character isn't there any more.");
+    choosePersona(a.id ? String(a.id) : undefined, true);
+    return { ok: true };
+  }
+  if (action !== "list") throw new Error(`unknown Characters action ${action}`);
+  return {
+    active: activeCharacter()?.id ?? null,
+    list: await Promise.all(
+      characters().map(async (c) => ({
+        id: c.id,
+        name: c.name,
+        about: c.personality.slice(0, 160),
+        voice: c.voice ?? "",
+        memories: c.memory.length,
+        thumb: c.face ? await faceThumb(c).catch(() => "") : "",
+      })),
+    ),
+  };
+}
+
 interface PhoneSend {
   chatId?: string | null;
   text: string;
@@ -3056,6 +3080,8 @@ async function main() {
     });
     // Studio, Renders and the render queue on the phone.
     onPhoneAsk("studio", (action, args) => phoneStudio(action, args));
+    onPhoneAsk("system", (action, args) => phoneSystem(action, args));
+    onPhoneAsk("characters", phoneCharacters);
     onQueueChange(phoneQueueChanged);
   }
   updateToolsButton();

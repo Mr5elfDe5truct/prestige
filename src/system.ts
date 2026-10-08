@@ -412,35 +412,47 @@ async function unload(r: Row) {
   setTimeout(refreshModels, 800);
 }
 
-async function load(r: Row) {
+/** Why a model may not fit in VRAM right now (null when it should), and what's loaded on its card(s). */
+async function fitProblem(r: Row): Promise<{ text: string; others: Row[] } | null> {
   const svc = serviceOf(r);
   const free = freeGB(svc);
-  if (free != null) {
-    // llama.cpp's router holds one model at a time, so loading one of its models swaps out the other.
-    const swapped = r.backend === "llama" ? rows.filter((o) => o.backend === "llama" && o.loaded).reduce((s, o) => s + (o.vramGB ?? 0), 0) : 0;
-    const room = free + swapped;
-    if (r.needGB > room) {
-      // Only what shares this model's card(s) is in the way.
-      const others = rows.filter((o) => o.loaded && o.key !== r.key && sharesCard(svc, serviceOf(o)));
-      await readHolders(true);
-      const apps = cardsFor(svc).map((g) => othersText(g.index)).filter(Boolean).join(", ");
-      const comfy = cardsFor(svc).reduce((s, g) => s + lastHolders().filter((h) => h.gpu === g.index && h.service === "comfyui").reduce((t, h) => t + h.mib, 0), 0);
-      $("#fit-text").textContent =
-        `${r.name} needs ${seen(r.key) != null ? "" : "about "}${r.needGB.toFixed(1)} GB of VRAM` +
-        `${seen(r.key) != null ? " (measured last time it loaded)" : ""} and only ${room.toFixed(1)} GB of ${cardsText(svc)} is free.` +
-        (others.length ? ` Loaded now: ${others.map((o) => o.name).join(", ")}.` : "") +
-        (comfy >= 300 ? ` ComfyUI holds ${(comfy / GB).toFixed(1)} GB.` : "") +
-        (apps ? ` Other programs using it: ${apps}.` : "") +
-        " Loading it anyway may spill into system RAM and run slowly, or fail.";
-      const dlg = $("#fit") as HTMLDialogElement;
-      dlg.returnValue = "";
-      dlg.showModal();
-      const choice = await new Promise<string>((res) => dlg.addEventListener("close", () => res(dlg.returnValue), { once: true }));
-      if (choice === "cancel" || !choice) return;
-      if (choice === "free") {
-        await Promise.all(others.map((o) => unloadRow(o).catch(() => {})));
-        await new Promise((res) => setTimeout(res, 1500));
-      }
+  if (free == null) return null;
+  // llama.cpp's router holds one model at a time, so loading one of its models swaps out the other.
+  const swapped = r.backend === "llama" ? rows.filter((o) => o.backend === "llama" && o.loaded).reduce((s, o) => s + (o.vramGB ?? 0), 0) : 0;
+  const room = free + swapped;
+  if (r.needGB <= room) return null;
+  // Only what shares this model's card(s) is in the way.
+  const others = rows.filter((o) => o.loaded && o.key !== r.key && sharesCard(svc, serviceOf(o)));
+  await readHolders(true);
+  const apps = cardsFor(svc).map((g) => othersText(g.index)).filter(Boolean).join(", ");
+  const comfy = cardsFor(svc).reduce((s, g) => s + lastHolders().filter((h) => h.gpu === g.index && h.service === "comfyui").reduce((t, h) => t + h.mib, 0), 0);
+  const text =
+    `${r.name} needs ${seen(r.key) != null ? "" : "about "}${r.needGB.toFixed(1)} GB of VRAM` +
+    `${seen(r.key) != null ? " (measured last time it loaded)" : ""} and only ${room.toFixed(1)} GB of ${cardsText(svc)} is free.` +
+    (others.length ? ` Loaded now: ${others.map((o) => o.name).join(", ")}.` : "") +
+    (comfy >= 300 ? ` ComfyUI holds ${(comfy / GB).toFixed(1)} GB.` : "") +
+    (apps ? ` Other programs using it: ${apps}.` : "") +
+    " Loading it anyway may spill into system RAM and run slowly, or fail.";
+  return { text, others };
+}
+
+/** Asks on the PC whether to load a model that may not fit: "load", "free" (unload the others first) or "cancel". */
+async function askFit(text: string) {
+  $("#fit-text").textContent = text;
+  const dlg = $("#fit") as HTMLDialogElement;
+  dlg.returnValue = "";
+  dlg.showModal();
+  return new Promise<string>((res) => dlg.addEventListener("close", () => res(dlg.returnValue), { once: true }));
+}
+
+async function load(r: Row, decide: (text: string) => Promise<string> = askFit) {
+  const fit = await fitProblem(r);
+  if (fit) {
+    const choice = await decide(fit.text);
+    if (choice === "cancel" || !choice) return;
+    if (choice === "free") {
+      await Promise.all(fit.others.map((o) => unloadRow(o).catch(() => {})));
+      await new Promise((res) => setTimeout(res, 1500));
     }
   }
   r.loading = true;
@@ -578,4 +590,58 @@ async function refreshServices() {
     p.textContent = port;
     box.append(dot, n, p);
   });
+}
+
+// ---------- the phone (System on a paired phone; main.ts passes its requests here) ----------
+/** What the phone's System tab shows: every card, RAM, the services and every model with its state. */
+async function phoneStatus() {
+  await refreshModels();
+  const [ok, ram] = await Promise.all([
+    Promise.all(SERVICES.map(([, , url]) => ping(url))),
+    invoke<{ total: number; avail: number }>("sys_memory").catch(() => null),
+  ]);
+  return {
+    gpus: lastGpus.map((g) => ({
+      index: g.index,
+      name: shortName(g),
+      util: Math.round(g.util),
+      usedGB: Math.round((g.mem_used / GB) * 10) / 10,
+      totalGB: Math.round(g.mem_total / GB),
+      temp: Math.round(g.temp),
+      power: g.power != null ? Math.round(g.power) : null,
+      hot: g.temp >= (g.target_temp ?? 83),
+    })),
+    ram: ram ? { usedGB: Math.round(((ram.total - ram.avail) / GB) * 10) / 10, totalGB: Math.round(ram.total / GB) } : null,
+    services: SERVICES.map(([name, port], i) => ({ name, port, ok: ok[i] })),
+    models: rows.map((r) => ({
+      key: r.key,
+      name: r.name,
+      role: r.role ?? "",
+      backend: r.backend === "llama" ? "llama.cpp" : "Ollama",
+      state: r.loading ? "loading" : r.loaded ? "loaded" : r.sleeping ? "asleep" : "disk",
+      size: r.loaded && r.vramGB ? `${r.measured ? "" : "~"}${r.vramGB.toFixed(1)} GB in VRAM` : `${r.diskGB.toFixed(1)} GB on disk`,
+    })),
+  };
+}
+
+/** A request from the phone: "status", "load" or "unload" a model. Loading runs on; the phone sees it in the status. */
+export async function phoneSystem(action: string, a: any): Promise<unknown> {
+  if (action === "status") return phoneStatus();
+  const r = rows.find((x) => x.key === a.key);
+  if (!r) throw new Error("That model isn't there any more.");
+  if (action === "unload") {
+    await unload(r);
+    return { ok: true, message: `Unloaded ${r.name}.` };
+  }
+  if (action === "load") {
+    // A model that may not fit: the phone asks first, then says what to do ("load" anyway, or "free" the others).
+    if (!a.choice) {
+      const fit = await fitProblem(r);
+      if (fit) return { ask: fit.text, others: fit.others.length > 0 };
+    }
+    if (a.choice === "cancel") return { ok: true };
+    load(r, async () => String(a.choice)).catch(() => {});
+    return { ok: true, message: `Loading ${r.name}…` };
+  }
+  throw new Error(`unknown System action ${action}`);
 }
