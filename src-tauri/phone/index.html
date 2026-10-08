@@ -173,6 +173,47 @@
       .sheet-menu > div { width: 100%; background: var(--panel); border-top: 1px solid var(--line); border-radius: 16px 16px 0 0; padding: 10px 10px calc(10px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; }
       .sheet-menu button { text-align: left; background: none; border: 0; padding: 13px 12px; border-radius: 8px; font-size: 15px; }
       .sheet-menu button:active { background: var(--panel-2); }
+      .sheet-menu button img, .sheet-menu button .ini { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; vertical-align: middle; margin-right: 10px; display: inline-grid; place-items: center; background: var(--panel-2); border: 1px solid var(--line); font-size: 13px; color: var(--gold); }
+      .sheet-menu button.on { color: var(--gold); }
+      button.brand { background: none; border: 0; padding: 0; text-align: left; color: inherit; }
+      .gpu { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+      .gpu h4 { grid-column: 1 / -1; margin: 0; font-size: 13px; color: var(--gold); font-weight: 600; }
+      .meter { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+      .meter small { display: block; color: var(--muted); font-size: 11px; }
+      .meter b { font: 600 16px var(--mono); }
+      .meter .bar, .ram .bar { display: block; height: 4px; background: var(--line); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+      .meter .bar i, .ram .bar i { display: block; height: 100%; background: var(--red); }
+      .meter.hot b { color: #ffb36b; }
+      .svc { display: grid; grid-template-columns: 12px 1fr auto; gap: 6px 8px; align-items: center; font-size: 13px; margin-top: 8px; }
+      .svc i { width: 9px; height: 9px; border-radius: 50%; background: #6b5a52; }
+      .svc i.ok { background: var(--ok); }
+      .svc .port { font: 11px var(--mono); color: var(--muted); }
+      .mrow { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 13.5px; }
+      .mrow:first-child { border-top: 0; }
+      .mrow .t { flex: 1; min-width: 0; }
+      .mrow small { display: block; color: var(--muted); font-size: 11.5px; }
+      .mrow.loaded b { color: var(--gold); }
+      .mrow .btn { padding: 6px 12px; font-size: 13px; }
+      .more-head { display: flex; align-items: center; gap: 10px; }
+      .more-head h3 { margin: 0; font-size: 17px; flex: 1; }
+      .item-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); font-size: 14px; }
+      .item-row:first-child { border-top: 0; }
+      .item-row .t { flex: 1; min-width: 0; }
+      .item-row b { font-weight: 600; display: block; overflow-wrap: anywhere; }
+      .item-row small { display: block; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+      .item-row .acts { display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
+      .item-row .btn { padding: 6px 12px; font-size: 13px; }
+      .item-row.off b { color: var(--muted); }
+      .switch { position: relative; width: 44px; height: 26px; flex: none; }
+      .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+      .switch span { position: absolute; inset: 0; background: var(--line); border-radius: 999px; transition: background .15s; }
+      .switch span::after { content: ""; position: absolute; left: 3px; top: 3px; width: 20px; height: 20px; border-radius: 50%; background: var(--fg); transition: transform .15s; }
+      .switch input:checked + span { background: var(--red); }
+      .switch input:checked + span::after { transform: translateX(18px); }
+      .switch input:disabled + span { opacity: .4; }
+      .pbar { display: block; height: 4px; background: var(--line); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+      .pbar i { display: block; height: 100%; background: var(--red); }
+      .pane input[type=text], .pane input[type=time] { width: 100%; background: var(--panel-2); color: var(--fg); border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; font: 15px var(--body); }
       .sheet-menu .title { font-size: 12px; color: var(--muted); padding: 6px 12px; }
       .toast { position: fixed; z-index: 30; left: 50%; bottom: 90px; transform: translateX(-50%); background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; font-size: 13px; max-width: 90vw; }
     </style>
@@ -189,7 +230,7 @@
 
     <header id="top" hidden>
       <button class="icon" id="menu" aria-label="Chats"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10" /></svg></button>
-      <div class="brand"><b>Prestige</b><small id="who">by R.G. Studios</small></div>
+      <button type="button" class="brand" id="persona" aria-label="Who to talk to"><b>Prestige</b><small id="who">by R.G. Studios</small></button>
       <span class="grow"></span>
       <button class="icon" id="call" aria-label="Talk (voice and Live)" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4" /></svg></button>
       <select id="model" aria-label="Model"></select>
@@ -198,6 +239,7 @@
       <button type="button" data-tab="chat" class="sel">Chat</button>
       <button type="button" data-tab="studio">Studio</button>
       <button type="button" data-tab="renders">Renders<span class="count" id="q-count" hidden></span></button>
+      <button type="button" data-tab="system">System</button>
     </nav>
     <main id="thread" hidden></main>
 
@@ -231,6 +273,21 @@
         <div class="row"><b style="flex:1">Render queue</b><button type="button" class="linkish" id="st-q-clear">clear finished</button></div>
         <div class="q" id="st-queue"></div>
       </div>
+    </section>
+
+    <!-- System: the PC's cards, RAM, services and models (load and unload). -->
+    <section class="pane" id="system" hidden>
+      <div id="sys-gpus" style="display:flex;flex-direction:column;gap:10px"></div>
+      <div class="card ram" id="sys-ram" hidden></div>
+      <div class="card"><b>Models</b><div id="sys-models"><p class="muted">Loading…</p></div></div>
+      <div class="card"><b>Services</b><div class="svc" id="sys-svc"></div></div>
+    </section>
+
+    <!-- More: Knowledge, Missions, Tools, Models and Memory, opened from the menu. -->
+    <section class="pane" id="more" hidden>
+      <div class="more-head"><button type="button" class="icon" id="more-back" aria-label="Back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5l-7 7 7 7" /></svg></button><h3 id="more-title"></h3></div>
+      <div id="more-body" style="display:flex;flex-direction:column;gap:12px"></div>
+      <input type="file" id="doc-file" accept=".pdf,.docx,.txt,.md,.markdown,.html,.htm,.csv,.json,.xml,.log,.py,.js,.ts,.java,.c,.cpp,.cs,.rs,.go,.rb,.php,.sh,.ps1,.yaml,.yml,.toml,.ini,text/*,application/pdf" hidden />
     </section>
 
     <!-- Renders: everything in ComfyUI's output folder on the PC. -->
@@ -300,6 +357,14 @@
         <div style="display:flex;gap:8px"><button class="btn primary" id="new-chat" style="flex:1">New chat</button><button class="btn" id="close-drawer">Close</button></div>
         <div class="list" id="chats"></div>
         <span class="grow"></span>
+        <button class="btn" id="drawer-persona">Characters</button>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px" id="drawer-more">
+          <button class="btn" data-more="knowledge">Knowledge</button>
+          <button class="btn" data-more="missions">Missions</button>
+          <button class="btn" data-more="tools">Tools</button>
+          <button class="btn" data-more="models">Models</button>
+          <button class="btn" data-more="memory" style="grid-column:1/-1">Shared memory</button>
+        </div>
         <button class="btn" id="change-pc" hidden>Connect to another PC</button>
         <button class="btn" id="unpair">Unpair this phone</button>
       </div>
@@ -369,7 +434,7 @@
 
       // ---------- pairing ----------
       function showPair() {
-        ["#top", "#tabs", "#thread", "#bottom", "#studio", "#renders"].forEach((s) => ($(s).hidden = true));
+        ["#top", "#tabs", "#thread", "#bottom", "#studio", "#renders", "#system", "#more"].forEach((s) => ($(s).hidden = true));
         $("#pair").hidden = false;
         const m = location.hash.match(/code=(\d{6})/);
         if (m) $("#code").value = m[1];
@@ -517,7 +582,7 @@
           const cur = sel.value || s.model;
           sel.innerHTML = (s.models || []).map((m) => `<option value="${esc(m.key)}">${esc(m.name)}</option>`).join("") || `<option value="">No models</option>`;
           if (cur) sel.value = cur;
-          $("#who").textContent = s.character ? `talking to ${s.character}` : "by R.G. Studios";
+          $("#who").textContent = s.character ? `talking to ${s.character} ▾` : "by R.G. Studios ▾";
           pcVoice = s.voice || "af_heart";
           liveAvailable = !!s.live;
           setBusy(!!s.busy);
@@ -1411,6 +1476,14 @@
         $("#thread").hidden = $("#bottom").hidden = t !== "chat";
         $("#studio").hidden = t !== "studio";
         $("#renders").hidden = t !== "renders";
+        $("#system").hidden = t !== "system";
+        $("#more").hidden = true;
+        clearInterval(moreTimer);
+        clearInterval(sysTimer);
+        if (t === "system") {
+          loadSystem();
+          sysTimer = setInterval(() => !document.hidden && loadSystem(), 3000);
+        }
         if (t === "studio") studioInfo();
         if (t === "renders" && (!gallery.loaded || gallery.stale)) loadGallery(true);
         if (t === "chat") $("#thread").scrollTop = $("#thread").scrollHeight;
@@ -1425,10 +1498,14 @@
         return new Promise((res) => {
           const box = $("#pick-list");
           box.innerHTML = title ? `<div class="title">${esc(title)}</div>` : "";
-          for (const [v, label, cls] of options) {
+          for (const [v, label, cls, pic] of options) {
             const b = document.createElement("button");
             b.type = "button";
-            b.textContent = label;
+            // A face (or the first letter) beside a character's name.
+            if (pic !== undefined) {
+              b.innerHTML = pic === null ? `<img alt="" src="/icon.png" />` : pic ? `<img alt="" src="data:image/jpeg;base64,${pic}" />` : `<span class="ini">${esc(label.trim().charAt(0).toUpperCase())}</span>`;
+              b.append(label);
+            } else b.textContent = label;
             if (cls) b.className = cls;
             b.addEventListener("click", () => done(v));
             box.appendChild(b);
@@ -1882,6 +1959,278 @@
           toast(e.message);
         }
       }
+
+      // ---------- characters: who Prestige talks as ----------
+      async function pickPersona() {
+        $("#drawer").hidden = true;
+        let r;
+        try {
+          r = await ask("characters.list");
+        } catch (e) {
+          return toast(e.message);
+        }
+        const opts = [["", "Prestige", !r.active ? "on" : "", null]];
+        for (const c of r.list) opts.push([c.id, c.name, c.id === r.active ? "on" : "", c.thumb || ""]);
+        const v = await choose(r.list.length ? "Talk to" : "Make characters in Prestige on the PC (the picker beside the model menu).", opts);
+        if (v === null || v === (r.active || "")) return;
+        try {
+          await ask("characters.choose", { id: v || null });
+          toast(v ? `Now talking to ${r.list.find((c) => c.id === v).name}.` : "Back to Prestige.");
+          loadState();
+        } catch (e) {
+          toast(e.message);
+        }
+      }
+      $("#persona").addEventListener("click", pickPersona);
+      $("#drawer-persona").addEventListener("click", pickPersona);
+
+      // ---------- System: the PC's cards, RAM, services and models ----------
+      let sysTimer = 0;
+      let sysBusy = false;
+      async function loadSystem() {
+        if (sysBusy) return;
+        sysBusy = true;
+        try {
+          drawSystem(await ask("system.status"));
+        } catch (e) {
+          $("#sys-models").innerHTML = `<p class="muted">${esc(e.message)}</p>`;
+        } finally {
+          sysBusy = false;
+        }
+      }
+      function drawSystem(s) {
+        const meter = (label, val, pct, sub = "", hot = false) =>
+          `<div class="meter${hot ? " hot" : ""}"><small>${esc(label)}</small><b>${esc(val)}</b>` +
+          (pct != null ? `<span class="bar"><i style="width:${Math.max(0, Math.min(100, pct))}%"></i></span>` : "") +
+          (sub ? `<small>${esc(sub)}</small>` : "") +
+          `</div>`;
+        $("#sys-gpus").innerHTML = s.gpus.length
+          ? s.gpus
+              .map(
+                (g) =>
+                  `<div class="card gpu"><h4>${esc(g.name)}</h4>` +
+                  meter("GPU load", `${g.util}%`, g.util) +
+                  meter("VRAM", `${g.usedGB} / ${g.totalGB} GB`, (g.usedGB / g.totalGB) * 100, `${Math.max(0, g.totalGB - g.usedGB).toFixed(1)} GB free`, g.usedGB / g.totalGB > 0.92) +
+                  meter("Temperature", `${g.temp}°C`, null, "", g.hot) +
+                  meter("Power", g.power != null ? `${g.power} W` : "n/a", null) +
+                  `</div>`,
+              )
+              .join("")
+          : `<p class="muted">No GPU readings from the PC yet.</p>`;
+        $("#sys-ram").hidden = !s.ram;
+        if (s.ram) $("#sys-ram").innerHTML = `<div class="row"><b style="flex:1">System RAM</b><span>${s.ram.usedGB} / ${s.ram.totalGB} GB</span></div><span class="bar"><i style="width:${(s.ram.usedGB / s.ram.totalGB) * 100}%"></i></span>`;
+        const box = $("#sys-models");
+        box.innerHTML = s.models.length ? "" : `<p class="muted">No models answered. Start the services on the PC.</p>`;
+        for (const m of s.models) {
+          const row = document.createElement("div");
+          row.className = `mrow${m.state === "loaded" ? " loaded" : ""}`;
+          const state = { loading: "Loading…", loaded: "In VRAM", asleep: "Asleep", disk: "On disk" }[m.state];
+          row.innerHTML = `<span class="t"><b></b><small></small></span><button type="button" class="btn"></button>`;
+          row.querySelector("b").textContent = m.name;
+          row.querySelector("small").textContent = [m.role, m.size, m.backend, state].filter(Boolean).join(" · ");
+          const b = row.querySelector("button");
+          b.textContent = m.state === "loaded" ? "Unload" : "Load";
+          b.disabled = m.state === "loading";
+          b.addEventListener("click", () => modelAct(m, m.state === "loaded" ? "unload" : "load"));
+          box.appendChild(row);
+        }
+        $("#sys-svc").innerHTML = s.services.map((x) => `<i class="${x.ok ? "ok" : ""}" title="${x.ok ? "running" : "not answering"}"></i><span>${esc(x.name)}</span><span class="port">${esc(x.port)}</span>`).join("");
+      }
+      /** Load or unload a model; one that may not fit asks first, as on the PC. */
+      async function modelAct(m, action, choice) {
+        try {
+          const r = await ask(`system.${action}`, { key: m.key, choice });
+          if (r.ask) {
+            const opts = [["load", "Load it anyway"]];
+            if (r.others) opts.push(["free", "Unload the others, then load it"]);
+            opts.push(["cancel", "Cancel"]);
+            const c = await choose(r.ask, opts);
+            if (c && c !== "cancel") return modelAct(m, action, c);
+            return;
+          }
+          if (r.message) toast(r.message);
+          loadSystem();
+        } catch (e) {
+          toast(e.message);
+        }
+      }
+
+      // ---------- More: Knowledge, Missions, Tools, Models and Memory ----------
+      let moreTimer = 0;
+      let moreWhat = "";
+      const TITLES = { knowledge: "Knowledge", missions: "Missions", tools: "Tools", models: "Get more models", memory: "Shared memory" };
+      function openMore(what) {
+        $("#drawer").hidden = true;
+        ["#thread", "#bottom", "#studio", "#renders", "#system"].forEach((s) => ($(s).hidden = true));
+        clearInterval(sysTimer);
+        clearInterval(moreTimer);
+        document.querySelectorAll("#tabs button").forEach((b) => b.classList.remove("sel"));
+        moreWhat = what;
+        $("#more-title").textContent = TITLES[what];
+        $("#more-body").innerHTML = `<p class="muted">Loading…</p>`;
+        $("#more").hidden = false;
+        loadMore();
+        // Downloads and file reading move on by themselves: look again every few seconds.
+        if (what === "models" || what === "knowledge" || what === "missions") moreTimer = setInterval(() => !document.hidden && loadMore(true), 3000);
+      }
+      $("#drawer-more").addEventListener("click", (e) => {
+        const b = e.target.closest("[data-more]");
+        if (b) openMore(b.dataset.more);
+      });
+      $("#more-back").addEventListener("click", () => showTab(tab));
+      let moreBusy = false;
+      async function loadMore(quiet) {
+        if (moreBusy) return;
+        // Not while something is being typed there (a new mission, a memory): redrawing would lose it.
+        if (quiet && [...document.querySelectorAll("#more-body input[type=text], #more-body textarea")].some((x) => x.value.trim() || x === document.activeElement)) return;
+        moreBusy = true;
+        const what = moreWhat;
+        try {
+          const r =
+            what === "knowledge" ? await ask("knowledge.list")
+            : what === "missions" ? await ask("missions.list")
+            : what === "models" ? await ask("catalog.list")
+            : what === "memory" ? await ask("settings.memories")
+            : await ask("settings.list");
+          if (what === moreWhat && !$("#more").hidden) drawMore(what, r);
+        } catch (e) {
+          if (!quiet) $("#more-body").innerHTML = `<p class="muted">${esc(e.message)}</p>`;
+        } finally {
+          moreBusy = false;
+        }
+      }
+      /** Runs a request from a More screen and shows its answer. */
+      async function moreAct(action, args, then) {
+        try {
+          const r = await ask(action, args);
+          if (r.message) toast(r.message);
+          if (then) then(r);
+          else drawMore(moreWhat, r);
+        } catch (e) {
+          toast(e.message);
+        }
+      }
+      const toggle = (on, disabled = false) => `<label class="switch"><input type="checkbox"${on ? " checked" : ""}${disabled ? " disabled" : ""} /><span></span></label>`;
+      function rowEl(title, sub, right = "", cls = "") {
+        const d = document.createElement("div");
+        d.className = `item-row ${cls}`;
+        d.innerHTML = `<span class="t"><b></b><small></small></span>${right}`;
+        d.querySelector("b").textContent = title;
+        d.querySelector("small").textContent = sub;
+        return d;
+      }
+      function drawMore(what, r) {
+        const body = $("#more-body");
+        body.innerHTML = "";
+        const card = (title) => {
+          const c = document.createElement("div");
+          c.className = "card";
+          if (title) c.innerHTML = `<b>${esc(title)}</b>`;
+          body.appendChild(c);
+          return c;
+        };
+        if (what === "tools") {
+          const c = card("");
+          c.innerHTML = `<p class="muted">What models may use in chat, on the PC and from here. Anything that changes something asks first on the PC.</p>`;
+          for (const g of r.tools) {
+            const row = rowEl(g.label, g.count ? `${g.hint} · ${g.count} tools` : `${g.hint} · not available`, toggle(g.on, !g.count));
+            row.querySelector("input").addEventListener("change", (e) => moreAct("settings.tool", { id: g.id, on: e.target.checked }));
+            c.appendChild(row);
+          }
+          const k = card("");
+          const row = rowEl("Use my files in every chat", "Close matches from everything in Knowledge come into every chat", toggle(r.kbAll));
+          row.querySelector("input").addEventListener("change", (e) => moreAct("settings.kbAll", { on: e.target.checked }));
+          k.appendChild(row);
+        } else if (what === "memory") {
+          const c = card("");
+          if (r.memories === null) {
+            c.innerHTML = `<p class="muted">Shared memory isn't set up. Add Open WebUI's API key in Settings → Shared memory on the PC.</p>`;
+            return;
+          }
+          c.innerHTML = `<p class="muted">What every model in Prestige and Open WebUI knows about you. In chat, "remember that…" adds to it too.</p><input type="text" id="mem-new" placeholder="Something to remember…" /><button type="button" class="btn primary" id="mem-add">Remember</button>`;
+          $("#mem-add").addEventListener("click", () => {
+            const fact = $("#mem-new").value.trim();
+            if (fact) moreAct("settings.remember", { fact }, () => (toast("Remembered."), loadMore()));
+          });
+          const list = card(`${r.memories.length} ${r.memories.length === 1 ? "memory" : "memories"}`);
+          for (const m of r.memories) list.appendChild(rowEl(m, ""));
+        } else if (what === "knowledge") {
+          const c = card("");
+          c.innerHTML = `<p class="muted">Files models can read and cite in chat. They're read and kept on the PC.</p><button type="button" class="btn primary" id="kb-add">Add a file from this phone</button>`;
+          $("#kb-add").addEventListener("click", () => $("#doc-file").click());
+          if (!r.ready) c.insertAdjacentHTML("beforeend", `<p class="warn">Get the embedding model first: Knowledge on the PC, one click.</p>`);
+          const list = card(r.docs.length ? `${r.docs.length} files` : "");
+          if (!r.docs.length) list.innerHTML = `<p class="muted">No files yet.</p>`;
+          for (const d of r.docs) {
+            const row = rowEl(d.name, [d.folder, d.what].filter(Boolean).join(" · "), `<button type="button" class="linkish">remove</button>`, d.state === "error" ? "off" : "");
+            row.querySelector("button").addEventListener("click", () => confirm(`Remove ${d.name} from Knowledge?`) && moreAct("knowledge.remove", { id: d.id }));
+            list.appendChild(row);
+          }
+        } else if (what === "missions") {
+          const list = card("");
+          if (!r.missions.length) list.innerHTML = `<p class="muted">No missions yet. Start from a template below, or make your own.</p>`;
+          for (const m of r.missions) {
+            const sub = [m.when, m.running ? "Running now…" : m.next ? `next ${m.next}` : m.enabled ? "" : "off", m.last ? `Last: ${m.last}` : "Hasn't run yet"].filter(Boolean).join(" · ");
+            const row = rowEl(m.name, sub, `<span class="acts">${toggle(m.enabled)}<span><button type="button" class="linkish" data-a="${m.running ? "stop" : "run"}">${m.running ? "stop" : "run now"}</button> ${m.chatId ? `<button type="button" class="linkish" data-a="open">result</button> ` : ""}<button type="button" class="linkish" data-a="delete">delete</button></span></span>`, m.enabled ? "" : "off");
+            row.querySelector("input").addEventListener("change", (e) => moreAct("missions.on", { id: m.id, on: e.target.checked }));
+            row.querySelectorAll("[data-a]").forEach((b) =>
+              b.addEventListener("click", () => {
+                const a = b.dataset.a;
+                if (a === "open") {
+                  showTab("chat");
+                  return loadChat(m.chatId);
+                }
+                if (a === "delete" && !confirm(`Delete the mission "${m.name}"? Its past results stay in Past chats.`)) return;
+                moreAct(`missions.${a}`, { id: m.id });
+              }),
+            );
+            list.appendChild(row);
+          }
+          const tpl = card("Templates");
+          for (const t of r.templates) {
+            const row = rowEl(t.name, t.about, `<button type="button" class="btn">Add</button>`);
+            row.querySelector("button").addEventListener("click", () => moreAct("missions.add", { template: t.i }));
+            tpl.appendChild(row);
+          }
+          const own = card("Your own (daily)");
+          own.insertAdjacentHTML(
+            "beforeend",
+            `<input type="text" id="ms-name" placeholder="Name, e.g. Morning briefing" /><textarea id="ms-prompt" rows="3" placeholder="What to do, e.g. Check r/LocalLLaMA's top posts today and summarise the most important ones with links."></textarea><div class="row"><input type="time" id="ms-time" value="08:00" style="flex:1" /><select id="ms-how"><option value="chat">Chat with tools</option><option value="research">Deep Research</option></select></div><button type="button" class="btn primary" id="ms-add">Add mission</button>`,
+          );
+          $("#ms-add").addEventListener("click", () => moreAct("missions.add", { name: $("#ms-name").value, prompt: $("#ms-prompt").value, time: $("#ms-time").value, how: $("#ms-how").value }));
+        } else if (what === "models") {
+          const c = card("");
+          c.innerHTML = `<p class="muted">Models checked to run on the PC. Downloading happens on the PC; it shows in the model menu when it's done.</p>`;
+          const FIT = { gpu: "fits the GPU", split: "part in RAM", big: "too big for the GPU" };
+          for (const m of r.models) {
+            const right = m.installed ? `<span class="muted">Installed</span>` : m.busy ? `<button type="button" class="btn">Cancel</button>` : `<button type="button" class="btn primary">Download</button>`;
+            const row = rowEl(`${m.name} · ${m.maker}`, `${m.about} ${m.size}${FIT[m.fits] ? ` · ${FIT[m.fits]}` : ""} · ${m.caps.join(", ")}`, right);
+            if (m.busy) row.querySelector(".t").insertAdjacentHTML("beforeend", `<span class="pbar"><i style="width:${m.busy.pct}%"></i></span><small>${esc(m.busy.label)}</small>`);
+            const b = row.querySelector("button");
+            if (b) b.addEventListener("click", () => moreAct(m.busy ? "catalog.cancel" : "catalog.install", { key: m.key }));
+            c.appendChild(row);
+          }
+        }
+      }
+      // A document from the phone for Knowledge (read on the PC).
+      $("#doc-file").addEventListener("change", async () => {
+        const f = $("#doc-file").files[0];
+        $("#doc-file").value = "";
+        if (!f) return;
+        if (f.size > 16 * 1024 * 1024) return toast("Files over 16 MB can't be sent from the phone. Add it on the PC.");
+        toast(`Sending ${f.name} to the PC…`);
+        const b64 = await new Promise((res, rej) => {
+          const rd = new FileReader();
+          rd.onload = () => res(String(rd.result).split(",")[1] || "");
+          rd.onerror = () => rej(rd.error);
+          rd.readAsDataURL(f);
+        }).catch(() => null);
+        if (b64 == null) return toast("Couldn't read that file.");
+        moreAct("knowledge.add", { name: f.name, b64 }, (r) => {
+          toast(`Reading ${f.name} on the PC…`);
+          if (moreWhat === "knowledge") drawMore("knowledge", r);
+        });
+      });
 
       function start() {
         $("#pair").hidden = true;

@@ -418,3 +418,32 @@ async function done() {
   render();
   deps.onInstalled();
 }
+
+// ---------- the phone (the model catalog on a paired phone; main.ts passes its requests here) ----------
+/** "list" the catalog (what's installed, what's downloading), "install" a model or "cancel" its download. */
+export async function phoneCatalog(action: string, a: any): Promise<unknown> {
+  const e = CATALOG.find((x) => keyOf(x) === a.key);
+  if (action === "install") {
+    if (!e) throw new Error("That model isn't in the catalog.");
+    await refreshInstalled();
+    if (!isInstalled(e) && !busy.has(keyOf(e))) await install(e);
+  } else if (action === "cancel") busy.get(String(a.key))?.cancel?.();
+  else if (action === "list") await refreshInstalled();
+  else throw new Error(`unknown catalog action ${action}`);
+  return {
+    models: CATALOG.map((x) => {
+      const b = busy.get(keyOf(x));
+      return {
+        key: keyOf(x),
+        name: x.name,
+        maker: x.maker,
+        about: x.about,
+        caps: x.caps,
+        size: `${x.sizeGB.toFixed(1)} GB · ${x.ollama ? "Ollama" : "llama.cpp"} · ${x.license}`,
+        fits: entryFit(x),
+        installed: isInstalled(x),
+        busy: b ? { pct: Math.round(b.pct), label: b.label } : null,
+      };
+    }),
+  };
+}
