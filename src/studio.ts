@@ -48,7 +48,7 @@ import {
 } from "./gensettings";
 import { CONSENT, bindRefChoices, hasFiles, imageIn, loadReference, onRefPrefsChange, refChoicesHtml, refPrefs, refPrompt, sceneOf, setRefPrefs, uploadReference, type RefKind, type Reference } from "./reference";
 import { characterById, characters, faceBlob, onCharactersChange } from "./characters";
-import { initInpaint, openInpaint } from "./inpaint";
+import { initInpaint, openInpaint, type SelectQuery } from "./inpaint";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
 const $$ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => Array.from(r.querySelectorAll(s)) as T[];
@@ -70,13 +70,30 @@ interface Asset {
   duration?: number | null; // a song's length in seconds
 }
 
-type GenMode = "image" | "fast" | "edit" | "inpaint" | "video" | "animate" | "long" | "ref" | "reffast" | "refvideo" | "song" | "model3d" | "talk";
+type GenMode =
+  | "image"
+  | "fast"
+  | "edit"
+  | "inpaint"
+  | "video"
+  | "animate"
+  | "long"
+  | "ref"
+  | "reffast"
+  | "refvideo"
+  | "song"
+  | "model3d"
+  | "talk"
+  | "select"
+  | "cutout"
+  | "vidcut";
 
 // How a workflow takes the generation settings: an image model with a latent size and batch, an edit
 // (size follows the picture), LTX with a 2× upscale pass ("ltx") or without ("ltx1"), Wan's two samplers,
 // Wan 2.2 SVI's chained shots ("svi"), an ACE-Step song ("song"), Pixal3D turning a picture into a textured 3D model ("model3d"),
-// or InfiniteTalk making a picture speak a voice recording ("talk").
-type Family = "image" | "edit" | "ltx" | "ltx1" | "wan" | "svi" | "song" | "model3d" | "talk";
+// InfiniteTalk making a picture speak a voice recording ("talk"), SAM 3.1 selecting something in a picture ("select", not
+// queued), a picture cut out onto transparent ("cutout"), or SAM 3.1 tracking a subject through a video ("vidcut").
+type Family = "image" | "edit" | "ltx" | "ltx1" | "wan" | "svi" | "song" | "model3d" | "talk" | "select" | "cutout" | "vidcut";
 
 interface Mode {
   file: string;
@@ -90,6 +107,7 @@ interface Mode {
   secs: number; // render time at the default settings on the reference RTX 3060 12 GB
   note?: string;
   imageNode?: string; // LoadImage node for image-to-video, edits and reference images
+  imageKey?: string; // that node's file input, "image" unless set ("file" for a LoadVideo)
   fallback?: Mode; // used when this workflow file isn't there
 }
 
@@ -101,6 +119,10 @@ const TALK_PART_SECS = 255;
 const TALK_LOAD_SECS = 15;
 /** The longest speech a talking video takes, in seconds. */
 export const TALK_MAX_SECONDS = 30;
+
+/* SAM 3.1 tracking a subject through a video, measured on an RTX 3060 12 GB: 8 s at 448×640 (199 frames) in 123 s,
+ * peak 4.0 GB. On the RTX 2060 6 GB it took 117 s at 3.0 GB, so a second card can run it (see segment). */
+const VIDCUT_SECS = 15;
 
 // The nodes in the stack's exported API workflows (workflows\*.api.json) that the settings go into.
 const QWEN_STEPS = { draft: 12, standard: 20, high: 30, max: 40 };
@@ -285,6 +307,40 @@ const MODES: Record<GenMode, Mode> = {
     note: "talking video",
     imageNode: "7",
   },
+  // Click to select: SAM 3.1 (Meta, through ComfyUI's native nodes) outlines what's under a click, or things by name,
+  // in ~3 s. Run straight away rather than queued (segment), and returned as a mask (workflows\sam3-select.api.json).
+  select: {
+    file: "sam3-select.api.json",
+    label: "SAM 3.1",
+    family: "select",
+    promptNode: "",
+    seed: ["", ""],
+    secs: 3,
+    imageNode: "2",
+  },
+  // A transparent cut-out: BiRefNet finds the subject ("Remove background"), or the selection's mask is used
+  // (workflows\cutout.api.json).
+  cutout: {
+    file: "cutout.api.json",
+    label: "Cut-out",
+    family: "cutout",
+    promptNode: "",
+    seed: ["", ""],
+    secs: 5,
+    imageNode: "1",
+  },
+  // A video's subject, tracked by SAM 3.1 in every frame, on a green screen with the sound kept
+  // (workflows\sam3-video-cutout.api.json). secs is per second of video.
+  vidcut: {
+    file: "sam3-video-cutout.api.json",
+    label: "SAM 3.1",
+    family: "vidcut",
+    promptNode: "4",
+    seed: ["", ""],
+    secs: VIDCUT_SECS,
+    imageNode: "2",
+    imageKey: "file",
+  },
 };
 
 /* ACE-Step 1.5 turbo on an RTX 3060 12 GB (ComfyUI's log and nvidia-smi): its 1.7B language model writes the audio codes
@@ -332,6 +388,16 @@ const MODEL3D_STEPS: Record<string, string> = {
 // part's talk node, scheduler, sampler and decode, and the frames the video is made from. Each part is 81 frames at
 // 25 fps and carries on from the last 9 frames before it.
 const TALK = { audio: "8", encode: "9", talk: "12", scheduler: "14", sampler: "17", decode: "18", frames: "20", fps: 25, part: 81, motion: 9 };
+/** What a cut-out's progress line says. */
+const CUT_STEPS: Record<string, string> = {
+  RemoveBackground: "Finding the subject",
+  SAM3_VideoTrack: "Tracking the subject in every frame",
+  SAM3_TrackToMask: "Cutting it out",
+  ImageCompositeMasked: "Putting it on a green screen",
+  CreateVideo: "Making the video",
+  SaveVideo: "Saving the video",
+  SaveImage: "Saving the PNG",
+};
 /** What a talking video's progress line says for its other steps. */
 const TALK_STEPS: Record<string, string> = {
   LoadAudio: "Loading the voice",
@@ -533,7 +599,8 @@ function plan(gm: GenMode, src: Source | null = srcAsset, o?: Override, song?: P
   const m = modeOf(gm);
   let p: Omit<Plan, "warn">;
   // Picture to 3D: one model per picture; its time and VRAM were measured (see MODES.model3d).
-  if (m.family === "model3d") return { w: 0, h: 0, count: 1, load: 0, secs: m.secs, warn: "" };
+  if (m.family === "model3d" || m.family === "select" || m.family === "cutout") return { w: 0, h: 0, count: 1, load: 0, secs: m.secs, warn: "" };
+  if (m.family === "vidcut") return { w: 0, h: 0, count: 1, load: 0, secs: m.secs * 8, warn: "" }; // per second of video (videoCutout)
   if (m.family === "song") {
     // Measured (see SONG_FIXED_SECS): the same ~5.3 GB at every length, so only a small card gets a warning.
     const s = { ...settings().music, ...song };
@@ -1453,8 +1520,10 @@ function startFrom(a: Asset, m: "image" | "video") {
 
 /** Paint to change: paint the area on the picture (inpaint.ts) and say what goes there; only that part is redrawn.
  *  With nothing painted it's an instruction edit of the whole picture. The result opens when it's done. */
-function paintToChange(a: Asset) {
+function paintToChange(a: Asset, selecting = false) {
   closeLightbox();
+  const select = workflows.select ? (q: SelectQuery) => segment(a, q) : undefined;
+  const cutout = workflows.cutout ? (mask: Blob, w: number, h: number) => cutOut(a, mask, w, h) : undefined;
   openInpaint(convertFileSrc(a.path), a.name, async (r) => {
     deps.show();
     try {
@@ -1471,7 +1540,158 @@ function paintToChange(a: Asset) {
     } catch (e) {
       if (errMsg(e) !== "stopped") deps.toast(`Couldn't change it: ${errMsg(e)}`, "warn");
     }
+  }, { select, cutout, selecting });
+}
+
+/** Puts a mask in ComfyUI's input folder (named from its content). */
+async function uploadMask(mask: Blob): Promise<string> {
+  const bytes = new Uint8Array(await mask.arrayBuffer());
+  const hash = new Uint8Array(await crypto.subtle.digest("SHA-1", bytes));
+  const hex = Array.from(hash.slice(0, 6), (b) => b.toString(16).padStart(2, "0")).join("");
+  return invoke<string>("comfy_upload_bytes", bytes, { headers: { "x-name": `prestige-mask-${hex}.png` } });
+}
+
+/** Cut out: the selection on a transparent background, saved as a new PNG next to the picture in the gallery. */
+async function cutOut(a: Asset, mask: Blob, w: number, h: number) {
+  deps.show();
+  try {
+    const name = await uploadMask(mask);
+    const out = await run("cutout", `Cut-out from ${a.name}`, a, { mask: { name, w, h } }, undefined, { from: "Cut out" });
+    deps.toast("Cut out on a transparent background.");
+    if (out[0]) openRender(out[0].path);
+  } catch (e) {
+    if (errMsg(e) !== "stopped") deps.toast(`Couldn't cut it out: ${errMsg(e)}`, "warn");
+  }
+}
+
+/** Remove background: BiRefNet finds the subject, and it's saved on a transparent background as a new PNG. */
+async function removeBackground(a: Asset) {
+  closeLightbox();
+  deps.toast("Removing the background…");
+  try {
+    const out = await run("cutout", `${a.name} without its background`, a, {}, undefined, { from: "Remove background" });
+    if (out[0]) openRender(out[0].path);
+  } catch (e) {
+    if (errMsg(e) !== "stopped") deps.toast(`Couldn't remove the background: ${errMsg(e)}`, "warn");
+  }
+}
+
+/** Cut out a subject from a video: SAM 3.1 tracks what's named through every frame, and the rest turns green (with
+ *  the sound kept), ready to key out in a video editor. */
+async function videoCutout(a: Asset) {
+  closeLightbox();
+  const what = await ask("Cut out a subject", "What should stay? The rest of the video turns green, so it can be keyed out in any video editor.", "e.g. the woman, the dog, the red car");
+  if (!what) return;
+  const secs = MODES.vidcut.secs * Math.max(2, await videoSeconds(a.path));
+  deps.toast(`Tracking ${what}: ${aboutTime(secs)}. It opens when it's done.`);
+  try {
+    const out = await run("vidcut", what, a, {}, undefined, { from: "Cut out", title: `${what}, cut out of ${a.name}` });
+    if (out[0]) openRender(out[0].path);
+  } catch (e) {
+    if (errMsg(e) !== "stopped") deps.toast(`Couldn't cut it out: ${errMsg(e)}`, "warn");
+  }
+}
+
+/** A video's length in seconds, from its own metadata (8 when it can't be read). */
+function videoSeconds(path: string): Promise<number> {
+  return new Promise((res) => {
+    const v = document.createElement("video");
+    v.preload = "metadata";
+    v.onloadedmetadata = () => res(Number.isFinite(v.duration) ? v.duration : 8);
+    v.onerror = () => res(8);
+    setTimeout(() => res(8), 5000);
+    v.src = convertFileSrc(path);
   });
+}
+
+/** A one-line question in a small dialog; resolves with the answer (null when cancelled). */
+function ask(title: string, text: string, placeholder: string): Promise<string | null> {
+  const dlg = $("#ask") as HTMLDialogElement;
+  const inp = $("#ask-input") as HTMLInputElement;
+  $("#ask-title").textContent = title;
+  $("#ask-text").textContent = text;
+  inp.placeholder = placeholder;
+  inp.value = "";
+  // Enter answers (the form's first button is Cancel, which Enter would otherwise press).
+  inp.onkeydown = (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    dlg.close("ok");
+  };
+  dlg.returnValue = "";
+  dlg.showModal();
+  inp.focus();
+  return new Promise((res) =>
+    dlg.addEventListener("close", () => res(dlg.returnValue === "ok" && inp.value.trim() ? inp.value.trim() : null), { once: true }),
+  );
+}
+
+// ---------- click to select ----------
+// SAM 3.1 answers a click in ~3 s, so it's run straight away instead of waiting in the render queue. A second ComfyUI on
+// the small card (start-all.ps1 with "comfyQuick": "on" in data\gpu-settings.json, port 8189) takes it when it runs:
+// selecting then doesn't wait for a render on the big card, nor unload anything. Measured: 3 s a selection on the
+// RTX 2060 (2.0 GB peak) and on the 3060 (1.7 GB).
+const COMFY_QUICK = "http://127.0.0.1:8189";
+let quickAt = 0;
+let quick: string | null = null;
+
+/** The ComfyUI to select with: the quick one on the small card if it's running (checked every 30 s), else the main one. */
+async function selectComfy(): Promise<string> {
+  if (Date.now() - quickAt < 30_000) return quick ?? COMFY;
+  quickAt = Date.now();
+  try {
+    quick = (await http(`${COMFY_QUICK}/system_stats`)).ok ? COMFY_QUICK : null;
+  } catch {
+    quick = null;
+  }
+  return quick ?? COMFY;
+}
+
+/** SAM 3.1's mask for a picture: what's under the clicks (and not under the negative ones), or what's named. White is
+ *  selected, at the picture's own size. */
+async function segment(src: Source, q: SelectQuery): Promise<Blob> {
+  await ensureWorkflows();
+  if (!workflows.select) throw new Error(`workflows\\${MODES.select.file} wasn't found (update the Workstation and add the select pack)`);
+  const base = await selectComfy();
+  const g = structuredClone(workflows.select);
+  g["2"].inputs.image = "path" in src ? await invoke<string>("comfy_upload", { path: src.path }) : await uploadReference(src);
+  if (q.text) g["3"].inputs.text = q.text;
+  else {
+    delete g["3"];
+    delete g["4"].inputs.conditioning;
+    g["4"].inputs.positive_coords = JSON.stringify(q.points);
+    g["4"].inputs.negative_coords = JSON.stringify(q.negative);
+  }
+  // On the main ComfyUI, a chat model filling its card is unloaded first (SAM needs ~2 GB). It waits for a running render.
+  if (base === COMFY) {
+    try {
+      const free = (await (await http(`${COMFY}/system_stats`)).json()).devices?.[0]?.vram_free ?? 0;
+      if (free < 2.5 * 2 ** 30) await deps.freeGpu();
+    } catch {
+      /* ComfyUI answers the prompt below or says why not */
+    }
+  }
+  let r: Response;
+  try {
+    r = await http(`${base}/prompt`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: g, client_id: clientId, front: true }) });
+  } catch (e) {
+    throw new Error(errMsg(e) === "not reachable" ? "ComfyUI isn't running" : errMsg(e));
+  }
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok || !body.prompt_id) throw new Error(body.error?.message ?? `ComfyUI answered ${r.status}`);
+  for (let t0 = Date.now(); Date.now() - t0 < 20 * 60_000; await new Promise((res) => setTimeout(res, 400))) {
+    const h = (await (await http(`${base}/history/${body.prompt_id}`)).json())[body.prompt_id];
+    if (!h) continue;
+    if (h.status?.status_str === "error") {
+      const err = (h.status.messages ?? []).find((m: any) => m[0] === "execution_error")?.[1]?.exception_message;
+      throw new Error(String(err ?? "SAM 3.1 failed").split("\n")[0]);
+    }
+    const f = h.outputs?.["6"]?.images?.[0];
+    if (!f) throw new Error("SAM 3.1 returned no mask");
+    const url = `${base}/view?filename=${encodeURIComponent(f.filename)}&subfolder=${encodeURIComponent(f.subfolder ?? "")}&type=${f.type ?? "temp"}`;
+    return await (await http(url)).blob();
+  }
+  throw new Error("SAM 3.1 took too long");
 }
 
 function reusePrompt(a: Asset) {
@@ -1562,6 +1782,9 @@ function showMenu(e: MouseEvent, a: Asset) {
     "-",
     ...(image && workflows.edit ? [{ label: "Edit with Qwen-Image…", run: () => startFrom(a, "image") }] : []),
     ...(image && workflows.inpaint ? [{ label: "Paint to change…", run: () => paintToChange(a) }] : []),
+    ...(image && workflows.select ? [{ label: "Select to change or cut out…", run: () => paintToChange(a, true), key: "SAM 3.1" }] : []),
+    ...(image && workflows.cutout ? [{ label: "Remove background", run: () => removeBackground(a), key: "transparent PNG" }] : []),
+    ...(a.kind === "video" && workflows.vidcut ? [{ label: "Cut out a subject…", run: () => videoCutout(a), key: "green screen" }] : []),
     ...(image && (workflows.animate || workflows.long) ? [{ label: "Animate (image → video)…", run: () => startFrom(a, "video") }] : []),
     ...(image && (workflows.ref || workflows.reffast) ? [{ label: "Use as reference image", run: () => useAsReference(a) }] : []),
     ...(image && workflows.model3d ? [{ label: "Make a 3D model", run: () => makeModel(a), key: "Pixal3D" }] : []),
@@ -1771,6 +1994,9 @@ const rq: QJob[] = [];
 let current: QJob | null = null;
 let jobIds = 1;
 
+/** Renders whose workflow has no Studio settings (and so no seed setting of their own). */
+const NO_SETTINGS: Family[] = ["talk", "select", "cutout", "vidcut"];
+
 /** Builds a render's workflow now, with the current settings and a fresh seed (it may run much later). */
 function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpts) {
   const wf = workflows[gm];
@@ -1778,7 +2004,8 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
   const m = modeOf(gm);
   const graph = structuredClone(wf);
   if (m.promptNode) graph[m.promptNode].inputs[m.promptKey ?? "text"] = gm === "ref" || gm === "reffast" ? refPrompt(opts.kind ?? "auto", prompt) : prompt;
-  const seed = takeSeed(settingsKey(gm));
+  // Renders without generation settings keep their seed to themselves, rather than taking the Image settings' one.
+  const seed = NO_SETTINGS.includes(m.family) ? Math.floor(Math.random() * 2 ** 32) : takeSeed(settingsKey(gm));
   const p = m.family === "talk" ? talkPlan(src, opts.talk?.seconds ?? 0) : plan(gm, src, opts.override, opts.song);
   if (m.family === "svi") shotPrompts(prompt, p.shots!).forEach((t, i) => (graph[SVI.shots[i].prompt].inputs.text = t));
   if (m.family === "song") graph[m.promptNode].inputs.lyrics = isInstrumental(opts.lyrics) ? INSTRUMENTAL : opts.lyrics!.trim();
@@ -1787,10 +2014,22 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
     if (!opts.mask) throw new Error("nothing is painted");
     inpaintGraph(graph, opts.mask);
   }
+  // A cut-out of a selection: its mask in place of BiRefNet's.
+  if (gm === "cutout" && opts.mask) {
+    graph["2"] = { class_type: "LoadImageMask", inputs: { image: opts.mask.name, channel: "red" } };
+    graph["3"].inputs.mask = ["2", 0];
+    delete graph["6"];
+    delete graph["7"];
+    graph["5"].inputs.filename_prefix = "selection";
+  }
   const nodes: Record<string, string> = {};
   for (const [id, n] of Object.entries<any>(graph))
     nodes[id] =
-      (m.family === "song" && SONG_STEPS[n.class_type]) || (m.family === "model3d" && MODEL3D_STEPS[n.class_type]) || (m.family === "talk" && TALK_STEPS[n.class_type]) || n.class_type;
+      (m.family === "song" && SONG_STEPS[n.class_type]) ||
+      (m.family === "model3d" && MODEL3D_STEPS[n.class_type]) ||
+      (m.family === "talk" && TALK_STEPS[n.class_type]) ||
+      ((m.family === "cutout" || m.family === "vidcut") && CUT_STEPS[n.class_type]) ||
+      n.class_type;
   if (m.family === "talk") talkLabels(nodes, p.shots!);
   return { graph, nodes, seed, count: p.count, label: modeOf(gm).label, audio: opts.talk?.audio };
 }
@@ -1974,7 +2213,7 @@ async function submit(j: QJob) {
     await invoke("comfy_listen", { clientId });
     if (src && m.imageNode) {
       setJob(1, "Uploading the image to ComfyUI…");
-      graph[m.imageNode].inputs.image = "path" in src ? await invoke<string>("comfy_upload", { path: src.path }) : await uploadReference(src);
+      graph[m.imageNode].inputs[m.imageKey ?? "image"] = "path" in src ? await invoke<string>("comfy_upload", { path: src.path }) : await uploadReference(src);
     }
     if (j.audio) {
       setJob(1, "Uploading the voice to ComfyUI…");

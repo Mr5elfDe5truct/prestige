@@ -823,6 +823,13 @@ dialog.characters[open] { display: flex; flex-direction: column; gap: 12px; }
 .ip-form { width: min(900px, 100%); margin: 0 auto; }
 .ip-form .credit { margin: 0 0 6px; }
 .ip-form .prompt-row { display: flex; gap: 8px; }
+/* Click to select: a crosshair over the picture, and the box to select by name. */
+.inpaint.selecting .ip-frame canvas { cursor: crosshair; }
+.ip-find { display: flex; gap: 6px; align-items: center; }
+#ask-input { width: 100%; margin-top: 6px; font-family: var(--body); }
+.ip-find input { width: 210px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font: 13px var(--body); padding: 6px 10px; }
+.ip-form .prompt-row .btn:disabled { opacity: .45; }
+@media (max-width: 760px) { .ip-find input { width: 140px; } .ip-form .prompt-row { flex-wrap: wrap; } }
 .ip-form input { flex: 1; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font: 14px var(--body); padding: 10px 12px; }
 /* ---------- 0.24: render queue ---------- */
 .rq { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }

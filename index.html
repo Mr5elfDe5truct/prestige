@@ -499,11 +499,12 @@
     </div>
 
     <!-- Paint to change: paint a mask on a render and regenerate only that area (inpaint.ts) -->
-    <div class="inpaint" id="inpaint" hidden role="dialog" aria-modal="true" aria-label="Paint to change">
+    <div class="inpaint" id="inpaint" hidden role="dialog" aria-modal="true" aria-label="Paint or select to change">
       <div class="ip-bar">
-        <b>Paint to change</b><span class="credit" id="ip-name"></span>
+        <b id="ip-title">Paint to change</b><span class="credit" id="ip-name"></span>
         <span class="grow"></span>
-        <span class="seg"><button type="button" id="ip-brush" class="on" title="Brush: paint over what to change">Brush</button><button type="button" id="ip-erase" title="Eraser: take paint away">Eraser</button></span>
+        <span class="seg"><button type="button" id="ip-select" title="Select: click on something and SAM 3.1 outlines it (Shift-click to leave a part out)">Select</button><button type="button" id="ip-brush" class="on" title="Brush: paint over what to change">Brush</button><button type="button" id="ip-erase" title="Eraser: take paint away">Eraser</button></span>
+        <span class="ip-find" id="ip-find-wrap"><input id="ip-find" type="text" autocomplete="off" placeholder="or type what to select" aria-label="Select by name" /><button type="button" class="btn" id="ip-find-go">Select</button></span>
         <label class="ip-size" title="Brush size ([ and ] change it)">Size<input id="ip-size" type="range" min="6" max="160" value="48" /></label>
         <button type="button" class="btn" id="ip-undo" title="Undo (Ctrl+Z)">Undo</button>
         <button type="button" class="btn" id="ip-clear">Clear</button>
@@ -516,6 +517,8 @@
         <div class="prompt-row">
           <input id="ip-prompt" type="text" autocomplete="off" placeholder="What should be there? e.g. a red vintage car, an open window, no people" />
           <button type="button" class="btn" id="ip-cancel">Cancel</button>
+          <button type="button" class="btn" id="ip-cut" title="Save what's selected on a transparent background, as a new PNG">Cut out</button>
+          <button type="button" class="btn" id="ip-remove" title="Take what's selected out of the picture: the background behind it is drawn in">Remove it</button>
           <button type="submit" class="btn primary" id="ip-go">Change the painted area</button>
         </div>
       </form>
@@ -554,6 +557,18 @@
         <div class="acts">
           <button class="btn" value="cancel">Cancel</button>
           <button class="btn primary" value="go" id="talk-go">Make it talk</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="sheet" id="ask">
+      <form method="dialog">
+        <h2 id="ask-title"></h2>
+        <p class="muted" id="ask-text"></p>
+        <input id="ask-input" type="text" autocomplete="off" />
+        <div class="acts">
+          <button class="btn" value="cancel">Cancel</button>
+          <button class="btn primary" value="ok">OK</button>
         </div>
       </form>
     </dialog>
