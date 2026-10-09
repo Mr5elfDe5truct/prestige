@@ -611,6 +611,8 @@ body[data-live="error"] .live-status { color: var(--warn); }
 .ref-consent::before { content: "⚠ "; }
 .ref-acts { display: flex; gap: 10px; flex: none; }
 .create.drop, .screen.drop { outline: 2px dashed var(--gold); outline-offset: 4px; border-radius: 12px; }
+/* While a render is dragged, where it can go: the create bar (as the reference) and the chat box. */
+body.dragging-render .create:not(.drop), body.dragging-render .composer { outline: 2px dashed color-mix(in srgb, var(--gold) 45%, transparent); outline-offset: 4px; border-radius: 12px; }
 .attachments .ref-note { flex-basis: 100%; margin: 0; font-size: 11.5px; color: var(--muted); }
 .attachments .ref-note.on { color: var(--warn); }
 @media (max-width: 760px) {

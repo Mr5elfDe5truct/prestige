@@ -37,7 +37,7 @@ import { STORYBOARD_CMD, boardFromPlan, hasBoard, initStoryboard, openStoryboard
 import { askSpeech, speakLine } from "./talking";
 import { SONG_CMD, writeSong } from "./songwriter";
 import { onSettingsChange } from "./gensettings";
-import { CONSENT, bindRefChoices, hasFiles, imageIn, imageToBase64, onRefPrefsChange, refChoicesHtml, referenceFromBase64, type Reference } from "./reference";
+import { CONSENT, bindRefChoices, dragRender, hasFiles, hasRender, imageIn, imageToBase64, onRefPrefsChange, refChoicesHtml, referenceFromBase64, renderIn, type Reference } from "./reference";
 import { initVoice, showVoice } from "./voice";
 import { initCamera, showCameraPane } from "./camera";
 import { initLive, startLive, LIVE_CTX, LIVE_MODELS } from "./live";
@@ -524,6 +524,8 @@ function renderFigure(bubble: HTMLElement, r: NonNullable<StoredMessage["render"
       img.addEventListener("error", () => fig.classList.add("missing"), { once: true });
       img.addEventListener("load", () => scrollDown());
       $(".pic", fig).addEventListener("click", () => openRender(path));
+      // Drag it into the chat box to use it again, or onto Studio's create bar (via the Studio tab) as a reference.
+      dragRender($(".pic", fig), path);
     }
     fig.addEventListener("contextmenu", (e) => renderMenu(e, path));
     $(".chat-renders", body).appendChild(fig);
@@ -2806,8 +2808,9 @@ function wire() {
   onRefPrefsChange(updateRefNote);
   const chatScreen = $('[data-screen="chat"]');
   chatScreen.addEventListener("dragover", (e) => {
-    if (!hasFiles(e)) return;
+    if (!(hasFiles(e) || hasRender(e))) return;
     e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
     chatScreen.classList.add("drop");
   });
   chatScreen.addEventListener("dragleave", (e) => {
@@ -2815,6 +2818,18 @@ function wire() {
   });
   chatScreen.addEventListener("drop", async (e) => {
     chatScreen.classList.remove("drop");
+    // A render dragged from chat or Studio is attached like a picked image (the reference for /image and /video).
+    const path = renderIn(e.dataTransfer);
+    if (path) {
+      e.preventDefault();
+      try {
+        await allowRenders();
+        attachImage(await (await fetch(convertFileSrc(path))).blob());
+      } catch (err) {
+        toast(`Couldn't read ${path.split(/[\/]/).pop()}: ${errMsg(err)}`, "warn");
+      }
+      return;
+    }
     // A dropped recording or video is transcribed.
     const rec = Array.from(e.dataTransfer?.files ?? []).find(isMedia);
     if (rec) {
@@ -2918,6 +2933,19 @@ function wire() {
 
   $$("[data-soon]").forEach((b) => b.addEventListener("click", () => toast(b.dataset.soon!)));
   $$("[data-go]").forEach((b) => b.addEventListener("click", () => go(b.dataset.go!)));
+  // Holding a dragged render over Chat or Studio in the menu opens that screen, to drop it there.
+  let springTimer = 0;
+  $$<HTMLElement>("nav [data-go]").forEach((b) => {
+    b.addEventListener("dragenter", (e) => {
+      if (!hasRender(e) || !["chat", "studio"].includes(b.dataset.go!)) return;
+      clearTimeout(springTimer);
+      springTimer = window.setTimeout(() => go(b.dataset.go!), 500);
+    });
+    b.addEventListener("dragleave", (e) => {
+      if (!b.contains(e.relatedTarget as Node)) clearTimeout(springTimer);
+    });
+    b.addEventListener("drop", () => clearTimeout(springTimer));
+  });
 
   $("#brand").addEventListener("click", () => ($("#about") as HTMLDialogElement).showModal());
   $("#replay-splash").addEventListener("click", () => {
