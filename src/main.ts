@@ -29,10 +29,11 @@ import { initSystem, onGpus, phoneSystem, showSystem, unloadAll } from "./system
 import { ollamaCtx, onPlanChange, readGpus, refreshPlan, shortName, type Gpu } from "./gpus";
 import {
   allowRenders, cancelRender, chatSettings, editLabel, editMedia, initStudio, modelLabel, openRender, renderMedia, renderMenu, renderModel, renderSong, renderTalk,
-  faceThumb, onQueueChange, phoneQueue, phoneStudio, renderShot, showStudio, songSeconds, talkSecs, videoQuality, type MediaKind,
+  faceThumb, frameLabel, onQueueChange, phoneQueue, phoneStudio, renderFrame, renderShot, showStudio, songSeconds, talkSecs, videoQuality, type MediaKind,
 } from "./studio";
 import { LASER_CMD, laserPrompt, openLaser } from "./laser";
-import { DIRECTOR_ASK, DIRECTOR_CMD, SHOT_SECONDS, SONG_SECS, askedSeconds, directorSecs, lyricsSrt, planVideo } from "./director";
+import { DIRECTOR_ASK, DIRECTOR_CMD, PLAN_SECS, SHOT_SECONDS, SONG_SECS, askedSeconds, directorSecs, lyricsSrt, planVideo } from "./director";
+import { STORYBOARD_CMD, boardFromPlan, hasBoard, initStoryboard, openStoryboard, type BoardRender } from "./storyboard";
 import { askSpeech, speakLine } from "./talking";
 import { SONG_CMD, writeSong } from "./songwriter";
 import { onSettingsChange } from "./gensettings";
@@ -1446,16 +1447,79 @@ async function makeSong(text: string, request: string, hooks?: ReplyHooks) {
   }
 }
 
+/** /storyboard: the chat model plans the video as the Director would (the song and the shots), and the plan opens as a
+ *  storyboard (storyboard.ts) to change before anything is rendered; every shot's frame starts drawing straight away. */
+async function makeStoryboard(text: string, idea: string, hooks?: ReplyHooks) {
+  if (!inTauri) {
+    toast("Storyboards are made in the desktop app.");
+    return hooks?.onDone?.(false);
+  }
+  const model = current;
+  if (!model) {
+    toast("No model is available to plan the video. Start the services first.", "warn");
+    return hooks?.onDone?.(false);
+  }
+  if (chat.messages.length === 0) chat.title = text.replace(/\s+/g, " ").slice(0, 60);
+  chat.messages.push({ role: "user", content: text });
+  renderChat();
+  const reply: StoredMessage = { role: "assistant", content: "", model: "Director" };
+  const bubble = addAiBubble("Director", () => reply.content);
+  const body = $(".msg-body", bubble);
+  const replyChat = chat.id;
+  phoneReplyStart("Director", text);
+  body.innerHTML = `<span class="status-line">${model.name} is planning the song and the shots…</span>`;
+  scrollDown(true);
+  busy = new AbortController();
+  setBusyUi(true);
+  const seconds = askedSeconds(idea);
+  try {
+    const plan = await planVideo(model, idea, seconds, busy.signal, (n) => {
+      const l = $(".status-line", body);
+      if (l) l.textContent = `${model.name} is planning the song and the shots… ${n} characters`;
+    });
+    const draft = /\b(draft|quick|fast)\b/i.test(idea);
+    const subtitles = !/\b(no|without)\s+(subtitles|captions|lyrics on screen)\b/i.test(idea);
+    reply.content =
+      `**${plan.title}** · storyboard for a ${seconds} s music video, ${plan.shots.length} shots\n\n*${plan.style}*\n\n${plan.look}\n\n` +
+      plan.shots.map((sh, i) => `${i + 1}. ${sh.action}`).join("\n") +
+      "\n\nThe storyboard is open, and a frame is being drawn for each shot. Change anything, then **Render the video**. Type `/storyboard` to open it again.";
+    renderBody(body, reply.content);
+    openStoryboard(boardFromPlan(plan, idea, draft, subtitles), true);
+  } catch (e) {
+    if (busy?.signal.aborted) reply.content = "*(stopped)*";
+    else {
+      reply.error = true;
+      reply.content = `Couldn't plan the storyboard: ${errMsg(e)}`;
+      bubble.classList.add("error");
+    }
+    body.innerHTML = md(reply.content);
+  } finally {
+    chat.messages.push(reply);
+    bubble.dataset.i = String(chat.messages.length - 1);
+    busy = null;
+    setBusyUi(false);
+    scrollDown();
+    persist()
+      .catch((e) => toast(`Couldn't save this chat: ${e}`, "warn"))
+      .finally(() => phoneReplyEnd(replyChat));
+    if (hooks) {
+      hooks.onDelta?.(reply.error ? "I couldn't plan that storyboard." : "The storyboard is ready on the PC.");
+      hooks.onDone?.(!reply.error);
+    }
+  }
+}
+
 /** The Director: one prompt becomes a short music video (director.ts). The chat model plans the song and the shots,
  *  ACE-Step makes the song, LTX-2.5 renders each shot (one model at a time, through the render queue), Whisper times the
- *  lyrics for subtitles, and ffmpeg joins it all. Each step shows in the reply as it happens. */
-async function makeDirector(text: string, idea: string, hooks?: ReplyHooks) {
+ *  lyrics for subtitles, and ffmpeg joins it all. Each step shows in the reply as it happens. A storyboard (`board`)
+ *  brings its own plan, changed by hand, and each shot with a drawn frame starts on it (LTX-2.5 image-to-video). */
+async function makeDirector(text: string, idea: string, hooks?: ReplyHooks, board?: BoardRender) {
   if (!inTauri) {
     toast("Music videos are made in the desktop app.");
     return hooks?.onDone?.(false);
   }
   const model = current;
-  if (!model) {
+  if (!model && !board) {
     toast("No model is available to plan the video. Start the services first.", "warn");
     return hooks?.onDone?.(false);
   }
@@ -1484,21 +1548,22 @@ async function makeDirector(text: string, idea: string, hooks?: ReplyHooks) {
   busy.signal.addEventListener("abort", () => (cancelRender(), cancelRender("Director")), { once: true });
   setBusyUi(true);
   const t0 = Date.now();
-  const seconds = askedSeconds(idea);
-  const quality = /\b(draft|quick|fast)\b/i.test(idea) ? "draft" : videoQuality();
-  const subtitles = !/\b(no|without)\s+(subtitles|captions|lyrics on screen)\b/i.test(idea);
+  const seconds = board?.plan.seconds ?? askedSeconds(idea);
+  // A storyboard's Draft box decides; unticked, the saved Video quality (or standard, if that's draft).
+  const quality = board ? (board.draft ? "draft" : videoQuality() === "draft" ? "standard" : videoQuality()) : /\b(draft|quick|fast)\b/i.test(idea) ? "draft" : videoQuality();
+  const subtitles = board ? board.subtitles : !/\b(no|without)\s+(subtitles|captions|lyrics on screen)\b/i.test(idea);
   try {
-    status(1, `${model.name} is planning the song and the shots…`);
-    const plan = await planVideo(model, idea, seconds, busy.signal, (n) => status(1, `${model.name} is planning the song and the shots… ${n} characters`));
+    if (!board) status(1, `${model!.name} is planning the song and the shots…`);
+    const plan = board?.plan ?? (await planVideo(model!, idea, seconds, busy.signal, (n) => status(1, `${model!.name} is planning the song and the shots… ${n} characters`)));
     const n = plan.shots.length;
     // The time it'll take (measured; see director.ts), and each part's share of the progress bar.
-    const total = directorSecs(seconds, quality === "draft");
+    const total = directorSecs(seconds, quality === "draft") - (board ? PLAN_SECS : 0);
     // The plan shows straight away: the title and style, then each shot with its state.
     const esc = (t: string) => t.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
     planEl.innerHTML =
       `<p class="director-title">🎬 <b>${esc(plan.title)}</b> · ${seconds} s · ${n} shots · about ${Math.max(1, Math.round(total / 60))} min${quality === "draft" ? " (draft)" : ""}</p>` +
       `<p class="credit">${esc(plan.style)}</p>` +
-      `<ol class="director-steps"><li data-s="song">The song (ACE-Step)</li>${plan.shots.map((sh, i) => `<li data-s="${i}" title="${esc(sh.prompt)}">Shot ${i + 1}: ${esc(sh.action)}</li>`).join("")}${subtitles && plan.lyrics ? `<li data-s="subs">Lyrics as subtitles (Whisper)</li>` : ""}<li data-s="join">Joining it all (ffmpeg)</li></ol>`;
+      `<ol class="director-steps"><li data-s="song">The song (ACE-Step)</li>${plan.shots.map((sh, i) => `<li data-s="${i}" title="${esc(sh.prompt)}">Shot ${i + 1}${board?.frames[i] ? " (from its frame)" : ""}: ${esc(sh.action)}</li>`).join("")}${subtitles && plan.lyrics ? `<li data-s="subs">Lyrics as subtitles (Whisper)</li>` : ""}<li data-s="join">Joining it all (ffmpeg)</li></ol>`;
     const step = (k: string, state: "on" | "done") => planEl.querySelector(`[data-s="${k}"]`)?.setAttribute("class", state);
     scrollDown();
     const span = (from: number, to: number) => (pct: number, label: string) => status(from + ((to - from) * pct) / 100, label);
@@ -1518,6 +1583,7 @@ async function makeDirector(text: string, idea: string, hooks?: ReplyHooks) {
         title: `${plan.title}: shot ${i + 1} of ${n}`,
         note: `Shot ${i + 1} of ${n} · `,
         quality,
+        frame: board?.frames[i],
       });
       shots.push(got[0].path);
       step(String(i), "done");
@@ -2006,6 +2072,18 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     const made = inChat.messages[inChat.messages.length - 1]?.render;
     if (made?.kind === "image") openLaser(made.path, made.path.split(/[\\/]/).pop() ?? "design", idea, "lineart");
     return;
+  }
+  // "/storyboard a fox in a neon city": the Director plans it, and the plan opens as a storyboard to change, with a frame
+  // drawn for every shot, before it's rendered. "/storyboard" alone opens the last one again.
+  if (!live && !opts.images && STORYBOARD_CMD.test(text)) {
+    const idea = text.replace(STORYBOARD_CMD, "").trim();
+    if (!idea) {
+      if (hasBoard()) openStoryboard();
+      else toast("Say what the video is about after /storyboard, e.g. /storyboard a lonely robot finds a flower, 30 seconds");
+      opts.hooks?.onDone?.(false);
+      return;
+    }
+    return makeStoryboard(text, idea, opts.hooks);
   }
   // "/director a fox in a neon city" or "make me a music video about…": the Director plans, renders and joins it.
   if (!live && !opts.images && !attachments.length && (DIRECTOR_CMD.test(text) || DIRECTOR_ASK.test(text))) {
@@ -3027,6 +3105,22 @@ async function main() {
     },
     // Right-click a picture > Make it talk: in the voice of the character being talked to, or Prestige's.
     makeTalk: (path) => talkFromPicture(convertFileSrc(path), path, activeCharacter()?.voice),
+  });
+  initStoryboard({
+    toast,
+    drawFrame: async (prompt, progress, title) => (await renderFrame(prompt, progress, title))[0].path,
+    stopFrames: () => cancelRender("Storyboard"),
+    frameModel: frameLabel,
+    allowRenders,
+    // The video is made in the chat, where the Director shows each step.
+    render: (b) => {
+      if (busy) {
+        toast("Wait for the reply that's running (or stop it), then render the storyboard.");
+        return openStoryboard();
+      }
+      go("chat");
+      makeDirector(`🎬 Render the storyboard: ${b.plan.title}`, b.plan.title, undefined, b);
+    },
   });
   onSpeakingChange((on) => {
     if (!on) markSpeaking(null);

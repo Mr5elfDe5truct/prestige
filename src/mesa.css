@@ -16,7 +16,7 @@ body[data-style="molded"] {
    the shade in front), rolls over a rounded shoulder (light on the top edge, shade under the bottom one) onto a matte
    top. Everything is drawn with the element's own background and shadows, so nothing scrolls away inside a scroller. */
 body[data-style="molded"] :is(.hud, .composer-dock, .dock, .history, .card, .create, .rq, .update-banner, .offline, .live-bar, .cu-card, .cam-pop, .emote-pick, .ctx-menu, .canvas, .phone-box, .canvas-card, .cu-next, .tool-confirm, dialog.sheet, .model-menu, .tools-pop),
-body[data-style="molded"] :is(.mrow, .cat-card, .ms-row, .thumb, .kb-model, .history-item, .model-menu button, .ch-list button, .ch-fact, .chat-render.song, .chat-render.model .model-card, .look-swatch, .ref-add, .ms-tpl),
+body[data-style="molded"] :is(.mrow, .cat-card, .sb-shot, .ms-row, .thumb, .kb-model, .history-item, .model-menu button, .ch-list button, .ch-fact, .chat-render.song, .chat-render.model .model-card, .look-swatch, .ref-add, .ms-tpl),
 body[data-style="molded"] :is(.btn, .icon-btn, .model-btn, .suggests button, .filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.pick, .live-ctl, .sources button, .chat-files .cf),
 body[data-style="molded"] .msg.you,
 body[data-style="molded"] .dock button svg {
@@ -36,7 +36,7 @@ body[data-style="molded"] .dock button svg {
     0 calc(var(--hh) * -.4px) calc(var(--hh) * 1.2px) calc(var(--hh) * .1px) color-mix(in srgb, var(--wall-hi) 22%, transparent);
   transition: transform .12s, box-shadow .15s, color .15s;
 }
-body[data-style="molded"] :is(.card, .create, .rq, .update-banner, .offline, .live-bar, .cu-card, .phone-box, .canvas-card, .cu-next, .tool-confirm, .mrow, .cat-card, .ms-row, .thumb, .kb-model, .history-item, .model-menu button, .ch-list button, .ch-fact, .chat-render.song, .chat-render.model .model-card, .look-swatch, .ref-add, .ms-tpl, .btn, .icon-btn, .model-btn, .suggests button, .filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.pick, .live-ctl, .sources button, .chat-files .cf, .dock button, .msg.you) {
+body[data-style="molded"] :is(.card, .create, .rq, .update-banner, .offline, .live-bar, .cu-card, .phone-box, .canvas-card, .cu-next, .tool-confirm, .mrow, .cat-card, .sb-shot, .ms-row, .thumb, .kb-model, .history-item, .model-menu button, .ch-list button, .ch-fact, .chat-render.song, .chat-render.model .model-card, .look-swatch, .ref-add, .ms-tpl, .btn, .icon-btn, .model-btn, .suggests button, .filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.pick, .live-ctl, .sources button, .chat-files .cf, .dock button, .msg.you) {
   position: relative;
 }
 body[data-style="molded"] :is(dialog.sheet, .model-menu, .tools-pop) { border-radius: 22px; }
@@ -62,7 +62,7 @@ body[data-style="molded"] .gen-settings { border-top: 0; box-shadow: inset 0 1px
 body[data-style="molded"] .ctx-menu hr, body[data-style="molded"] .model-menu button.more { border-color: rgba(0, 0, 0, .5); }
 
 /* low tiles stand a little above the panel they sit on */
-body[data-style="molded"] :is(.mrow, .cat-card, .ms-row, .thumb, .kb-model, .chat-render.song, .chat-render.model .model-card, .ref-add, .ms-tpl) { --hh: calc(var(--h) * var(--g) * .5); border-radius: 14px; border-style: solid; }
+body[data-style="molded"] :is(.mrow, .cat-card, .sb-shot, .ms-row, .thumb, .kb-model, .chat-render.song, .chat-render.model .model-card, .ref-add, .ms-tpl) { --hh: calc(var(--h) * var(--g) * .5); border-radius: 14px; border-style: solid; }
 body[data-style="molded"] :is(.history-item, .model-menu button, .ch-list button, .ch-fact) { --hh: calc(var(--h) * var(--g) * .3); border-radius: 12px; }
 body[data-style="molded"] :is(.history-list, .ch-list) { gap: 6px; padding: 8px; }
 body[data-style="molded"] .model-menu { padding: 10px 10px 14px; display: flex; flex-direction: column; gap: 6px; }
