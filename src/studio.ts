@@ -47,7 +47,7 @@ import {
   type SettingsKey,
   type VideoSettings,
 } from "./gensettings";
-import { CONSENT, bindRefChoices, hasFiles, imageIn, loadReference, onRefPrefsChange, refChoicesHtml, refPrefs, refPrompt, referenceFromBase64, sceneOf, setRefPrefs, uploadReference, type RefKind, type Reference } from "./reference";
+import { CONSENT, bindRefChoices, dragRender, hasFiles, hasRender, imageIn, loadReference, onRefPrefsChange, refChoicesHtml, refPrefs, refPrompt, referenceFromBase64, renderIn, sceneOf, setRefPrefs, uploadReference, type RefKind, type Reference } from "./reference";
 import { characterById, characters, faceBlob, onCharactersChange } from "./characters";
 import { initInpaint, openInpaint, type SelectQuery } from "./inpaint";
 import { initLaser, openLaser } from "./laser";
@@ -1185,11 +1185,13 @@ function initRefSlot() {
   onCharactersChange(() => renderCreate());
   bindRefChoices($("#ref-picks"));
   onRefPrefsChange(() => renderCreate());
-  // Drop a picture anywhere on the create bar, or paste one while Studio is open.
+  // Drop a picture anywhere on the create bar (a file, or a render dragged from the gallery or chat), or paste one
+  // while Studio is open.
   const create = $("#create");
   create.addEventListener("dragover", (e) => {
-    if (!hasFiles(e) || mode === "webcam") return;
+    if (!(hasFiles(e) || hasRender(e)) || mode === "webcam") return;
     e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
     create.classList.add("drop");
   });
   create.addEventListener("dragleave", (e) => {
@@ -1197,6 +1199,12 @@ function initRefSlot() {
   });
   create.addEventListener("drop", (e) => {
     create.classList.remove("drop");
+    const path = renderIn(e.dataTransfer);
+    if (path) {
+      e.preventDefault();
+      if (mode !== "webcam") refFromRender(path);
+      return;
+    }
     const f = imageIn(e.dataTransfer);
     if (!f || mode === "webcam") return;
     e.preventDefault();
@@ -1233,6 +1241,20 @@ async function useAsReference(a: Asset) {
     await setRef(await (await fetch(convertFileSrc(a.path))).blob());
   } catch (e) {
     deps.toast(`Couldn't read ${a.name}: ${errMsg(e)}`, "warn");
+  }
+}
+
+/** A render dropped on the create bar becomes the reference (the full-size file, not its thumbnail). */
+async function refFromRender(path: string) {
+  if (!(workflows.ref || workflows.reffast)) {
+    deps.toast(`Reference images need workflows\\${MODES.ref.file} (update the Workstation).`, "warn");
+    return;
+  }
+  try {
+    await allowRenders();
+    await setRef(await (await fetch(convertFileSrc(path))).blob());
+  } catch (e) {
+    deps.toast(`Couldn't read ${path.split(/[\\/]/).pop()}: ${errMsg(e)}`, "warn");
   }
 }
 
@@ -1527,6 +1549,8 @@ function render() {
     }
     fig.addEventListener("click", () => (model ? deps.openModel(a.path, a.name) : openLightbox(a)));
     fig.addEventListener("contextmenu", (e) => showMenu(e, a));
+    // A picture can be dragged up onto the create bar to be the reference.
+    if (a.kind === "image") dragRender(fig, a.path);
     g.appendChild(fig);
     if (!song && !model) io.observe(fig);
   }

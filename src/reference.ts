@@ -77,6 +77,31 @@ export function imageIn(data: DataTransfer | null): File | null {
 /** True while something with files is dragged over the window (to highlight drop targets). */
 export const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
 
+// ---------- dragging a render (a Studio card or a picture in chat) ----------
+// The drag carries the render's file path under its own type, so a drop target can tell it from a file off the desktop
+// and read the full-size picture rather than the thumbnail.
+const RENDER_DRAG = "application/x-prestige-render";
+
+/** True while a render picture is dragged over the window. */
+export const hasRender = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes(RENDER_DRAG);
+
+/** The path of a dropped render picture, if that's what was dropped. */
+export const renderIn = (data: DataTransfer | null) => data?.getData(RENDER_DRAG) || null;
+
+/** Lets `el` (a render picture's card or image) be dragged onto Studio's create bar or into chat. */
+export function dragRender(el: HTMLElement, path: string) {
+  el.draggable = true;
+  el.addEventListener("dragstart", (e) => {
+    const dt = e.dataTransfer;
+    if (!dt) return;
+    dt.clearData(); // not the thumbnail the webview would offer for an <img>
+    dt.setData(RENDER_DRAG, path);
+    dt.effectAllowed = "copy";
+    document.body.classList.add("dragging-render");
+  });
+  el.addEventListener("dragend", () => document.body.classList.remove("dragging-render"));
+}
+
 /** Sends the reference to ComfyUI's input folder and returns the name for its LoadImage node. */
 export async function uploadReference(r: Reference): Promise<string> {
   const body = new Uint8Array(await r.blob.arrayBuffer());
