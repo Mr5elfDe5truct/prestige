@@ -863,7 +863,16 @@ interface Deps {
 
 let deps: Deps;
 let items: Asset[] = [];
-let filter: "all" | "image" | "video" | "audio" = "all";
+let filter: "all" | "image" | "video" | "audio" | "starred" = "all";
+let query = ""; // the gallery's search box: words that must all be in the prompt, file name, model or lyrics
+// Starred renders (by path), kept in this PC's settings.
+const starred = new Set<string>(loadStarred());
+// Renders picked with Ctrl- or Shift-click, for the selection bar; a Shift-click range starts at the last one clicked.
+const selected = new Set<string>();
+let anchor: string | null = null;
+// The gallery builds this many cards at a time, and more as it scrolls (a big output folder stays quick).
+const PAGE = 120;
+let shown = 0;
 let mode: "image" | "video" | "music" | "storyboard" | "webcam" = "image";
 // The image being animated (Video mode) or edited (Image mode), picked from the lightbox.
 let srcAsset: Asset | null = null;
@@ -907,6 +916,15 @@ export function initStudio(d: Deps) {
       render();
     }),
   );
+  const search = $<HTMLInputElement>("#gal-search");
+  search.addEventListener("input", () => {
+    query = search.value;
+    render();
+  });
+  initSelectionBar();
+  $("#lb-prev").addEventListener("click", () => stepLightbox(-1));
+  $("#lb-next").addEventListener("click", () => stepLightbox(1));
+  $("#lb-star").addEventListener("click", () => lbAsset && toggleStar(lbAsset.path));
   $$(".modes [data-mode]").forEach((b) =>
     b.addEventListener("click", () => {
       mode = b.dataset.mode as typeof mode;
@@ -942,6 +960,16 @@ export function initStudio(d: Deps) {
     if ($("#lb").hidden || (e.target as HTMLElement)?.closest?.("input, textarea, dialog")) return;
     if (e.key === "Escape") closeLightbox();
     else if (e.key === "Delete" && lbAsset) deleteRender(lbAsset);
+    else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !(e.target as HTMLElement)?.closest?.("video, audio")) {
+      // The arrow keys step through the gallery as it's filtered and searched (a focused player keeps them to seek).
+      e.preventDefault();
+      stepLightbox(e.key === "ArrowRight" ? 1 : -1);
+    } else if (e.key.toLowerCase() === "s" && !e.ctrlKey && !e.altKey && !e.metaKey && lbAsset) toggleStar(lbAsset.path);
+  });
+  // Escape (with no window open) lets go of the picked renders.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || !selected.size || !$("#lb").hidden || !studioShown() || (e.target as HTMLElement)?.closest?.("input, textarea, dialog")) return;
+    clearSelection();
   });
   listen<any>("comfy", (e) => onComfy(e.payload));
 }
@@ -1186,23 +1214,34 @@ function initRefSlot() {
   bindRefChoices($("#ref-picks"));
   onRefPrefsChange(() => renderCreate());
   // Drop a picture anywhere on the create bar (a file, or a render dragged from the gallery or chat), or paste one
-  // while Studio is open.
+  // while Studio is open. A dragged render shows where it can go: the reference, or the picture to edit or animate.
   const create = $("#create");
+  const choices = $("#drop-choices");
   create.addEventListener("dragover", (e) => {
     if (!(hasFiles(e) || hasRender(e)) || mode === "webcam") return;
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
     create.classList.add("drop");
+    if (!hasRender(e)) return;
+    if (choices.hidden) showDropChoices();
+    const over = (e.target as HTMLElement).closest?.("[data-drop]");
+    $$("[data-drop]", choices).forEach((x) => x.classList.toggle("over", x === over));
   });
   create.addEventListener("dragleave", (e) => {
-    if (!create.contains(e.relatedTarget as Node)) create.classList.remove("drop");
+    if (create.contains(e.relatedTarget as Node)) return;
+    create.classList.remove("drop");
+    choices.hidden = true;
   });
   create.addEventListener("drop", (e) => {
     create.classList.remove("drop");
+    const to = (e.target as HTMLElement).closest?.<HTMLElement>("[data-drop]:not([hidden])")?.dataset.drop ?? "ref";
+    choices.hidden = true;
     const path = renderIn(e.dataTransfer);
     if (path) {
       e.preventDefault();
-      if (mode !== "webcam") refFromRender(path);
+      if (mode === "webcam") return;
+      if (to === "ref") refFromRender(path);
+      else findItem(path).then((a) => startFrom(a, to === "edit" ? "image" : "video"), (err) => deps.toast(errMsg(err), "warn"));
       return;
     }
     const f = imageIn(e.dataTransfer);
@@ -1242,6 +1281,15 @@ async function useAsReference(a: Asset) {
   } catch (e) {
     deps.toast(`Couldn't read ${a.name}: ${errMsg(e)}`, "warn");
   }
+}
+
+/** The drop targets over the create bar for a dragged render: only the ones with their workflows (none when it can
+ *  only be the reference, so the whole bar takes it). */
+function showDropChoices() {
+  const has = { ref: !!(workflows.ref || workflows.reffast), edit: !!workflows.edit, animate: !!(workflows.animate || workflows.long) };
+  const choices = $("#drop-choices");
+  $$<HTMLElement>("[data-drop]", choices).forEach((x) => (x.hidden = !has[x.dataset.drop as keyof typeof has]));
+  choices.hidden = !has.edit && !has.animate;
 }
 
 /** A render dropped on the create bar becomes the reference (the full-size file, not its thumbnail). */
@@ -1460,6 +1508,8 @@ async function refresh() {
     const res = await invoke<{ dir: string; exists: boolean; items: Asset[] }>("gallery_list", { root: deps.root() });
     // A reference render's prompt starts with the wording that keeps the subject; show just the scene.
     items = res.items.map((a) => (a.prompt ? { ...a, prompt: sceneOf(a.prompt) } : a));
+    const paths = new Set(items.map((a) => a.path));
+    for (const p of selected) if (!paths.has(p)) selected.delete(p);
     $("#gallery-note").textContent = res.exists
       ? `${items.length} renders in ${res.dir}`
       : `ComfyUI's output folder (${res.dir}) doesn't exist yet. Renders will appear here.`;
@@ -1495,8 +1545,8 @@ const io = new IntersectionObserver(
 function render() {
   const g = $("#gallery");
   g.innerHTML = "";
-  const list = items.filter((a) => filter === "all" || a.kind === filter);
-  if (!list.length && !job) g.innerHTML = `<p class="note">Nothing here yet.</p>`;
+  const list = visible();
+  if (!list.length && !job) g.innerHTML = `<p class="note">${items.length && (query.trim() || filter !== "all") ? "Nothing matches." : "Nothing here yet."}</p>`;
   if (job) {
     const p = document.createElement("div");
     p.className = "thumb pending";
@@ -1507,53 +1557,221 @@ function render() {
     $(".p", p).textContent = job.prompt;
     g.appendChild(p);
   }
-  for (const a of list) {
-    const fig = document.createElement("button");
-    const song = a.kind === "audio";
-    const model = a.kind === "model";
-    fig.className = "thumb" + (song ? " song" : model ? " model" : " pending") + (fresh.has(a.name) ? " fresh" : "");
-    fig.dataset.path = a.path;
-    // A song has no picture: a note and the first lines of its lyrics instead. A 3D model gets a cube, and a click opens
-    // it in the 3D viewer.
-    const pic = song
-      ? `<span class="song-art" aria-hidden="true">${NOTE_SVG}</span><span class="song-lines"></span>`
-      : model
-        ? `<span class="model-art" aria-hidden="true">${CUBE_SVG}</span>`
-        : "";
-    fig.innerHTML = `<div class="pic">${pic}<span class="badge ${a.kind === "video" ? "vid" : song ? "song" : model ? "m3d" : ""}">${song ? "SONG" : model ? "3D" : a.kind.toUpperCase()}</span></div><figcaption><span class="p"></span><span class="m"></span></figcaption>`;
-    $(".p", fig).textContent = a.prompt || a.name;
-    $(".p", fig).title = a.prompt || a.name;
-    $(".m", fig).textContent = [a.model, a.duration ? songLength(Math.round(a.duration)) : "", age(a.mtime)].filter(Boolean).join(" · ");
-    if (song) $(".song-lines", fig).textContent = lyricLines(a.lyrics, 4);
-    if (a.kind === "video") {
-      // Hovering plays the clip, muted.
-      fig.addEventListener("mouseenter", () => {
-        const v = document.createElement("video");
-        v.src = convertFileSrc(a.path);
-        v.muted = true;
-        v.loop = true;
-        v.playsInline = true;
-        v.addEventListener("playing", () => v.classList.add("playing"));
-        $(".pic", fig).appendChild(v);
-        v.play().catch(() => {});
-      });
-      fig.addEventListener("mouseleave", () => {
-        const v = $("video", fig) as HTMLVideoElement | null;
-        if (v) {
-          v.pause();
-          v.removeAttribute("src");
-          v.load();
-          v.remove();
-        }
-      });
-    }
-    fig.addEventListener("click", () => (model ? deps.openModel(a.path, a.name) : openLightbox(a)));
-    fig.addEventListener("contextmenu", (e) => showMenu(e, a));
-    // A picture can be dragged up onto the create bar to be the reference.
-    if (a.kind === "image") dragRender(fig, a.path);
-    g.appendChild(fig);
-    if (!song && !model) io.observe(fig);
+  moreIo.disconnect();
+  shown = 0;
+  more(list);
+  renderSelection();
+}
+
+/** The renders the gallery shows: the filter (a kind, or Starred) and every word in the search box. */
+function visible() {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  return items.filter((a) => {
+    if (filter === "starred" ? !starred.has(a.path) : filter !== "all" && a.kind !== filter) return false;
+    if (!words.length) return true;
+    const hay = `${a.prompt ?? ""} ${a.name} ${a.model ?? ""} ${a.lyrics ?? ""}`.toLowerCase();
+    return words.every((w) => hay.includes(w));
+  });
+}
+
+// The next page of cards is built when the "Show more" button after the last one comes near the screen.
+const moreIo = new IntersectionObserver(
+  (entries) => {
+    if (!entries.some((en) => en.isIntersecting)) return;
+    moreIo.disconnect();
+    more();
+  },
+  { rootMargin: "600px" },
+);
+
+/** Adds the next page of cards to the gallery, and a "Show more" button while there are more. */
+function more(list = visible()) {
+  const g = $("#gallery");
+  $(".gal-more", g)?.remove();
+  for (const a of list.slice(shown, shown + PAGE)) g.appendChild(card(a));
+  shown = Math.min(list.length, shown + PAGE);
+  if (shown < list.length) {
+    const m = document.createElement("button");
+    m.type = "button";
+    m.className = "gal-more";
+    m.textContent = `Show more (${list.length - shown} left)`;
+    m.addEventListener("click", () => more());
+    g.appendChild(m);
+    moreIo.observe(m);
   }
+}
+
+/** A gallery card for a render. */
+function card(a: Asset) {
+  const fig = document.createElement("button");
+  const song = a.kind === "audio";
+  const model = a.kind === "model";
+  fig.className = "thumb" + (song ? " song" : model ? " model" : " pending") + (fresh.has(a.name) ? " fresh" : "") + (selected.has(a.path) ? " sel" : "");
+  fig.dataset.path = a.path;
+  // A song has no picture: a note and the first lines of its lyrics instead. A 3D model gets a cube, and a click opens
+  // it in the 3D viewer.
+  const pic = song
+    ? `<span class="song-art" aria-hidden="true">${NOTE_SVG}</span><span class="song-lines"></span>`
+    : model
+      ? `<span class="model-art" aria-hidden="true">${CUBE_SVG}</span>`
+      : "";
+  fig.innerHTML = `<div class="pic">${pic}<span class="badge ${a.kind === "video" ? "vid" : song ? "song" : model ? "m3d" : ""}">${song ? "SONG" : model ? "3D" : a.kind.toUpperCase()}</span></div><figcaption><span class="p"></span><span class="m"></span></figcaption>`;
+  $(".p", fig).textContent = a.prompt || a.name;
+  $(".p", fig).title = a.prompt || a.name;
+  $(".m", fig).textContent = [a.model, a.duration ? songLength(Math.round(a.duration)) : "", age(a.mtime)].filter(Boolean).join(" · ");
+  if (song) $(".song-lines", fig).textContent = lyricLines(a.lyrics, 4);
+  // The star in the corner keeps it in the Starred filter.
+  const star = document.createElement("span");
+  star.className = "star" + (starred.has(a.path) ? " on" : "");
+  star.setAttribute("role", "button");
+  star.title = "Star (keeps it in the Starred filter)";
+  star.textContent = "★";
+  star.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleStar(a.path);
+  });
+  $(".pic", fig).appendChild(star);
+  if (a.kind === "video") {
+    // Hovering plays the clip, muted.
+    fig.addEventListener("mouseenter", () => {
+      const v = document.createElement("video");
+      v.src = convertFileSrc(a.path);
+      v.muted = true;
+      v.loop = true;
+      v.playsInline = true;
+      v.addEventListener("playing", () => v.classList.add("playing"));
+      $(".pic", fig).appendChild(v);
+      v.play().catch(() => {});
+    });
+    fig.addEventListener("mouseleave", () => {
+      const v = $("video", fig) as HTMLVideoElement | null;
+      if (v) {
+        v.pause();
+        v.removeAttribute("src");
+        v.load();
+        v.remove();
+      }
+    });
+  }
+  // Ctrl- or Shift-click picks it (and while some are picked, a click does too); otherwise it opens.
+  fig.addEventListener("click", (e) => {
+    if (e.ctrlKey || e.metaKey || e.shiftKey || selected.size) return pick(a, e.shiftKey);
+    if (model) deps.openModel(a.path, a.name);
+    else openLightbox(a);
+  });
+  fig.addEventListener("contextmenu", (e) => showMenu(e, a));
+  // A picture can be dragged up onto the create bar: the reference, or the picture to edit or animate.
+  if (a.kind === "image") dragRender(fig, a.path);
+  if (!song && !model) io.observe(fig);
+  return fig;
+}
+
+// ---------- stars ----------
+function loadStarred(): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem("studio.starred") ?? "[]");
+    return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveStarred() {
+  try {
+    localStorage.setItem("studio.starred", JSON.stringify([...starred]));
+  } catch {}
+}
+
+/** Stars a render, or takes its star away (the card, the viewer and the Starred filter follow). */
+function toggleStar(path: string, on = !starred.has(path)) {
+  if (on) starred.add(path);
+  else starred.delete(path);
+  saveStarred();
+  if (filter === "starred") render();
+  else $$<HTMLElement>("#gallery .thumb").forEach((f) => f.dataset.path === path && $(".star", f)?.classList.toggle("on", on));
+  if (lbAsset?.path === path) renderLbStar();
+}
+
+function renderLbStar() {
+  const on = !!lbAsset && starred.has(lbAsset.path);
+  const b = $("#lb-star");
+  b.textContent = on ? "★ Starred" : "☆ Star";
+  b.classList.toggle("on", on);
+}
+
+// ---------- picking several renders (Ctrl- or Shift-click) ----------
+function pick(a: Asset, range: boolean) {
+  const list = visible();
+  const from = range && anchor ? list.findIndex((x) => x.path === anchor) : -1;
+  const to = list.findIndex((x) => x.path === a.path);
+  if (from >= 0 && to >= 0) {
+    for (let i = Math.min(from, to); i <= Math.max(from, to); i++) selected.add(list[i].path);
+  } else if (selected.has(a.path)) selected.delete(a.path);
+  else selected.add(a.path);
+  anchor = a.path;
+  $$<HTMLElement>("#gallery .thumb").forEach((f) => f.classList.toggle("sel", selected.has(f.dataset.path!)));
+  renderSelection();
+}
+
+function clearSelection() {
+  selected.clear();
+  anchor = null;
+  $$<HTMLElement>("#gallery .thumb.sel").forEach((f) => f.classList.remove("sel"));
+  renderSelection();
+}
+
+/** The bar over the gallery while renders are picked: star, copy or delete them all at once. */
+function renderSelection() {
+  const bar = $("#gal-sel");
+  bar.hidden = !selected.size;
+  if (!selected.size) return;
+  $("#sel-count").textContent = `${selected.size} selected`;
+  $("#sel-star").textContent = [...selected].every((p) => starred.has(p)) ? "Unstar" : "Star";
+}
+
+function initSelectionBar() {
+  $("#sel-clear").addEventListener("click", clearSelection);
+  $("#sel-all").addEventListener("click", () => {
+    for (const a of visible()) selected.add(a.path);
+    $$<HTMLElement>("#gallery .thumb").forEach((f) => f.classList.toggle("sel", selected.has(f.dataset.path!)));
+    renderSelection();
+  });
+  $("#sel-star").addEventListener("click", () => {
+    const on = ![...selected].every((p) => starred.has(p));
+    for (const p of selected) on ? starred.add(p) : starred.delete(p);
+    saveStarred();
+    render();
+  });
+  $("#sel-copy").addEventListener("click", async () => {
+    try {
+      await invoke("copy_renders", { root: deps.root(), paths: [...selected] });
+      deps.toast(`${selected.size === 1 ? "File" : `${selected.size} files`} copied. Paste into a folder or a chat app.`);
+    } catch (e) {
+      deps.toast(`Couldn't copy them: ${errMsg(e)}`, "warn");
+    }
+  });
+  $("#sel-delete").addEventListener("click", deleteSelected);
+}
+
+/** Asks once, then moves every picked render to the Recycle Bin. */
+async function deleteSelected() {
+  const picked = items.filter((a) => selected.has(a.path));
+  if (!picked.length) return;
+  if (!(await confirmDelete(picked.length === 1 ? `Delete this ${kindWord(picked[0])}?` : `Delete these ${picked.length} renders?`, picked.length === 1 ? picked[0].name : `${picked.length} files`))) return;
+  let failed = 0;
+  for (const a of picked) {
+    try {
+      await invoke("delete_render", { root: deps.root(), path: a.path, mtime: a.mtime });
+      gone(a.path);
+    } catch {
+      failed++;
+    }
+  }
+  selected.clear();
+  anchor = null;
+  render();
+  const moved = picked.length - failed;
+  deps.toast(failed ? `Moved ${moved} to the Recycle Bin; ${failed} couldn't be deleted.` : `Moved ${moved} ${moved === 1 ? "render" : "renders"} to the Recycle Bin.`, failed ? "warn" : undefined);
 }
 
 const CUBE_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2l9 5v10l-9 5-9-5V7z" /><path d="M3 7l9 5 9-5M12 12v10" /></svg>`;
@@ -1660,7 +1878,25 @@ function openLightbox(a: Asset) {
   $("#lb-reuse").onclick = () => reusePrompt(a);
   $("#lb-save").onclick = () => saveAs(a);
   $("#lb-delete").onclick = () => deleteRender(a);
+  renderLbStar();
+  // Back and next buttons for the gallery around it (the arrow keys do the same).
+  const list = viewable();
+  const i = list.findIndex((x) => x.path === a.path);
+  $("#lb-prev").hidden = i <= 0;
+  $("#lb-next").hidden = i < 0 || i >= list.length - 1;
   $("#lb").hidden = false;
+}
+
+/** What the viewer steps through: the gallery as filtered and searched, without 3D models (they open in 3D). */
+const viewable = () => visible().filter((a) => a.kind !== "model");
+
+/** Opens the render before (-1) or after (1) the one in the viewer. */
+function stepLightbox(d: number) {
+  if (!lbAsset) return;
+  const list = viewable();
+  const i = list.findIndex((x) => x.path === lbAsset!.path);
+  const next = i >= 0 ? list[i + d] : undefined;
+  if (next) openLightbox(next);
 }
 
 function closeLightbox() {
@@ -1945,13 +2181,7 @@ async function saveAs(a: Asset) {
 /** Asks first, then moves the file to the Recycle Bin and takes it out of the gallery and chats. */
 async function deleteRender(a: Asset) {
   closeMenu();
-  const dlg = $("#del-confirm") as HTMLDialogElement;
-  $("#del-name").textContent = a.name;
-  $("#del-kind").textContent = a.kind === "audio" ? "song" : a.kind;
-  dlg.returnValue = "";
-  dlg.showModal();
-  await new Promise((r) => dlg.addEventListener("close", r, { once: true }));
-  if (dlg.returnValue !== "delete") return;
+  if (!(await confirmDelete(`Delete this ${kindWord(a)}?`, a.name))) return;
   try {
     await removeRender(a);
   } catch (e) {
@@ -1961,14 +2191,34 @@ async function deleteRender(a: Asset) {
   deps.toast(`Moved ${a.name} to the Recycle Bin.`);
 }
 
+const kindWord = (a: Asset) => (a.kind === "audio" ? "song" : a.kind === "model" ? "3D model" : a.kind);
+
+/** The "goes to the Recycle Bin" question; true when it's answered Delete. */
+async function confirmDelete(title: string, name: string) {
+  const dlg = $("#del-confirm") as HTMLDialogElement;
+  $("#del-title").textContent = title;
+  $("#del-name").textContent = name;
+  dlg.returnValue = "";
+  dlg.showModal();
+  await new Promise((r) => dlg.addEventListener("close", r, { once: true }));
+  return dlg.returnValue === "delete";
+}
+
 /** Moves a render to the Recycle Bin and takes it out of the gallery and chats (asked first, here or on the phone). */
 async function removeRender(a: Asset) {
   await invoke("delete_render", { root: deps.root(), path: a.path, mtime: a.mtime });
-  if (lbAsset?.path === a.path) closeLightbox();
-  items = items.filter((x) => x.path !== a.path);
+  gone(a.path);
   render();
+}
+
+/** Forgets a deleted render: the viewer, the gallery, its star and pick, and chat messages that showed it. */
+function gone(path: string) {
+  if (lbAsset?.path === path) closeLightbox();
+  items = items.filter((x) => x.path !== path);
+  selected.delete(path);
+  if (starred.delete(path)) saveStarred();
   // Chat messages that showed it say it's gone instead of a broken picture.
-  $$<HTMLElement>("figure.chat-render").forEach((f) => f.dataset.path === a.path && f.classList.add("missing"));
+  $$<HTMLElement>("figure.chat-render").forEach((f) => f.dataset.path === path && f.classList.add("missing"));
 }
 
 // ---------- right-click menu ----------
@@ -1990,6 +2240,7 @@ function showMenu(e: MouseEvent, a: Asset) {
     ...(model ? [{ label: "Open in 3D viewer", run: () => deps.openModel(a.path, a.name) }] : []),
     { label: image ? "Open" : model ? "Open in default app" : "Play", run: () => fileAction("open_render", a, {}), key: model ? "3D Viewer, Blender…" : "in default app" },
     { label: "Show info", run: () => openLightbox(a) },
+    { label: starred.has(a.path) ? "Unstar" : "Star", run: () => toggleStar(a.path), key: "Starred filter" },
     { label: "Open in folder", run: () => revealFile(a) },
     "-",
     ...(image && workflows.edit ? [{ label: "Edit with Qwen-Image…", run: () => startFrom(a, "image") }] : []),
