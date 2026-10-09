@@ -31,6 +31,7 @@ import {
   allowRenders, cancelRender, chatSettings, editLabel, editMedia, initStudio, modelLabel, openRender, renderMedia, renderMenu, renderModel, renderSong, renderTalk,
   faceThumb, onQueueChange, phoneQueue, phoneStudio, renderShot, showStudio, songSeconds, talkSecs, videoQuality, type MediaKind,
 } from "./studio";
+import { LASER_CMD, laserPrompt, openLaser } from "./laser";
 import { DIRECTOR_ASK, DIRECTOR_CMD, SHOT_SECONDS, SONG_SECS, askedSeconds, directorSecs, lyricsSrt, planVideo } from "./director";
 import { askSpeech, speakLine } from "./talking";
 import { SONG_CMD, writeSong } from "./songwriter";
@@ -1990,6 +1991,21 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
       return;
     }
     return runComputer(text, task, opts.hooks);
+  }
+  // "/laser a celtic knot coaster": the image model draws a design made to engrave or cut (bold black on white), and it
+  // opens in the Laser panel as line art, to save as a PNG or trace to an SVG.
+  if (!live && !opts.images && LASER_CMD.test(text)) {
+    const idea = text.replace(LASER_CMD, "").trim();
+    if (!idea || attachments.length) {
+      toast(idea ? "To use a picture you have, right-click it in Studio and pick Make a laser file." : "Describe the design after /laser, e.g. /laser a celtic knot coaster");
+      opts.hooks?.onDone?.(false);
+      return;
+    }
+    const inChat = chat;
+    await makeMedia(text, "image", laserPrompt(idea), opts.hooks);
+    const made = inChat.messages[inChat.messages.length - 1]?.render;
+    if (made?.kind === "image") openLaser(made.path, made.path.split(/[\\/]/).pop() ?? "design", idea, "lineart");
+    return;
   }
   // "/director a fox in a neon city" or "make me a music video about…": the Director plans, renders and joins it.
   if (!live && !opts.images && !attachments.length && (DIRECTOR_CMD.test(text) || DIRECTOR_ASK.test(text))) {
