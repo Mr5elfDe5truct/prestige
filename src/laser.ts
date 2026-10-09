@@ -369,6 +369,7 @@ let srcPrompt = "";
 let timer: number | undefined;
 let last: { kind: "png"; canvas: HTMLCanvasElement } | { kind: "svg"; svg: string } | null = null;
 let svgUrl = "";
+let srcUrl = ""; // the picture, as a blob URL
 let zoom: Zoom;
 
 const JOB_HINT: Record<LaserJob, string> = {
@@ -384,7 +385,8 @@ export function initLaser(d: Deps) {
     img = null;
     last = null;
     if (svgUrl) URL.revokeObjectURL(svgUrl);
-    svgUrl = "";
+    if (srcUrl) URL.revokeObjectURL(srcUrl);
+    svgUrl = srcUrl = "";
     ($("#lz-canvas") as HTMLCanvasElement).width = 1;
   });
   for (const b of Array.from(dlg.querySelectorAll<HTMLButtonElement>("#lz-job button")))
@@ -439,9 +441,15 @@ export async function openLaser(path: string, name: string, prompt = "", job?: L
   srcPrompt = prompt;
   if (job) s.job = job;
   $("#lz-name").textContent = name;
+  // The picture is read into a blob first: drawn straight from the asset protocol (another origin), it would taint the
+  // canvas, and reading its pixels back (to dither, trace or save) would fail, leaving the preview blank.
   const im = new Image();
-  im.src = convertFileSrc(path);
   try {
+    const r = await fetch(convertFileSrc(path));
+    if (!r.ok) throw new Error(`${r.status}`);
+    if (srcUrl) URL.revokeObjectURL(srcUrl);
+    srcUrl = URL.createObjectURL(await r.blob());
+    im.src = srcUrl;
     await im.decode();
   } catch {
     deps.toast("Couldn't open that picture.", "warn");
@@ -507,7 +515,17 @@ function describe(): string {
   return `${what} · ${Math.round(wMm)} × ${Math.round(hMm)} mm${s.job === "cut" ? "" : ` · ${Math.round(dpi)} DPI`}${s.invert ? " · inverted" : ""}${s.mirror ? " · mirrored" : ""} · from ${srcName}${srcPrompt ? `: ${srcPrompt}` : ""}`;
 }
 
+/** Draws the preview; a failure says why there instead of leaving it blank. */
 function redraw() {
+  try {
+    draw();
+  } catch (e) {
+    last = null;
+    $("#lz-info").textContent = `Couldn't make the preview: ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+function draw() {
   if (!img) return;
   const { wMm, hMm, dpi, w, h } = size();
   const canvas = $("#lz-canvas") as HTMLCanvasElement;
@@ -542,7 +560,7 @@ function redraw() {
 }
 
 async function save(ask: boolean) {
-  if (!img || !last) return;
+  if (!img || !last) return deps.toast("There's nothing to save yet: the preview couldn't be made.", "warn");
   const desc = describe();
   const btns = Array.from(document.querySelectorAll<HTMLButtonElement>("#lz-save, #lz-save-as"));
   btns.forEach((b) => (b.disabled = true));
