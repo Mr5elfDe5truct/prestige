@@ -178,6 +178,11 @@
 
       <section class="screen wide" data-screen="studio" hidden>
         <div class="create" id="create">
+          <div class="drop-choices" id="drop-choices" hidden>
+            <div data-drop="ref"><b>Reference image</b><small>put what's in it into a new scene</small></div>
+            <div data-drop="edit"><b>Edit</b><small>change it with Qwen-Image</small></div>
+            <div data-drop="animate"><b>Animate</b><small>image → video</small></div>
+          </div>
           <div class="modes" role="tablist">
             <button class="on" data-mode="image" role="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="M21 15l-5-5L5 21" /></svg>Image</button>
             <button data-mode="video" role="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2" /><path d="M16 10l5-3v10l-5-3z" /></svg>Video</button>
@@ -235,7 +240,17 @@
         </div>
         <div class="gal-head">
           <h2>Renders</h2>
-          <div class="filters"><button class="on" data-f="all">All</button><button data-f="image">Images</button><button data-f="video">Videos</button><button data-f="audio">Songs</button></div>
+          <input class="gal-search" id="gal-search" type="search" placeholder="Search prompts…" autocomplete="off" aria-label="Search renders by prompt, file name or model" />
+          <div class="filters"><button class="on" data-f="all">All</button><button data-f="image">Images</button><button data-f="video">Videos</button><button data-f="audio">Songs</button><button data-f="starred" title="Renders you starred">★ Starred</button></div>
+        </div>
+        <div class="gal-sel" id="gal-sel" hidden>
+          <b id="sel-count"></b>
+          <button type="button" class="linkish" id="sel-all">select all</button>
+          <span class="grow"></span>
+          <button type="button" class="btn" id="sel-star">Star</button>
+          <button type="button" class="btn" id="sel-copy" title="Copy the files, to paste into a folder or a chat app">Copy files</button>
+          <button type="button" class="btn danger" id="sel-delete" title="Move them to the Recycle Bin">Delete…</button>
+          <button type="button" class="btn" id="sel-clear" title="Esc">Done</button>
         </div>
         <div class="gallery" id="gallery"></div>
         <p class="note" id="gallery-note"></p>
@@ -497,11 +512,12 @@
 
     <div class="lightbox" id="lb" hidden role="dialog" aria-modal="true" aria-label="Render preview">
       <div class="lb-inner">
-        <div class="lb-left"><div class="lb-media" id="lb-media"></div><div id="lb-zoom" title="Zoom: the mouse wheel over the picture, or this bar. Drag to look around, double-click to fit"></div></div>
+        <div class="lb-left"><div class="lb-stage"><div class="lb-media" id="lb-media"></div><button type="button" class="lb-nav prev" id="lb-prev" title="Previous (←)" aria-label="Previous render">‹</button><button type="button" class="lb-nav next" id="lb-next" title="Next (→)" aria-label="Next render">›</button></div><div id="lb-zoom" title="Zoom: the mouse wheel over the picture, or this bar. Drag to look around, double-click to fit"></div></div>
         <div class="lb-side">
           <div class="lb-p" id="lb-p"></div>
           <dl id="lb-dl"></dl>
           <div class="acts">
+            <button class="btn" id="lb-star" title="Keep it in the Starred filter (S)">☆ Star</button>
             <button class="btn" id="lb-reveal">Open in folder</button>
             <button class="btn" id="lb-copy">Copy prompt</button>
             <button class="btn" id="lb-edit">Edit (Qwen-Image)</button>
@@ -547,7 +563,7 @@
 
     <dialog class="sheet" id="del-confirm">
       <form method="dialog">
-        <h2>Delete this <span id="del-kind">render</span>?</h2>
+        <h2 id="del-title">Delete this render?</h2>
         <p><b id="del-name"></b> goes to the Recycle Bin, so you can still restore it from there.</p>
         <div class="acts">
           <button class="btn" value="cancel" autofocus>Cancel</button>

@@ -511,6 +511,7 @@ pub fn run() {
             studio::open_render,
             studio::delete_render,
             studio::copy_render,
+            studio::copy_renders,
             studio::save_render_as,
             studio::read_workflow,
             studio::comfy_listen,

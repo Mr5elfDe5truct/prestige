@@ -406,6 +406,22 @@ pub async fn copy_render(root: Option<String>, path: String, as_image: bool) -> 
     tauri::async_runtime::spawn_blocking(move || powershell(script, &p, true)).await.map_err(|e| e.to_string())?
 }
 
+/// Copies several renders to the clipboard as files (Studio's selection bar), to paste into a folder or a chat app.
+#[tauri::command]
+pub async fn copy_renders(root: Option<String>, paths: Vec<String>) -> Result<(), String> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let checked = paths.iter().map(|p| render_path(root.clone(), p)).collect::<Result<Vec<_>, _>>()?;
+    // One path per line in $env:PRESTIGE_PATH (a Windows path can't hold a line break).
+    let list = checked.iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>().join("\n");
+    let script = "Add-Type -AssemblyName System.Windows.Forms; \
+         $files = New-Object System.Collections.Specialized.StringCollection; \
+         foreach ($p in $env:PRESTIGE_PATH -split \"`n\") { [void]$files.Add($p) }; \
+         [System.Windows.Forms.Clipboard]::SetFileDropList($files)";
+    tauri::async_runtime::spawn_blocking(move || powershell(script, Path::new(&list), true)).await.map_err(|e| e.to_string())?
+}
+
 /// Saves a copy of a render wherever the user picks. Returns the new path, or null if they cancelled.
 #[tauri::command]
 pub async fn save_render_as(app: AppHandle, root: Option<String>, path: String) -> Result<Option<String>, String> {
