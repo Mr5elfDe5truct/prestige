@@ -986,4 +986,30 @@ body.cu-on { overflow: hidden; }
 .director-steps li.on { color: var(--fg); }
 .director-steps li.on::marker { color: var(--gold); }
 .director-steps li.done { color: var(--fg); opacity: .75; }
+/* Storyboard: the plan to change before rendering, one card per 5-second shot with its frame. */
+.sheet.storyboard { width: min(1180px, calc(100vw - 32px)); max-height: calc(100vh - 32px); }
+.sb-top { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+.sb-top textarea { min-height: 64px; }
+.sb-shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; margin-top: 16px; }
+.sb-shot { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); min-width: 0; }
+.sb-pic { position: relative; aspect-ratio: 3 / 2; border-radius: 8px; overflow: hidden; background: var(--bg); }
+.sb-frame { display: block; width: 100%; height: 100%; padding: 0; border: 0; background: none; cursor: zoom-in; }
+.sb-frame img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sb-shot.zoom { grid-column: 1 / -1; }
+.sb-shot.zoom .sb-pic { max-height: 70vh; margin: 0 auto; width: min(100%, calc(70vh * 1.5)); }
+.sb-shot.zoom .sb-frame { cursor: zoom-out; }
+.sb-frame.empty { display: grid; place-items: center; padding: 12px; text-align: center; font-size: 12px; color: var(--muted); cursor: default; }
+.sb-progress { position: absolute; inset: auto 8px 8px; display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; border-radius: 8px; background: color-mix(in srgb, var(--bg) 82%, transparent); font: 11px var(--mono); color: var(--muted); }
+.sb-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sb-head .sb-stale { color: var(--gold); }
+.sb-tools { margin-left: auto; display: flex; gap: 4px; }
+.sb-tools .icon-btn { width: 26px; height: 26px; font-size: 14px; }
+.sb-tools .icon-btn:disabled { opacity: .35; }
+.sb-shot textarea { resize: vertical; font-size: 12.5px; }
+.sb-shot .sb-draw { align-self: flex-start; }
+.sb-acts { align-items: center; }
+.sb-acts label.check { margin-top: 0; }
+.sb-acts .grow { flex: 1; }
+body[data-style="molded"] .sb-shot { border-radius: 16px; }
+@media (max-width: 760px) { .sb-top { grid-template-columns: 1fr; } }
 .director-steps li.done::after { content: " ✓"; color: var(--ok); }
