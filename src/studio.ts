@@ -51,6 +51,7 @@ import { CONSENT, bindRefChoices, hasFiles, imageIn, loadReference, onRefPrefsCh
 import { characterById, characters, faceBlob, onCharactersChange } from "./characters";
 import { initInpaint, openInpaint, type SelectQuery } from "./inpaint";
 import { initLaser, openLaser } from "./laser";
+import { attachZoom, type Zoom } from "./zoom";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
 const $$ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => Array.from(r.querySelectorAll(s)) as T[];
@@ -854,12 +855,16 @@ interface Deps {
   writeLyrics: (style: string, seconds: number, signal: AbortSignal) => Promise<string>;
   /** Opens "Make it talk" for this picture: what to say and in which voice. */
   makeTalk: (path: string) => void;
+  /** Storyboard mode: plans a music video from the idea and opens it as a storyboard; with no idea, opens the last one. */
+  storyboard: (idea: string) => void;
+  /** Whether there's a storyboard to open again. */
+  hasStoryboard: () => boolean;
 }
 
 let deps: Deps;
 let items: Asset[] = [];
 let filter: "all" | "image" | "video" | "audio" = "all";
-let mode: "image" | "video" | "music" | "webcam" = "image";
+let mode: "image" | "video" | "music" | "storyboard" | "webcam" = "image";
 // The image being animated (Video mode) or edited (Image mode), picked from the lightbox.
 let srcAsset: Asset | null = null;
 // The reference image (a character or item to put in a new scene), and how it's used. Kept across Image and Video.
@@ -894,6 +899,7 @@ export function initStudio(d: Deps) {
   });
   deps = d;
   initLaser({ toast: d.toast, root: d.root, openRender });
+  lbZoom = attachZoom($("#lb-media"), { target: () => $("#lb-media img"), bar: $("#lb-zoom"), panButton: 0 });
   $$(".filters [data-f]").forEach((b) =>
     b.addEventListener("click", () => {
       filter = b.dataset.f as typeof filter;
@@ -920,6 +926,7 @@ export function initStudio(d: Deps) {
       return renderCreate();
     }
     if (t.closest(".opt.model")) flipModel(mode === "video");
+    if (t.closest(".opt.board")) deps.storyboard("");
   });
   onSettingsChange(() => renderCreate());
   initSongWriter();
@@ -1011,6 +1018,21 @@ function renderCreate() {
   const webcam = mode === "webcam";
   const gm = currentMode();
   $$(".modes [data-mode]").forEach((x) => x.classList.toggle("on", x.dataset.mode === mode));
+  // Storyboard: the idea for a music video; the chat model plans it and it opens as a storyboard (storyboard.ts).
+  if (mode === "storyboard") {
+    for (const id of ["#animate-src", "#song-lyrics", "#ref-slot", "#gen-warn", "#gen-settings", "#cam-pane"]) $(id).hidden = true;
+    deps?.cameraPane(false);
+    $("#gen-form").hidden = false;
+    $("#gen-opts").hidden = false;
+    $("#create").classList.remove("disabled");
+    ($("#gen-btn") as HTMLButtonElement).disabled = false;
+    $("#gen-btn").textContent = "Plan storyboard";
+    ($("#gen-prompt") as HTMLInputElement).placeholder = "What's the music video about? e.g. a fox driving a vintage car through a neon city at night, 30 seconds";
+    $("#gen-opts").innerHTML =
+      `<span class="opt"><b>15 to 60 s</b> (30 unless you say)</span><span class="opt">a frame for every 5 s shot, to change before rendering</span><span class="opt">add <b>draft</b> for quicker shots</span>` +
+      (deps?.hasStoryboard() ? `<button type="button" class="opt pick board" title="Open the storyboard you made last">Open the last storyboard</button>` : "");
+    return;
+  }
   $("#gen-form").hidden = webcam;
   $("#gen-opts").hidden = webcam;
   $("#cam-pane").hidden = !webcam;
@@ -1538,12 +1560,16 @@ function lyricLines(lyrics: string | null | undefined, n: number) {
 
 // ---------- lightbox ----------
 let lbAsset: Asset | null = null;
+// Pictures zoom with the mouse wheel or the bar under them (zoom.ts).
+let lbZoom: Zoom;
 
 function openLightbox(a: Asset) {
   closeMenu();
   lbAsset = a;
   const media = $("#lb-media");
+  lbZoom.reset();
   media.innerHTML = "";
+  $("#lb-zoom").hidden = a.kind !== "image";
   media.oncontextmenu = (e) => showMenu(e, a);
   if (a.kind === "video") {
     const v = document.createElement("video");
@@ -2035,6 +2061,11 @@ async function copy(text: string, what = "Prompt") {
 async function generate() {
   const prompt = ($("#gen-prompt") as HTMLInputElement).value.trim();
   if (mode === "webcam") return;
+  if (mode === "storyboard") {
+    if (!prompt) return deps.toast("Say what the music video is about, e.g. a lonely robot finds a flower, 30 seconds");
+    ($("#gen-prompt") as HTMLInputElement).value = "";
+    return deps.storyboard(prompt);
+  }
   const gm = currentMode();
   if (!prompt || !workflows[gm]) return;
   // Something already rendering: this one waits its turn in the queue.

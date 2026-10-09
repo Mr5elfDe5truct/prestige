@@ -5,6 +5,8 @@
 // Click to select: the Select tool asks SAM 3.1 for the object under a click (or for things by name), and paints its
 // outline for you. The selection can then be changed, removed, or cut out as a transparent PNG.
 
+import { attachZoom, type Zoom } from "./zoom";
+
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
 
 export interface InpaintRequest {
@@ -48,6 +50,7 @@ let last: { x: number; y: number } | null = null;
 let sel: (SelectQuery & { base: ImageData }) | null = null;
 let selGen = 0; // only the newest answer is drawn
 let selecting = false;
+let zoom: Zoom;
 
 const brush = () => Number(($("#ip-size") as HTMLInputElement).value);
 
@@ -248,7 +251,9 @@ export function openInpaint(url: string, name: string, onSubmit: (r: InpaintRequ
   $("#ip-title").textContent = tool === "select" ? "Select to change" : "Paint to change";
   $("#inpaint").hidden = false;
   document.addEventListener("keydown", onKey);
+  zoom.reset();
   img.onload = () => {
+    zoom.reset();
     paint.width = img.naturalWidth;
     paint.height = img.naturalHeight;
     ctx.clearRect(0, 0, paint.width, paint.height);
@@ -263,7 +268,9 @@ export function initInpaint() {
   ctx = paint.getContext("2d")!;
   img = $("#ip-img") as HTMLImageElement;
   paint.addEventListener("contextmenu", (e) => tool === "select" && e.preventDefault());
+  zoom = attachZoom($("#ip-stage"), { target: () => $(".ip-frame"), bar: $("#ip-zoom"), panButton: 1 });
   paint.addEventListener("pointerdown", (e) => {
+    if (e.button === 1) return; // the middle button moves the view (zoom.ts)
     if (tool === "select") {
       // A click selects what's under it: more clicks add to it, Shift (or right-click) leaves a part out, Ctrl starts
       // another object on top of this one.

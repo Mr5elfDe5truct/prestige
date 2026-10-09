@@ -307,6 +307,16 @@ body.busy .hud .eye-glow, .splash .eye-glow { animation: eye 1s ease-in-out infi
 .lb-inner { width: min(1200px, 100%); display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 18px; align-items: start; }
 .lb-media { border-radius: 10px; overflow: hidden; border: 1px solid var(--line); background: #000; }
 .lb-media img, .lb-media video { width: 100%; display: block; max-height: 82vh; object-fit: contain; }
+.lb-left { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.lb-media.zoomed { max-height: 82vh; overflow: auto; display: grid; place-content: safe center; }
+.lb-media.zoomed img { cursor: grab; object-fit: fill; }
+.lb-media.zoomed.panning img { cursor: grabbing; }
+/* Zoom (zoom.ts): the wheel over the picture or this bar; zoomed in, the box scrolls and the picture is sized, not scaled. */
+.zoom-bar { display: flex; align-items: center; gap: 8px; align-self: center; font: 11.5px var(--mono); color: var(--muted); }
+.zoom-bar[hidden] { display: none; }
+.zoom-bar .icon-btn { width: 26px; height: 26px; font-size: 15px; line-height: 1; }
+.zoom-bar input[type="range"] { width: 140px; accent-color: var(--red); padding: 0; border: 0; background: none; }
+.zoom-bar .zoom-pct { min-width: 40px; text-align: right; }
 .lb-side { display: flex; flex-direction: column; gap: 12px; }
 .lb-p { font-size: 14.5px; max-height: 40vh; overflow-y: auto; }
 .lb-side dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 12px; }
@@ -810,10 +820,10 @@ dialog.characters[open] { display: flex; flex-direction: column; gap: 12px; }
 .lz-body { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; align-items: start; }
 .lz-view { height: min(62vh, 620px); display: grid; place-items: center; background: #fff; border-radius: 10px; border: 1px solid var(--line); overflow: hidden; }
 .lz-view canvas, .lz-view img { max-width: 100%; max-height: 100%; }
+.lz-view.zoomed { overflow: auto; place-items: start; place-content: safe center; }
+.lz-view.zoomed canvas { image-rendering: pixelated; cursor: grab; }
+.lz-view.zoomed img { object-fit: fill; cursor: grab; }
 .lz-view img { width: 100%; height: 100%; object-fit: contain; }
-.lz-view.actual { place-items: start; overflow: auto; }
-.lz-view.actual canvas, .lz-view.actual img { max-width: none; max-height: none; image-rendering: pixelated; }
-.lz-view.actual img { width: auto; height: auto; }
 .lz-side { display: flex; flex-direction: column; min-width: 0; }
 .lz-side > label:first-of-type, .lz-side .lz-row label { margin-top: 12px; }
 .lz-side .seg.lz-job button { padding: 6px 10px; }
@@ -824,8 +834,8 @@ dialog.characters[open] { display: flex; flex-direction: column; gap: 12px; }
 .lz-row .seg { margin-top: 12px; }
 .lz-row .seg button { padding: 6px 10px; }
 .lz-info { font-family: var(--mono); margin-top: 14px !important; }
-.lz-foot { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
-.lz-foot label.check { margin-top: 0; }
+.lz-foot { display: flex; gap: 8px 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.lz-side .zoom-bar input[type="range"] { width: 100px; }
 @media (max-width: 760px) { .lz-body { grid-template-columns: 1fr; } .lz-view { height: 40vh; } }
 .ch-voice-row { display: flex; gap: 8px; align-items: center; }
 .ch-voice-row select { flex: 1; min-width: 0; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font: 13px var(--body); padding: 8px; text-transform: none; letter-spacing: 0; }
@@ -851,6 +861,9 @@ dialog.characters[open] { display: flex; flex-direction: column; gap: 12px; }
 .ip-size { display: flex; align-items: center; gap: 8px; font: 11px var(--display); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
 .ip-size input { accent-color: var(--red); width: 130px; }
 .ip-stage { flex: 1; min-height: 0; display: grid; place-items: center; }
+.ip-stage.zoomed { overflow: auto; place-items: start; place-content: safe center; }
+.ip-stage.zoomed .ip-frame img { width: 100%; height: 100%; max-width: none; max-height: none; }
+.ip-stage.panning { cursor: grabbing; }
 .ip-frame { position: relative; max-width: 100%; max-height: 100%; line-height: 0; }
 .ip-frame img { max-width: 100%; max-height: calc(100vh - 190px); display: block; border-radius: 8px; user-select: none; -webkit-user-drag: none; }
 .ip-frame canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: none; opacity: .5; touch-action: none; }
