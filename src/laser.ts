@@ -7,6 +7,7 @@
 // Everything runs here on a canvas, so it's instant and needs no model. "/laser a celtic knot coaster" in chat draws a
 // design first with the image model, made to be engraved (bold black lines on white), and opens it here.
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { attachZoom, type Zoom } from "./zoom";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
 
@@ -368,6 +369,7 @@ let srcPrompt = "";
 let timer: number | undefined;
 let last: { kind: "png"; canvas: HTMLCanvasElement } | { kind: "svg"; svg: string } | null = null;
 let svgUrl = "";
+let zoom: Zoom;
 
 const JOB_HINT: Record<LaserJob, string> = {
   photo: "Dithered to dots the laser burns one by one: for photos and anything with shading.",
@@ -420,7 +422,11 @@ export function initLaser(d: Deps) {
     s = { ...DEFAULTS, job: s.job, widthMm: s.widthMm, dpi: s.dpi };
     changed();
   });
-  $("#lz-actual").addEventListener("change", (e) => $("#lz-view").classList.toggle("actual", (e.target as HTMLInputElement).checked));
+  zoom = attachZoom($("#lz-view"), {
+    target: () => ($("#lz-canvas").hidden ? $("#lz-svg") : $("#lz-canvas")),
+    bar: $("#lz-zoom"),
+    panButton: 0,
+  });
   $("#lz-cancel").addEventListener("click", () => dlg.close());
   $("#lz-save").addEventListener("click", () => save(false));
   $("#lz-save-as").addEventListener("click", () => save(true));
@@ -442,6 +448,7 @@ export async function openLaser(path: string, name: string, prompt = "", job?: L
     return;
   }
   img = im;
+  zoom.reset();
   if (!dlg.open) dlg.showModal();
   sync();
   redraw();
@@ -529,6 +536,7 @@ function redraw() {
     const capped = Math.round(dpi) !== s.dpi ? ` (lowered to fit ${MAX_PX} px)` : "";
     info.textContent = `${w} × ${h} px · ${Math.round(wMm)} × ${Math.round(hMm)} mm at ${Math.round(dpi)} DPI${capped} · ${(25.4 / dpi).toFixed(3)} mm a dot`;
   }
+  zoom.refresh();
   const ms = performance.now() - t0;
   if (ms > 400) info.textContent += ` · ${(ms / 1000).toFixed(1)} s to draw`;
 }

@@ -53,6 +53,7 @@ import { addMemory, memoryContext, listMemories, rememberRequest, DEFAULT_OWUI, 
 import { addStache } from "./talk";
 import { applyCachedLook, applyLook, closeAppearance, initAppearance, openAppearance, type Look } from "./theme";
 import { initMesa } from "./mesa";
+import { initScrollLock } from "./scrolllock";
 // the living styles: their shared hooks, then each one (theme.ts lists them; skins/backgrounds.ts draws behind them)
 import "./skins/living.css";
 import "./skins/matrix.css";
@@ -2845,6 +2846,16 @@ function wire() {
     ta.focus();
     ta.setSelectionRange(ta.value.length, ta.value.length);
   });
+  // Storyboard button: starts the message with /storyboard (what's typed is the idea); with an empty box and a storyboard
+  // already made, it opens that one.
+  $("#composer-storyboard").addEventListener("click", () => {
+    const v = ta.value.replace(STORYBOARD_CMD, "").trim();
+    if (!v && hasBoard()) return openStoryboard();
+    ta.value = `/storyboard ${v}`;
+    autosize();
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+  });
   // Research button: starts the message with /research, so what's typed becomes the question.
   $("#composer-research").addEventListener("click", () => {
     const v = ta.value.replace(RESEARCH_CMD, "");
@@ -3038,6 +3049,7 @@ function showWelcome() {
 }
 
 async function main() {
+  initScrollLock();
   greet(true);
   wire();
   initSystem({ toast, nameFor, openCatalog: () => openCatalog() });
@@ -3105,6 +3117,14 @@ async function main() {
     },
     // Right-click a picture > Make it talk: in the voice of the character being talked to, or Prestige's.
     makeTalk: (path) => talkFromPicture(convertFileSrc(path), path, activeCharacter()?.voice),
+    // Studio's Storyboard mode: planned in the chat, where the Director's reply shows (the board opens over it).
+    storyboard: (idea) => {
+      if (!idea) return openStoryboard();
+      if (busy) return toast("Wait for the reply that's running (or stop it), then plan the storyboard.");
+      go("chat");
+      makeStoryboard(`/storyboard ${idea}`, idea);
+    },
+    hasStoryboard: hasBoard,
   });
   initStoryboard({
     toast,

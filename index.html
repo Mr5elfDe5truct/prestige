@@ -124,6 +124,7 @@
               <input type="file" id="attach-file" accept="image/*,audio/*,video/*,.pdf,.docx,.txt,.md,.markdown,.html,.htm,.csv,.json,.xml,.yaml,.yml,.log,.rst,.tex,.py,.js,.ts,.rs,.cs,.java,.go,.cpp,.c,.h,.ps1,.sql" multiple hidden />
               <button type="button" class="icon-btn" id="composer-cam" aria-label="Attach a webcam frame" title="Attach a webcam frame"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7h4l2-3h6l2 3h4v12H3z" /><circle cx="12" cy="13" r="4" /></svg></button>
               <button type="button" class="icon-btn" id="composer-image" aria-label="Make an image" title="Make an image. Or type /image (or /video) followed by what to make"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="M21 16l-5-5-9 9" /></svg></button>
+              <button type="button" class="icon-btn" id="composer-storyboard" aria-label="Storyboard a music video" title="Storyboard a music video: Prestige plans the song and the shots, draws a frame for each, and you change them before it's rendered. Or type /storyboard and what it's about (alone, it opens the last storyboard)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="4" width="8" height="7" rx="1" /><rect x="14" y="4" width="8" height="7" rx="1" /><rect x="2" y="14" width="8" height="7" rx="1" /><rect x="14" y="14" width="8" height="7" rx="1" /></svg></button>
               <button type="button" class="icon-btn" id="composer-research" aria-label="Deep research" title="Deep research: Prestige plans searches, reads the pages it finds and writes a report that cites them (a few minutes). Or type /research and a question"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="M15.5 15.5L21 21M10.5 7.5v6M7.5 10.5h6" /></svg></button>
               <button type="button" class="icon-btn" id="composer-do" aria-label="Do it for me" title="Do it for me: a model that can see uses your mouse and keyboard to do the task, step by step, with you approving each step. Or type /do and the task"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 3l6 16 2.5-6.5L20 10z" /><path d="M14 14l5 5" /></svg></button>
               <button type="button" class="icon-btn" id="composer-gen" aria-label="Image and video settings" title="Image and video settings: size, quality, seed, length…"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0" /><circle cx="16" cy="6" r="2" /><circle cx="10" cy="12" r="2" /><circle cx="18" cy="18" r="2" /></svg></button>
@@ -181,6 +182,7 @@
             <button class="on" data-mode="image" role="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="M21 15l-5-5L5 21" /></svg>Image</button>
             <button data-mode="video" role="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2" /><path d="M16 10l5-3v10l-5-3z" /></svg>Video</button>
             <button data-mode="music" role="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 18V5l11-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="17" cy="16" r="3" /></svg>Music</button>
+            <button data-mode="storyboard" role="tab" title="A music video planned shot by shot, with a frame for each, to change before it's rendered"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="4" width="8" height="7" rx="1" /><rect x="14" y="4" width="8" height="7" rx="1" /><rect x="2" y="14" width="8" height="7" rx="1" /><rect x="14" y="14" width="8" height="7" rx="1" /></svg>Storyboard</button>
             <button data-mode="webcam" role="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7h4l2-3h6l2 3h4v12H3z" /><circle cx="12" cy="13" r="4" /></svg>Webcam</button>
             <button data-go="voice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 12h2M7 8v8M11 5v14M15 8v8M19 11v2" /></svg>Voice</button>
           </div>
@@ -495,7 +497,7 @@
 
     <div class="lightbox" id="lb" hidden role="dialog" aria-modal="true" aria-label="Render preview">
       <div class="lb-inner">
-        <div class="lb-media" id="lb-media"></div>
+        <div class="lb-left"><div class="lb-media" id="lb-media"></div><div id="lb-zoom" title="Zoom: the mouse wheel over the picture, or this bar. Drag to look around, double-click to fit"></div></div>
         <div class="lb-side">
           <div class="lb-p" id="lb-p"></div>
           <dl id="lb-dl"></dl>
@@ -526,8 +528,9 @@
         <label class="ip-size" title="Brush size ([ and ] change it)">Size<input id="ip-size" type="range" min="6" max="160" value="48" /></label>
         <button type="button" class="btn" id="ip-undo" title="Undo (Ctrl+Z)">Undo</button>
         <button type="button" class="btn" id="ip-clear">Clear</button>
+        <span id="ip-zoom" title="Zoom: the mouse wheel over the picture, or this bar. Drag with the middle button (or the scroll bars) to look around"></span>
       </div>
-      <div class="ip-stage">
+      <div class="ip-stage" id="ip-stage">
         <div class="ip-frame"><img id="ip-img" alt="" /><canvas id="ip-paint"></canvas><span class="ip-ring" id="ip-ring"></span></div>
       </div>
       <form class="ip-form" id="ip-form">
@@ -617,7 +620,7 @@
             <label class="check" title="White burns instead of black: slate, black anodized aluminium, painted tiles, rubber stamps"><input id="lz-invert" type="checkbox" />Invert (dark materials, stamps)</label>
             <label class="check" title="Flipped left to right, to engrave the back of clear glass or acrylic"><input id="lz-mirror" type="checkbox" />Mirror (back of glass or acrylic)</label>
             <p class="muted lz-info" id="lz-info"></p>
-            <p class="muted lz-foot"><label class="check"><input id="lz-actual" type="checkbox" />Show actual pixels</label><button type="button" class="linkish" id="lz-reset">Reset the adjustments</button></p>
+            <p class="muted lz-foot"><span id="lz-zoom" title="Zoom: the mouse wheel over the preview, or this bar. Drag to look around"></span><button type="button" class="linkish" id="lz-reset">Reset the adjustments</button></p>
           </div>
         </div>
         <div class="acts">
