@@ -17,7 +17,7 @@ mod studio;
 
 use serde::Serialize;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use tauri::{AppHandle, Manager};
 
@@ -271,14 +271,46 @@ fn ide_running() -> bool {
         .unwrap_or(false)
 }
 
+/// Where Prestige IDE is installed. Not only %LOCALAPPDATA%: after an update the installer restarts Prestige with an
+/// environment that can lack it, so also the install record, the user's profile folder and, last, every profile.
+fn ide_exe() -> Option<PathBuf> {
+    let exe = Path::new("Prestige IDE").join("prestige-ide.exe");
+    let mut places: Vec<PathBuf> = Vec::new();
+    if let Some(d) = std::env::var_os("LOCALAPPDATA") {
+        places.push(PathBuf::from(d).join(&exe));
+    }
+    // The uninstall entry its installer writes: InstallLocation    REG_SZ    "C:\Users\…\AppData\Local\Prestige IDE"
+    if let Ok(o) = hidden(&mut Command::new("reg"))
+        .args(["query", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Prestige IDE", "/v", "InstallLocation"])
+        .output()
+    {
+        let out = String::from_utf8_lossy(&o.stdout);
+        if let Some(v) = out.lines().find_map(|l| l.split_once("REG_SZ").map(|x| x.1.trim().trim_matches('"').to_string())) {
+            places.push(PathBuf::from(v).join("prestige-ide.exe"));
+        }
+    }
+    if let Some(home) = std::env::var_os("USERPROFILE") {
+        places.push(PathBuf::from(home).join("AppData").join("Local").join(&exe));
+    }
+    if let Some(found) = places.into_iter().find(|p| p.exists()) {
+        return Some(found);
+    }
+    let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+    let mut all: Vec<PathBuf> = std::fs::read_dir(format!(r"{drive}\Users"))
+        .ok()?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path().join("AppData").join("Local").join(&exe))
+        .filter(|p| p.exists())
+        .collect();
+    // More than one profile with it: the most recently updated.
+    all.sort_by_key(|p| std::cmp::Reverse(std::fs::metadata(p).and_then(|m| m.modified()).ok()));
+    all.into_iter().next()
+}
+
 /// Opens Prestige IDE, or its download page when it isn't installed ("download").
 #[tauri::command]
 fn open_ide() -> Result<String, String> {
-    let exe = std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .map(|d| d.join("Prestige IDE").join("prestige-ide.exe"))
-        .filter(|p| p.exists());
-    match exe {
+    match ide_exe() {
         Some(exe) => Command::new(exe).spawn().map(|_| "opened".into()).map_err(|e| e.to_string()),
         None => hidden(&mut Command::new("explorer.exe"))
             .arg("https://github.com/Mr5elfDe5truct/prestige-ide/releases/latest")
@@ -615,5 +647,23 @@ mod tests {
         let s = snippet(&text, at, 60);
         assert!(s.contains("dragon") && s.starts_with('…') && s.ends_with('…'));
         assert_eq!(snippet("short dragon", 6, 140), "short dragon");
+    }
+}
+
+#[cfg(test)]
+mod ide_tests {
+    /// Run on a PC with Prestige IDE installed: finds it even without LOCALAPPDATA (as after an update's restart).
+    #[test]
+    #[ignore]
+    fn finds_the_ide_without_localappdata() {
+        let saved = std::env::var_os("LOCALAPPDATA");
+        std::env::remove_var("LOCALAPPDATA");
+        let found = super::ide_exe();
+        if let Some(v) = saved {
+            std::env::set_var("LOCALAPPDATA", v);
+        }
+        let found = found.expect("Prestige IDE not found");
+        assert!(found.ends_with(r"Prestige IDE\prestige-ide.exe"), "{}", found.display());
+        println!("found {}", found.display());
     }
 }
