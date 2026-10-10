@@ -37,6 +37,7 @@ export interface MusicSettings {
   key: string; // "C major", "A minor"…
   meter: string; // beats per bar: "4" (4/4), "3" (3/4), "6" (6/8), "2" (2/4)
   language: string; // the lyrics' language, as ACE-Step names it (en, es, ja…)
+  quality: "standard" | "high"; // ACE-Step 1.5 turbo, or the XL turbo (better sound, ~11 GB, slower)
   seed: number | null;
 }
 export interface GenSettings {
@@ -53,7 +54,7 @@ export const DEFAULTS: GenSettings = {
   video: { res: "768x512", seconds: 4, fps: 24, quality: "standard", seed: null },
   animate: { res: "auto", seconds: 5, fps: 16, quality: "standard", seed: null },
   long: { size: 640, frames: 49, shots: 4, quality: "standard", seed: null, high: null, low: null },
-  music: { seconds: 120, bpm: 120, key: "C major", meter: "4", language: "en", seed: null },
+  music: { seconds: 120, bpm: 120, key: "C major", meter: "4", language: "en", quality: "standard", seed: null },
 };
 
 export const ASPECTS: [Aspect, string][] = [
@@ -216,6 +217,7 @@ function load(): GenSettings {
       key: (v) => SONG_KEYS.includes(v),
       meter: (v) => SONG_METERS.some(([m]) => m === v),
       language: (v) => SONG_LANGUAGES.some(([c]) => c === v),
+      quality: (v) => v === "standard" || v === "high",
     }),
   };
 }

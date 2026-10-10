@@ -1068,3 +1068,5 @@ body[data-style="molded"] .sb-shot { border-radius: 16px; }
 .sheet.songedit select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font: 13px var(--body); padding: 8px 10px; text-transform: none; letter-spacing: 0; }
 .se-music label { flex: 1; min-width: 120px; }
 .sheet.songedit [hidden] { display: none !important; }
+.se-stems { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px 14px; margin-top: 8px; }
+.sheet .se-stems label.check { margin-top: 0; }

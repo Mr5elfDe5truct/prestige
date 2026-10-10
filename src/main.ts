@@ -48,7 +48,7 @@ import { bestFor, capsFor, chipsHtml, supportsTools } from "./caps";
 import { initCatalog, openCatalog, phoneCatalog } from "./catalog";
 import { checkForUpdates, initUpdates } from "./updates";
 import { GROUPS, describeCall, loadTools, runTool, toolContext, toolSpecs, type ToolDef, type ToolStep } from "./tools";
-import { errMsg, freeLlamaVram, nameFor, listModels, ping, streamChat, OLLAMA, LLAMA, type ChatMessage, type ModelInfo, type StreamStats } from "./backends";
+import { errMsg, freeLlamaVram, http, nameFor, listModels, ping, streamChat, OLLAMA, LLAMA, type ChatMessage, type ModelInfo, type StreamStats } from "./backends";
 import { addMemory, memoryContext, listMemories, rememberRequest, DEFAULT_OWUI, type MemoryConfig } from "./memory";
 import { addStache } from "./talk";
 import { applyCachedLook, applyLook, closeAppearance, initAppearance, openAppearance, type Look } from "./theme";
@@ -1371,12 +1371,21 @@ const lyricsMd = (lyrics: string) =>
 
 /** /song: the chat model writes the song (title, style, tempo, key, lyrics; songwriter.ts), then ACE-Step sings it. The
  *  song plays in the chat with its lyrics under it, and is saved with the other renders. */
-async function makeSong(text: string, request: string, hooks?: ReplyHooks) {
+async function makeSong(text: string, request: string, hooks?: ReplyHooks, images?: string[]) {
   if (!inTauri) {
     toast("Songs are made in the desktop app.");
     return hooks?.onDone?.(false);
   }
-  const model = current;
+  // A song about a picture needs a model that can see: Gemma 4, or another vision model, writes it.
+  let model = current;
+  if (images?.length && (!model || !VISION.test(model.id))) {
+    const want = models.find((m) => m.id === "gemma4:12b") ?? models.find((m) => VISION.test(m.id));
+    if (want) {
+      selectModel(want);
+      toast(`Switched to ${want.name} to look at the picture.`);
+      model = want;
+    } else toast("No model that can see pictures is installed, so the song is written from your words alone.", "warn");
+  }
   if (!model) {
     toast("No model is available to write the song. Start the services first.", "warn");
     return hooks?.onDone?.(false);
@@ -1384,7 +1393,7 @@ async function makeSong(text: string, request: string, hooks?: ReplyHooks) {
   if (chat.messages.length === 0) chat.title = text.replace(/\s+/g, " ").slice(0, 60);
   // The conversation so far, so "a song about that" knows what "that" is.
   const before = chat.messages.filter((m) => !m.error && !m.render).slice(-6);
-  chat.messages.push({ role: "user", content: text });
+  chat.messages.push({ role: "user", content: text, ...(images?.length ? { images } : {}) });
   renderChat();
   const label = await modelLabel("audio");
   const reply: StoredMessage = { role: "assistant", content: "", model: label };
@@ -1411,7 +1420,11 @@ async function makeSong(text: string, request: string, hooks?: ReplyHooks) {
   try {
     const context = before.length ? `Conversation so far:\n${before.map((m) => `${m.role}: ${m.content.slice(0, 800)}`).join("\n")}\n\nWrite this song: ` : "";
     progress(1, `${model.name} is writing the song…`);
-    const song = await writeSong(model, context + request, songSeconds(), busy.signal, (n) => progress(1, `${model.name} is writing the song… ${n} characters`));
+    const seeing = images?.length && VISION.test(model.id) ? images : undefined;
+    // ComfyUI can still hold its last render's model on the card; the writer reads the picture far faster without it
+    // (a song about a picture sat writing for minutes beside a stems job's model). Each song loads its models anyway.
+    if (seeing) await http("http://127.0.0.1:8188/free", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ unload_models: true, free_memory: true }) }).catch(() => {});
+    const song = await writeSong(model, context + request, songSeconds(), busy.signal, (n) => progress(1, `${model.name} is writing the song… ${n} characters`), seeing);
     // The lyrics show while ACE-Step sings them.
     reply.content = `**${song.title}**\n\n${song.lyrics ? lyricsMd(song.lyrics) : "*Instrumental*"}`;
     const lyr = document.createElement("div");
@@ -2106,7 +2119,15 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     opts.hooks?.onDone?.(false);
     return;
   }
-  if (songAsk) return makeSong(text, songAsk, opts.hooks);
+  if (songAsk) {
+    // "/song" with pictures attached: a song about them.
+    const pics = live ? undefined : opts.images?.length ? opts.images : attachments.length ? [...attachments] : undefined;
+    if (pics && !opts.images) {
+      attachments = [];
+      renderAttachments();
+    }
+    return makeSong(text, songAsk, opts.hooks, pics);
+  }
   // With pictures attached, /image or /video uses the first as a reference image (Live and the camera ask don't make media).
   // "Draw me a chart of…" or "make a snake game" is for the Canvas, unless it asks for a picture or a clip.
   const forCanvas = CANVAS_CMD.test(text) || (wantsCanvas(text) && !/\b(image|picture|photo|illustration|painting|wallpaper|video|clip)s?\b/i.test(text));
@@ -3153,6 +3174,17 @@ async function main() {
     },
     // Right-click a picture > Make it talk: in the voice of the character being talked to, or Prestige's.
     makeTalk: (path) => talkFromPicture(convertFileSrc(path), path, activeCharacter()?.voice),
+    // Right-click a picture → Make a song about it: in the chat, written by a model that can see it.
+    songFromPicture: async (path) => {
+      if (busy) return toast("Wait for the reply that's running (or stop it), then make the song.");
+      try {
+        const pic = await imageToBase64(await (await fetch(convertFileSrc(path))).blob());
+        go("chat");
+        makeSong("/song about this picture", "a song about this picture", undefined, [pic]);
+      } catch (e) {
+        toast(`Couldn't read the picture: ${errMsg(e)}`, "warn");
+      }
+    },
     // Studio's Storyboard mode: planned in the chat, where the Director's reply shows (the board opens over it).
     storyboard: (idea) => {
       if (!idea) return openStoryboard();

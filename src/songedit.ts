@@ -3,14 +3,36 @@
 //   Redo a part: drag over a stretch of the song and it's made again, the rest kept as it was. Change its lines in
 //     the lyrics to change the words, or leave them for a new take.
 //   Extend: carry on from a point (the end, or earlier to leave out an ending) with up to 4 minutes more.
-//   Cover: the same melody and structure in a new style, with the same or new lyrics.
+//   Cover: the same melody and structure in a new style, with the same or new lyrics. Covering a recording of just
+//     singing builds a band around it (Suno's "add instrumental").
+//   Stems: the vocals, drums, bass and other parts taken out of the song as files of their own, or an instrumental
+//     without the vocals (ACE-Step 1.5's base model, "extract").
 // It asks here and studio.ts renders it in the queue like any other song.
 import { audio } from "./speech";
 import { SONG_BPMS, SONG_KEYS, SONG_LANGUAGES, SONG_METERS } from "./gensettings";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
 
-export type EditTask = "repaint" | "extend" | "cover";
+export type EditTask = "repaint" | "extend" | "cover" | "stems";
+
+/** The parts Stems can take out (ACE-Step's track names), and "instrumental": everything but the vocals, mixed from
+ *  the drums, bass, guitar, keys and synth. */
+export const STEMS: [string, string][] = [
+  ["vocals", "Vocals"],
+  ["instrumental", "Instrumental (no vocals)"],
+  ["drums", "Drums"],
+  ["bass", "Bass"],
+  ["guitar", "Guitar"],
+  ["keyboard", "Keys / piano"],
+  ["synth", "Synth"],
+  ["strings", "Strings"],
+  ["backing_vocals", "Backing vocals"],
+  ["percussion", "Percussion"],
+  ["brass", "Brass"],
+  ["woodwinds", "Woodwinds"],
+];
+/** What "instrumental" is mixed from. */
+export const INSTRUMENTAL_PARTS = ["drums", "bass", "guitar", "keyboard", "synth"];
 
 /** A song's tempo, key, meter and language, as its workflow had them. */
 export interface SongMusic {
@@ -48,6 +70,8 @@ export interface SongEdit {
   seconds: number; // the new song's length
   source: number; // the original's length
   sourceLyrics: string; // the original's words
+  stems: string[]; // stems: the parts to take out
+  quality?: "standard" | "high"; // Settings' song quality (XL for High), set when it's queued
 }
 
 export const EXTEND_SECONDS = [15, 30, 45, 60, 90, 120, 180, 240];
@@ -57,6 +81,10 @@ export const EDIT_MAX_SECONDS = 480;
 /* An edit on an RTX 3060 12 GB (no language model, 8 steps): a 60 s song redone or covered in 20–26 s and extended to
  * 90 s in 26–30 s, with the models loading each time. */
 export const editSecs = (seconds: number) => 12 + 0.18 * seconds;
+/* Stems with the base model (32 steps with guidance) on an RTX 3060: each part of a 60 s song took 32–34 s, models
+ * loaded once per job. The instrumental is five parts mixed. */
+export const stemSecs = (seconds: number, stems: string[]) =>
+  10 + stems.reduce((n, s) => n + (s === "instrumental" ? INSTRUMENTAL_PARTS.length : 1), 0) * (4 + 0.45 * seconds);
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
@@ -102,6 +130,11 @@ export async function askSongEdit(src: SongSource, task: EditTask, toast: (m: st
   const meter = $("#se-meter") as HTMLSelectElement;
   const lang = $("#se-lang") as HTMLSelectElement;
   const go = $("#se-go") as HTMLButtonElement;
+  const stemBox = $("#se-stems");
+  if (!stemBox.childElementCount)
+    stemBox.innerHTML = STEMS.map(([v, l]) => `<label class="check"><input type="checkbox" value="${v}" ${v === "vocals" || v === "instrumental" ? "checked" : ""} />${l}</label>`).join("");
+  const stemPicks = () => [...stemBox.querySelectorAll<HTMLInputElement>("input:checked")].map((i) => i.value);
+  stemBox.onchange = () => update();
 
   $("#se-name").textContent = src.name;
   player.src = src.url;
@@ -185,17 +218,22 @@ export async function askSongEdit(src: SongSource, task: EditTask, toast: (m: st
     fromIn.value = from.toFixed(1);
     const seconds = mode === "extend" ? from + Number(addSel.value) : len;
     const over = seconds > EDIT_MAX_SECONDS;
-    go.disabled = over || (mode === "repaint" && sel.b - sel.a < 1) || !style.value.trim();
-    go.textContent = mode === "repaint" ? "Redo this part" : mode === "extend" ? "Extend the song" : "Make the cover";
+    go.disabled = over || (mode === "repaint" && sel.b - sel.a < 1) || (mode === "stems" ? !stemPicks().length : !style.value.trim());
+    go.textContent =
+      mode === "repaint" ? "Redo this part" : mode === "extend" ? "Extend the song" : mode === "cover" ? "Make the cover" : `Take out ${stemPicks().length === 1 ? "1 part" : `${stemPicks().length} parts`}`;
     $("#se-hint").textContent =
       mode === "repaint"
         ? `Drag over the part to redo (${fmt(sel.a)} to ${fmt(sel.b)}). Change its lines in the lyrics for new words, or leave them for a new take. The rest stays exactly as it is.`
         : mode === "extend"
           ? `Click where it should carry on from (${fmt(from)}${from < len - 0.5 ? `; the ${Math.round(len - from)} s after it are left out` : ", the end"}). The new part is sung from the lyrics below.`
-          : "The same melody and structure in the style you give, with the lyrics below.";
+          : mode === "cover"
+            ? "The same melody and structure in the style you give, with the lyrics below. A recording of just singing gets a band built around it."
+            : "Each part you tick becomes a file of its own next to the song, made by ACE-Step's base model listening to the whole song.";
     $("#se-est").textContent = over
       ? `That makes ${Math.round(seconds)} s; songs go up to ${EDIT_MAX_SECONDS / 60} minutes.`
-      : `Makes a new ${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, "0")} song next to the original, in about ${Math.round(editSecs(seconds))} s on an RTX 3060.`;
+      : mode === "stems"
+        ? `About ${Math.max(1, Math.round(stemSecs(len, stemPicks()) / 60))} min on an RTX 3060.`
+        : `Makes a new ${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, "0")} song next to the original, in about ${Math.round(editSecs(seconds))} s on an RTX 3060.`;
     draw();
   };
 
@@ -213,7 +251,7 @@ export async function askSongEdit(src: SongSource, task: EditTask, toast: (m: st
   const timeAt = (e: PointerEvent) => clamp(((e.clientX - canvas.getBoundingClientRect().left) / canvas.clientWidth) * len, 0, len);
   canvas.onpointerdown = (e) => {
     const t0 = Math.round(timeAt(e) * 10) / 10;
-    if (mode === "cover") {
+    if (mode === "cover" || mode === "stems") {
       player.currentTime = t0;
       return draw();
     }
@@ -301,5 +339,6 @@ export async function askSongEdit(src: SongSource, task: EditTask, toast: (m: st
     seconds: mode === "extend" ? from + Number(addSel.value) : len,
     source: len,
     sourceLyrics: src.lyrics,
+    stems: mode === "stems" ? stemPicks() : [],
   };
 }

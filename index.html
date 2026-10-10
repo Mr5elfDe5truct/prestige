@@ -605,7 +605,7 @@
     <dialog class="sheet songedit" id="songedit">
       <form method="dialog">
         <h2>Edit song <span class="credit" id="se-name"></span></h2>
-        <span class="seg se-tabs" id="se-tabs"><button type="button" data-task="repaint">Redo a part</button><button type="button" data-task="extend">Extend</button><button type="button" data-task="cover">Cover</button></span>
+        <span class="seg se-tabs" id="se-tabs"><button type="button" data-task="repaint">Redo a part</button><button type="button" data-task="extend">Extend</button><button type="button" data-task="cover">Cover</button><button type="button" data-task="stems">Stems</button></span>
         <canvas id="se-wave" class="se-wave" title="Drag over a part to redo, or click where an extension carries on from"></canvas>
         <audio id="se-audio" preload="auto"></audio>
         <div class="se-row">
@@ -617,15 +617,16 @@
           <label data-for="cover" class="se-strength">Follow the original<input id="se-strength" type="range" min="0.3" max="1" step="0.05" title="Lower lets the new style change more of the melody" /></label>
         </div>
         <p class="muted" id="se-hint"></p>
-        <label>Style<input id="se-style" type="text" autocomplete="off" placeholder="e.g. acoustic folk, warm female vocals, fingerpicked guitar" /></label>
-        <label id="se-lyrics-label">Lyrics<textarea id="se-lyrics" rows="7"></textarea></label>
-        <div class="se-row se-music">
+        <div class="se-stems" data-for="stems" id="se-stems"></div>
+        <label data-for="repaint extend cover">Style<input id="se-style" type="text" autocomplete="off" placeholder="e.g. acoustic folk, warm female vocals, fingerpicked guitar" /></label>
+        <label id="se-lyrics-label" data-for="repaint extend cover">Lyrics<textarea id="se-lyrics" rows="7"></textarea></label>
+        <div class="se-row se-music" data-for="repaint extend cover">
           <label>Tempo<select id="se-bpm"></select></label>
           <label>Key<select id="se-key"></select></label>
           <label>Meter<select id="se-meter"></select></label>
           <label>Language<select id="se-lang"></select></label>
         </div>
-        <p class="muted" id="se-music-note"></p>
+        <p class="muted" id="se-music-note" data-for="repaint extend cover"></p>
         <p class="muted" id="se-est"></p>
         <div class="acts">
           <button class="btn" value="cancel">Cancel</button>
