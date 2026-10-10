@@ -104,7 +104,7 @@ export const WAN_SECONDS = [2, 3, 4, 5, 6, 8];
 export const LTX_FPS = [24, 25, 30];
 
 // ACE-Step 1.5 songs: length, tempo, key, meter and the lyrics' language (the codes its text encoder takes).
-export const SONG_SECONDS = [30, 60, 90, 120, 150, 180, 240];
+export const SONG_SECONDS = [30, 60, 90, 120, 150, 180, 240, 300, 360, 480];
 export const SONG_BPMS = [70, 80, 90, 100, 110, 120, 128, 140, 160, 174];
 export const SONG_KEYS = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"].flatMap((r) => [`${r} major`, `${r} minor`]);
 export const SONG_METERS: [string, string][] = [

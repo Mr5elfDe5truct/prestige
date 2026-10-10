@@ -1055,3 +1055,16 @@ body.cu-on { overflow: hidden; }
 body[data-style="molded"] .sb-shot { border-radius: 16px; }
 @media (max-width: 760px) { .sb-top { grid-template-columns: 1fr; } }
 .director-steps li.done::after { content: " ✓"; color: var(--ok); }
+
+/* The song editor: a waveform to pick the part to redo or where to carry on from, and the song's words and style. */
+.sheet.songedit { width: min(720px, calc(100vw - 32px)); }
+.se-tabs { margin: 4px 0 12px; }
+.se-tabs button { font-size: 12.5px; padding: 5px 14px; }
+.se-wave { display: block; width: 100%; height: 96px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); cursor: crosshair; touch-action: none; }
+.se-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-top: 10px; }
+.se-row label { margin-top: 0; min-width: 110px; }
+.se-row label.se-strength { flex: 1; min-width: 200px; }
+.se-row > .btn { align-self: flex-end; }
+.sheet.songedit select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font: 13px var(--body); padding: 8px 10px; text-transform: none; letter-spacing: 0; }
+.se-music label { flex: 1; min-width: 120px; }
+.sheet.songedit [hidden] { display: none !important; }
