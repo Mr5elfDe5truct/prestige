@@ -200,6 +200,10 @@ Mic or camera blocked? Check **Windows Settings → Privacy & security → Micro
 Prestige is the desktop app for **[Custom AI Workstation](https://github.com/Mr5elfDe5truct/custom-ai-workstation)**:
 one folder, one script, one 12 GB GPU. The workstation holds the services, models and tools; Prestige is the way to use them.
 
+For code there's **[Prestige IDE](https://github.com/Mr5elfDe5truct/prestige-ide)**, an agent that builds, fixes and explains
+code in your projects on the same models. The code button in the top bar opens it (or its download page), and closing
+Prestige leaves the AI stack running while Prestige IDE is open.
+
 ## 💖 Support
 
 Prestige is free and always will be. If it saves you a subscription, you can help keep it going on
