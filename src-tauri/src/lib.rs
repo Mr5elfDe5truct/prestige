@@ -254,8 +254,38 @@ fn stop_on_close(app: &AppHandle) {
     if settings["keepRunning"].as_bool().unwrap_or(false) {
         return;
     }
+    // Prestige IDE codes on the same models and never stops the stack itself, so leave it running for it.
+    if ide_running() {
+        return;
+    }
     let root = settings["stackRoot"].as_str().map(String::from);
     let _ = run_script(&stack_root(root), "stop-all.ps1", &[]);
+}
+
+/// Prestige IDE (github.com/Mr5elfDe5truct/prestige-ide) is open.
+fn ide_running() -> bool {
+    hidden(&mut Command::new("tasklist"))
+        .args(["/FI", "IMAGENAME eq prestige-ide.exe", "/NH"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_ascii_lowercase().contains("prestige-ide.exe"))
+        .unwrap_or(false)
+}
+
+/// Opens Prestige IDE, or its download page when it isn't installed ("download").
+#[tauri::command]
+fn open_ide() -> Result<String, String> {
+    let exe = std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .map(|d| d.join("Prestige IDE").join("prestige-ide.exe"))
+        .filter(|p| p.exists());
+    match exe {
+        Some(exe) => Command::new(exe).spawn().map(|_| "opened".into()).map_err(|e| e.to_string()),
+        None => hidden(&mut Command::new("explorer.exe"))
+            .arg("https://github.com/Mr5elfDe5truct/prestige-ide/releases/latest")
+            .spawn()
+            .map(|_| "download".into())
+            .map_err(|e| e.to_string()),
+    }
 }
 
 // ---------- local storage in the app data folder ----------
@@ -493,6 +523,7 @@ pub fn run() {
             stack_info,
             start_services,
             set_updating,
+            open_ide,
             stop_services,
             list_chats,
             load_chat,

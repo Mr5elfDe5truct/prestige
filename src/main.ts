@@ -3108,6 +3108,14 @@ async function main() {
     onChange: () => renderChatFiles(),
   });
   $("#kb-btn").addEventListener("click", () => openKnowledge());
+  $("#ide-btn").addEventListener("click", async () => {
+    try {
+      const r = await invoke<string>("open_ide");
+      toast(r === "download" ? "Prestige IDE isn't installed yet: its download page is open" : "Opening Prestige IDE");
+    } catch (e) {
+      toast(`Couldn't open Prestige IDE: ${errMsg(e)}`, "warn");
+    }
+  });
   if (inTauri)
     initMissions({
       toast,
