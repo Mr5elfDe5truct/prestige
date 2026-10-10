@@ -62,14 +62,27 @@ function normKey(k: unknown): string | undefined {
   return SONG_KEYS.includes(key) ? key : undefined;
 }
 
-/** Writes a song for the request with the chat model (no thinking, so it's quick). */
-export async function writeSong(model: ModelInfo, request: string, seconds: number, signal: AbortSignal, onText?: (chars: number) => void): Promise<Song> {
+/** Writes a song for the request with the chat model (no thinking, so it's quick). With pictures (a vision model), the
+ *  song is about what's in them: its mood, colours and story set the style and the words. */
+export async function writeSong(
+  model: ModelInfo,
+  request: string,
+  seconds: number,
+  signal: AbortSignal,
+  onText?: (chars: number) => void,
+  images?: string[],
+): Promise<Song> {
+  const pictured = images?.length
+    ? `The song is about the attached picture${images.length > 1 ? "s" : ""}: let what's in ${images.length > 1 ? "them" : "it"} (the scene, the mood, the colours, the story it suggests) shape the style and the lyrics.
+
+${request}`
+    : request;
   let out = "";
   await streamChat(
     model,
     [
       { role: "system", content: SYSTEM(seconds) },
-      { role: "user", content: request },
+      { role: "user", content: pictured, ...(images?.length ? { images } : {}) },
     ],
     {
       onToken: (t) => {

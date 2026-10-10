@@ -52,6 +52,7 @@ import { characterById, characters, faceBlob, onCharactersChange } from "./chara
 import { initInpaint, openInpaint, type SelectQuery } from "./inpaint";
 import { initLaser, openLaser } from "./laser";
 import { attachZoom, type Zoom } from "./zoom";
+import { INSTRUMENTAL_PARTS, STEMS, askSongEdit, editSecs, stemSecs, type EditTask, type SongEdit, type SongMusic, type SongSource } from "./songedit";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
 const $$ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => Array.from(r.querySelectorAll(s)) as T[];
@@ -71,6 +72,7 @@ interface Asset {
   seed?: number | null;
   lyrics?: string | null; // a song's
   duration?: number | null; // a song's length in seconds
+  music?: SongMusic | null; // a song's tempo, key, meter and language
 }
 
 type GenMode =
@@ -85,6 +87,7 @@ type GenMode =
   | "reffast"
   | "refvideo"
   | "song"
+  | "songedit"
   | "model3d"
   | "talk"
   | "select"
@@ -99,7 +102,7 @@ type GenMode =
 // InfiniteTalk making a picture speak a voice recording ("talk"), SAM 3.1 selecting something in a picture ("select", not
 // queued), a picture cut out onto transparent ("cutout"), or SAM 3.1 tracking a subject through a video ("vidcut").
 // SeedVR2 sharpening a picture or a video to 1080p or 4K ("upscale").
-type Family = "image" | "edit" | "ltx" | "ltx1" | "wan" | "svi" | "song" | "model3d" | "talk" | "select" | "cutout" | "vidcut" | "upscale";
+type Family = "image" | "edit" | "ltx" | "ltx1" | "wan" | "svi" | "song" | "songedit" | "model3d" | "talk" | "select" | "cutout" | "vidcut" | "upscale";
 
 interface Mode {
   file: string;
@@ -299,6 +302,21 @@ const MODES: Record<GenMode, Mode> = {
     latent: "6",
     secs: 10,
   },
+  // The song editor (songedit.ts): ACE-Step 1.5 turbo redoes a part of a song, extends it or covers it, through the
+  // Workstation's workstation_music node. The song goes into LoadAudio (node 20); the job, its times and the music
+  // settings are set per edit (songEditGraph). secs is a 60 s song's (editSecs has the rest).
+  songedit: {
+    file: "ace-step-15-edit.api.json",
+    label: "ACE-Step 1.5",
+    family: "songedit",
+    promptNode: "4",
+    promptKey: "tags",
+    seed: ["7", "seed"],
+    secs: 23,
+    note: "song edit",
+    imageNode: "20",
+    imageKey: "audio",
+  },
   // Picture to 3D: Pixal3D (int8) through ComfyUI's native nodes, the picture's background removed by BiRefNet and its
   // field of view from MoGe; a textured .glb comes out (workflows\pixal3d-image-to-3d.api.json).
   model3d: {
@@ -388,13 +406,29 @@ const MODES: Record<GenMode, Mode> = {
 /* ACE-Step 1.5 turbo on an RTX 3060 12 GB (ComfyUI's log and nvidia-smi): its 1.7B language model writes the audio codes
  * (~60 tokens/s), then 8 diffusion steps and a tiled VAE decode. Each song loads the models fresh (~5.2 GB peak at any
  * length): 30 s of music took 18 s, 60 s 26 s, 120 s 44 s, 180 s 62 s, 240 s 53 s. On a 6 GB RTX 2060 the language
- * model ran at 1.7 s a token (a 60 s song took 9 min), so songs stay on ComfyUI's main card. */
+ * model ran at 1.7 s a token (a 60 s song took 9 min), so songs stay on ComfyUI's main card. 8 minutes took 172 s
+ * and peaked at 5.8 GB. */
 const SONG_FIXED_SECS = 10;
 const SONG_SECS_PER_SECOND = 0.3;
-const SONG_PEAK_GB = 5.3;
+const songPeakGB = (seconds: number) => (seconds > 240 ? 5.8 : 5.3);
+/* ACE-Step 1.5 XL turbo (4B, the music-xl pack), Settings' High quality: on the RTX 3060 a 60 s song took 128 s with
+ * the 10 GB model loading, 4 min took 188 s, and VRAM peaked at 11.1 GB (ComfyUI streams what doesn't fit). */
+const XL_FIXED_SECS = 105;
+const XL_SECS_PER_SECOND = 0.35;
+const XL_PEAK_GB = 11.1;
+/** The ACE-Step models: Standard (turbo), High (XL turbo), and the base model that takes stems out. */
+const ACE_MODELS = {
+  standard: "acestep_v1.5_turbo.safetensors",
+  high: "acestep_v1.5_xl_turbo_bf16.safetensors",
+  stems: "acestep_v1.5_base.safetensors",
+};
+const ACE_PACK: Record<string, string> = { [ACE_MODELS.high]: "music-xl", [ACE_MODELS.stems]: "music" };
 /** What a song's progress line says for each step. */
 const SONG_STEPS: Record<string, string> = {
   "TextEncodeAceStepAudio1.5": "Composing the melody and vocals",
+  TextEncodeAceStep15Task: "Reading the style and lyrics",
+  VAEEncodeAudio: "Reading the song",
+  AceStep15SongEdit: "Lining up the edit",
   KSampler: "Rendering the audio",
   VAEDecodeAudioTiled: "Decoding the audio",
   SaveAudioMP3: "Saving the MP3",
@@ -654,16 +688,20 @@ function plan(gm: GenMode, src: Source | null = srcAsset, o?: Override, song?: P
   const m = modeOf(gm);
   let p: Omit<Plan, "warn">;
   // Picture to 3D: one model per picture; its time and VRAM were measured (see MODES.model3d).
-  if (m.family === "model3d" || m.family === "select" || m.family === "cutout" || m.family === "upscale") return { w: 0, h: 0, count: 1, load: 0, secs: m.secs, warn: "" };
+  if (m.family === "model3d" || m.family === "select" || m.family === "cutout" || m.family === "upscale" || m.family === "songedit") return { w: 0, h: 0, count: 1, load: 0, secs: m.secs, warn: "" };
   if (m.family === "vidcut") return { w: 0, h: 0, count: 1, load: 0, secs: m.secs * 8, warn: "" }; // per second of video (videoCutout)
   if (m.family === "song") {
     // Measured (see SONG_FIXED_SECS): the same ~5.3 GB at every length, so only a small card gets a warning.
-    const s = { ...settings().music, ...song };
+    // A songwriter's pick that's missing (undefined) keeps the saved setting rather than blanking it.
+    const s = { ...settings().music, ...Object.fromEntries(Object.entries(song ?? {}).filter(([, v]) => v != null)) } as MusicSettings;
     const { main } = comfyCards();
     const mainGB = main ? main.mem_total / 1024 : vramGB("comfyui");
     const where = main ? `the ${shortName(main)}'s ${Math.round(mainGB)} GB` : cardsText("comfyui");
-    const warn = mainGB < SONG_PEAK_GB + 0.7 ? `ACE-Step peaks at about ${SONG_PEAK_GB} GB, more than ${where} can hold: it will run partly from system RAM, slowly.` : "";
-    return { w: 0, h: 0, count: 1, seconds: s.seconds, song: s, load: 0, secs: SONG_FIXED_SECS + SONG_SECS_PER_SECOND * s.seconds, warn };
+    const high = s.quality === "high";
+    const peak = high ? XL_PEAK_GB : songPeakGB(s.seconds);
+    const warn = mainGB < peak + 0.7 ? `ACE-Step${high ? " XL" : ""} peaks at about ${peak} GB, more than ${where} can hold: it will run partly from system RAM, slowly.` : "";
+    const secs = high ? XL_FIXED_SECS + XL_SECS_PER_SECOND * s.seconds : SONG_FIXED_SECS + SONG_SECS_PER_SECOND * s.seconds;
+    return { w: 0, h: 0, count: 1, seconds: s.seconds, song: s, load: 0, secs, warn };
   }
   if (m.family === "image" || m.family === "edit") {
     const s = settings().image;
@@ -821,6 +859,7 @@ function apply(m: Mode, g: any, p: Plan, seed: number) {
       const s = p.song!;
       set(g, m.promptNode, { seed, duration: s.seconds, bpm: s.bpm, keyscale: s.key, timesignature: s.meter, language: s.language });
       set(g, m.latent!, { seconds: s.seconds });
+      if (s.quality === "high") set(g, "1", { unet_name: ACE_MODELS.high });
       break;
     }
   }
@@ -857,6 +896,8 @@ interface Deps {
   makeTalk: (path: string) => void;
   /** Storyboard mode: plans a music video from the idea and opens it as a storyboard; with no idea, opens the last one. */
   storyboard: (idea: string) => void;
+  /** "Make a song about it": chat's /song with this picture, written by a model that can see it. */
+  songFromPicture: (path: string) => void;
   /** Whether there's a storyboard to open again. */
   hasStoryboard: () => boolean;
 }
@@ -1165,6 +1206,17 @@ function promptHint(gm: GenMode) {
 // ---------- song lyrics ----------
 /** Music mode's "Write lyrics": the chat model writes lyrics for the style in the prompt box (click again to stop). */
 function initSongWriter() {
+  // A song from the PC (a demo, a voice memo, a hummed tune) opens in the song editor, on Cover.
+  const own = $<HTMLInputElement>("#song-own-file");
+  $("#song-own").onclick = () => {
+    if (!workflows.songedit) return deps.toast(`Editing songs needs workflows\\${MODES.songedit.file} (update the Workstation).`, "warn");
+    own.value = "";
+    own.click();
+  };
+  own.onchange = () => {
+    const f = own.files?.[0];
+    if (f) editSong(f, "cover");
+  };
   const btn = $<HTMLButtonElement>("#song-write");
   const box = $<HTMLTextAreaElement>("#song-lyrics-text");
   let writing: AbortController | null = null;
@@ -1447,6 +1499,7 @@ function settingsFields(gm: GenMode, src: Source | null = srcAsset): Field[] {
     field("Key", "key", SONG_KEYS.map((k) => [k, k]), v.key);
     field("Meter", "meter", SONG_METERS, v.meter);
     field("Lyrics language", "language", SONG_LANGUAGES, v.language, "Chat's /song picks the tempo, key and language for each song");
+    field("Quality", "quality", [["standard", "Standard · ACE-Step 1.5 turbo"], ["high", "High · ACE-Step 1.5 XL, ~3 min"]], v.quality, "High needs the Workstation's music-xl pack and most of a 12 GB card; the song editor uses it too");
   }
   const quality = "quality" in s ? s.quality : "standard";
   if (m.family === "ltx") field("Quality", "quality", [["draft", "Draft · half size, one pass"], ["standard", "Standard · upscaled 2×"]], quality === "draft" ? "draft" : "standard");
@@ -1870,6 +1923,8 @@ function openLightbox(a: Asset) {
     $("#lb-upscale").textContent = up.label;
     $("#lb-upscale").onclick = up.run;
   }
+  ($("#lb-songedit") as HTMLButtonElement).hidden = !songEditItems(a).length;
+  $("#lb-songedit").onclick = () => editSong(a, "repaint");
   ($("#lb-laser") as HTMLButtonElement).hidden = a.kind !== "image";
   $("#lb-laser").onclick = () => laser(a);
   ($("#lb-reuse") as HTMLButtonElement).disabled = !a.prompt;
@@ -1972,6 +2027,120 @@ async function upscale(a: Asset, size: UpscaleSize) {
     if (out[0]) openRender(out[0].path);
   } catch (e) {
     if (errMsg(e) !== "stopped") deps.toast(`Couldn't upscale it: ${errMsg(e)}`, "warn");
+  }
+}
+
+/** The song editor's items for a song: redo a part, extend it, or cover it in a new style. */
+function songEditItems(a: Asset): MenuItem[] {
+  if (a.kind !== "audio" || !workflows.songedit) return [];
+  return [
+    { label: "Redo a part…", run: () => editSong(a, "repaint"), key: "new words or a new take" },
+    { label: "Extend…", run: () => editSong(a, "extend"), key: "up to 4 min more" },
+    { label: "Cover in a new style…", run: () => editSong(a, "cover") },
+    { label: "Stems…", run: () => editSong(a, "stems"), key: "vocals, instrumental, drums…" },
+  ];
+}
+
+/** Opens the song editor on a gallery song or one from the PC, then renders the edit in the queue. The new song goes
+ *  into the gallery next to the original and opens when it's done. */
+async function editSong(a: Asset | File, task: EditTask) {
+  closeLightbox();
+  if (!workflows.songedit) return deps.toast(`Editing songs needs workflows\\${MODES.songedit.file} (update the Workstation).`, "warn");
+  const file = a instanceof File ? a : null;
+  const asset = file ? null : (a as Asset);
+  const src: SongSource = file
+    ? { name: file.name, url: URL.createObjectURL(file), blob: file, style: "", lyrics: "" }
+    : {
+        name: asset!.name,
+        url: convertFileSrc(asset!.path),
+        path: asset!.path,
+        style: asset!.prompt ?? "",
+        lyrics: isInstrumental(asset!.lyrics) ? "" : (asset!.lyrics ?? ""),
+        music: asset!.music,
+      };
+  try {
+    const e = await askSongEdit(src, task, deps.toast);
+    if (!e) return;
+    e.quality = settings().music.quality;
+    const what = { repaint: "Redoing the part", extend: "Extending the song", cover: "Making the cover", stems: "Taking out the stems" }[e.task];
+    const secs = e.task === "stems" ? stemSecs(e.source, e.stems) : e.quality === "high" ? XL_FIXED_SECS + XL_SECS_PER_SECOND * e.seconds : editSecs(e.seconds);
+    deps.toast(`${what}: about ${aboutTime(secs)}. ${e.task === "stems" ? "The first opens" : "It opens"} when it's done.`);
+    const title = `${{ repaint: "Redo", extend: "Extend", cover: "Cover of", stems: "Stems of" }[e.task]} ${src.name}`;
+    const out = await run("songedit", e.style, asset, { edit: e, audio: file ?? undefined }, undefined, { from: "Song editor", title });
+    if (out[0]) openRender(out[0].path);
+  } catch (err) {
+    if (errMsg(err) !== "stopped") deps.toast(`Couldn't edit the song: ${errMsg(err)}`, "warn");
+  } finally {
+    if (file) URL.revokeObjectURL(src.url);
+  }
+}
+
+/** The song editor's job in the edit workflow: what's done where, and the music settings the new song keeps. */
+function songEditGraph(g: any, e: SongEdit) {
+  if (e.task === "stems") return stemsGraph(g, e);
+  if (e.quality === "high") g["1"].inputs.unet_name = ACE_MODELS.high;
+  const lyrics = isInstrumental(e.lyrics) ? INSTRUMENTAL : e.lyrics;
+  Object.assign(g["4"].inputs, {
+    task: e.task,
+    lyrics,
+    bpm: e.bpm,
+    duration: e.seconds,
+    timesignature: e.meter,
+    language: e.language,
+    keyscale: e.key,
+  });
+  Object.assign(g["22"].inputs, {
+    task: e.task,
+    start: e.start,
+    end: e.end,
+    extend_before: 0,
+    extend_after: e.task === "extend" ? e.add : 0,
+    // Carrying on from the very end keeps it all (0); from earlier leaves out what comes after.
+    keep_until: e.task === "extend" && e.keepUntil < e.source - 0.05 ? e.keepUntil : 0,
+    strength: e.strength,
+    // An extension has nothing of its own to blend into; a redone part blends over 0.4 s.
+    crossfade: e.task === "extend" ? 0 : 0.4,
+    // The gallery shows the whole song's words: an extension's are the original's then the new part's.
+    song_lyrics: e.task === "extend" ? [e.sourceLyrics, e.lyrics].filter((x) => x.trim()).join("\n\n") || lyrics : lyrics,
+  });
+  g["10"].inputs.filename_prefix = `ace-step-${e.task === "repaint" ? "redo" : e.task}`;
+}
+
+/** Stems: ACE-Step's base model listens to the whole song and makes one part of it at a time ("extract"), 32 steps
+ *  with guidance, each saved as its own MP3. It's told the song's style, and the vocals its words: with them a vocal
+ *  stem came out with the right words and half the drum bleed (percussive/tonal 0.37 against 0.72 without). The instrumental is the drums, bass, guitar, keys and synth mixed.
+ *  (Measured on a 60 s song: the vocal stem had the words and 38% silence between lines, the bass 59% of its
+ *  energy under 150 Hz, the drums twice as much percussive as tonal energy, and the instrumental mix no words and
+ *  the original's chords: chroma similarity 0.94.) */
+function stemsGraph(g: any, e: SongEdit) {
+  const enc = g["4"], edit = g["22"], ks = g["7"], dec = g["9"], save = g["10"];
+  for (const id of ["4", "5", "22", "7", "9", "10"]) delete g[id];
+  g["1"].inputs.unet_name = ACE_MODELS.stems;
+  const seed = ks.inputs.seed;
+  const part = (track: string, i: number) => {
+    const n = `s${i}`;
+    g[`${n}e`] = { class_type: enc.class_type, inputs: { ...enc.inputs, task: "extract", track, tags: e.style, lyrics: /vocals/.test(track) ? e.sourceLyrics : "", bpm: e.bpm, keyscale: e.key, timesignature: e.meter, language: e.language, duration: e.source } };
+    g[`${n}z`] = { class_type: "ConditioningZeroOut", inputs: { conditioning: [`${n}e`, 0] } };
+    g[`${n}m`] = { class_type: edit.class_type, inputs: { ...edit.inputs, task: "extract", song_lyrics: track === "vocals" ? e.sourceLyrics : "" } };
+    g[`${n}k`] = { class_type: ks.class_type, inputs: { ...ks.inputs, model: [`${n}m`, 0], positive: [`${n}e`, 0], negative: [`${n}z`, 0], latent_image: [`${n}m`, 1], seed: seed + i, steps: 32, cfg: 7 } };
+    g[`${n}d`] = { class_type: dec.class_type, inputs: { ...dec.inputs, samples: [`${n}k`, 0] } };
+    return `${n}d`;
+  };
+  let i = 0;
+  for (const stem of e.stems) {
+    let out: string;
+    if (stem === "instrumental") {
+      const parts = INSTRUMENTAL_PARTS.map((t) => part(t, i++));
+      out = parts[0];
+      parts.slice(1).forEach((p, k) => {
+        g[`mix${k}`] = { class_type: "AudioMerge", inputs: { audio1: [out, 0], audio2: [p, 0], merge_method: "add" } };
+        out = `mix${k}`;
+      });
+      // Five parts added together peaked at 0.95 of full scale; 2 dB down leaves room so the MP3 doesn't clip.
+      g["mixv"] = { class_type: "AudioAdjustVolume", inputs: { audio: [out, 0], volume: -2 } };
+      out = "mixv";
+    } else out = part(stem, i++);
+    g[`save-${stem}`] = { class_type: save.class_type, inputs: { ...save.inputs, audio: [out, 0], filename_prefix: `stem-${stem.replace("_", "-")}` } };
   }
 }
 
@@ -2249,10 +2418,12 @@ function showMenu(e: MouseEvent, a: Asset) {
     ...(image && workflows.cutout ? [{ label: "Remove background", run: () => removeBackground(a), key: "transparent PNG" }] : []),
     ...(a.kind === "video" && workflows.vidcut ? [{ label: "Cut out a subject…", run: () => videoCutout(a), key: "green screen" }] : []),
     ...upscaleItems(a),
+    ...songEditItems(a),
     ...(image && (workflows.animate || workflows.long) ? [{ label: "Animate (image → video)…", run: () => startFrom(a, "video") }] : []),
     ...(image && (workflows.ref || workflows.reffast) ? [{ label: "Use as reference image", run: () => useAsReference(a) }] : []),
     ...(image && workflows.model3d ? [{ label: "Make a 3D model", run: () => makeModel(a), key: "Pixal3D" }] : []),
     ...(image && workflows.talk ? [{ label: "Make it talk…", run: () => deps.makeTalk(a.path), key: "InfiniteTalk" }] : []),
+    ...(image && workflows.song ? [{ label: "Make a song about it", run: () => deps.songFromPicture(a.path), key: "in chat" }] : []),
     ...(image ? [{ label: "Make a laser file…", run: () => laser(a), key: "engrave or cut" }] : []),
     ...(a.prompt ? [{ label: a.kind === "audio" ? "Reuse style and lyrics" : "Reuse prompt", run: () => reusePrompt(a) }] : []),
     ...(a.seed != null ? [{ label: "Reuse seed", run: () => reuseSeed(a), key: String(a.seed) }] : []),
@@ -2401,6 +2572,8 @@ interface QueueOpts {
   talk?: { audio: Blob; seconds: number }; // a talking video's voice recording and its length
   video?: Partial<VideoSettings>; // a video's length, size or quality over the saved settings (a Director shot)
   upscale?: UpscaleSize; // an upscale's shorter side
+  edit?: SongEdit; // the song editor's job
+  audio?: Blob; // a song from the PC to edit (a gallery song goes as the source's path)
 }
 
 /** ACE-Step's way of asking for no vocals. */
@@ -2467,7 +2640,7 @@ let current: QJob | null = null;
 let jobIds = 1;
 
 /** Renders whose workflow has no Studio settings (and so no seed setting of their own). */
-const NO_SETTINGS: Family[] = ["talk", "select", "cutout", "vidcut", "upscale"];
+const NO_SETTINGS: Family[] = ["talk", "select", "cutout", "vidcut", "upscale", "songedit"];
 
 /** Builds a render's workflow now, with the current settings and a fresh seed (it may run much later). */
 function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpts) {
@@ -2481,6 +2654,10 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
   const p = m.family === "talk" ? talkPlan(src, opts.talk?.seconds ?? 0) : plan(gm, src, opts.override, opts.song, opts.video);
   if (m.family === "svi") shotPrompts(prompt, p.shots!).forEach((t, i) => (graph[SVI.shots[i].prompt].inputs.text = t));
   if (m.family === "song") graph[m.promptNode].inputs.lyrics = isInstrumental(opts.lyrics) ? INSTRUMENTAL : opts.lyrics!.trim();
+  if (m.family === "songedit") {
+    if (!opts.edit) throw new Error("nothing to edit");
+    songEditGraph(graph, opts.edit);
+  }
   apply(m, graph, p, seed);
   if (gm === "inpaint") {
     if (!opts.mask) throw new Error("nothing is painted");
@@ -2502,14 +2679,14 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
   const nodes: Record<string, string> = {};
   for (const [id, n] of Object.entries<any>(graph))
     nodes[id] =
-      (m.family === "song" && SONG_STEPS[n.class_type]) ||
+      ((m.family === "song" || m.family === "songedit") && SONG_STEPS[n.class_type]) ||
       (m.family === "model3d" && MODEL3D_STEPS[n.class_type]) ||
       (m.family === "talk" && TALK_STEPS[n.class_type]) ||
       ((m.family === "cutout" || m.family === "vidcut") && CUT_STEPS[n.class_type]) ||
       (m.family === "upscale" && UPSCALE_STEPS[n.class_type]) ||
       n.class_type;
   if (m.family === "talk") talkLabels(nodes, p.shots!);
-  return { graph, nodes, seed, count: p.count, label: modeOf(gm).label, audio: opts.talk?.audio };
+  return { graph, nodes, seed, count: p.count, label: modeOf(gm).label, audio: opts.talk?.audio ?? opts.audio };
 }
 
 /** Adds a render to the queue (throws when its workflow is missing). */
@@ -2682,6 +2859,17 @@ async function uploadAudio(audio: Blob): Promise<string> {
   return invoke<string>("comfy_upload_bytes", bytes, { headers: { "x-name": `prestige-voice-${hex}.${ext}` } });
 }
 
+/** A song's ACE-Step model must be in ComfyUI's model folders; say which Workstation pack brings it if it isn't
+ *  (the XL for High quality, the base model for stems). */
+async function checkAceModel(graph: any) {
+  const want = graph["1"]?.inputs?.unet_name as string | undefined;
+  if (!want || !ACE_PACK[want]) return;
+  const r = await http(`${COMFY}/object_info/UNETLoader`).catch(() => null);
+  const names: string[] = (await r?.json().catch(() => null))?.UNETLoader?.input?.required?.unet_name?.[0] ?? [];
+  if (names.length && !names.includes(want))
+    throw new Error(`${want} isn't installed: add the Workstation's ${ACE_PACK[want]} pack (install.ps1)${want === ACE_MODELS.high ? ", or set Quality to Standard in the song settings" : ""}`);
+}
+
 /** Sends a prepared render to ComfyUI. Throws if it couldn't be queued; progress then arrives by websocket. */
 async function submit(j: QJob) {
   const { gm, graph, nodes, seed, count, prompt, src } = j;
@@ -2699,9 +2887,11 @@ async function submit(j: QJob) {
       graph[m.imageNode].inputs[m.imageKey ?? "image"] = "path" in src ? await invoke<string>("comfy_upload", { path: src.path }) : await uploadReference(src);
     }
     if (j.audio) {
-      setJob(1, "Uploading the voice to ComfyUI…");
-      graph[TALK.audio].inputs.audio = await uploadAudio(j.audio);
+      const song = m.family === "songedit";
+      setJob(1, song ? "Uploading the song to ComfyUI…" : "Uploading the voice to ComfyUI…");
+      graph[song ? m.imageNode! : TALK.audio].inputs.audio = await uploadAudio(j.audio);
     }
+    if (m.family === "song" || m.family === "songedit") await checkAceModel(graph);
     if (j.cancelled) throw new Error("stopped");
     const r = await http(`${COMFY}/prompt`, {
       method: "POST",

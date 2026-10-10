@@ -36,6 +36,9 @@ pub struct Asset {
     seed: Option<u64>,
     lyrics: Option<String>,  // a song's
     duration: Option<f64>,   // a song's length in seconds
+    // A song's tempo, key, meter and language ({"bpm", "key", "meter", "language"}), so an edit keeps them.
+    #[serde(default)]
+    music: Option<serde_json::Value>,
 }
 
 fn is_media(x: &str) -> bool {
@@ -79,7 +82,11 @@ fn describe_workflow(json: &str) -> (Option<String>, Option<String>, Option<u64>
         let i = &nodes.get(id)?["inputs"];
         i["text"].as_str().or(i["prompt"].as_str()).or(i["tags"].as_str()).map(String::from)
     };
-    let lyrics = nodes.values().find_map(|n| n["inputs"]["lyrics"].as_str().map(String::from));
+    // An edited song keeps its whole words in "song_lyrics" (an extension is sung from its new part's alone).
+    let lyrics = nodes
+        .values()
+        .find_map(|n| n["inputs"]["song_lyrics"].as_str().filter(|s| !s.trim().is_empty()).map(String::from))
+        .or_else(|| nodes.values().find_map(|n| n["inputs"]["lyrics"].as_str().map(String::from)));
     // Follow the sampler's (or guider's) "positive" link to its text encoder.
     let mut prompt = None;
     for n in nodes.values() {
@@ -200,6 +207,7 @@ fn build_asset(p: &Path, mtime: f64, size: u64) -> Asset {
         _ => (None, None),
     };
     let (prompt, model, seed, lyrics) = wf.as_deref().map(describe_workflow).unwrap_or((None, None, None, None));
+    let music = if kind == "audio" { wf.as_deref().and_then(song_settings) } else { None };
     Asset {
         path: p.to_string_lossy().into_owned(),
         name: p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string(),
@@ -213,7 +221,20 @@ fn build_asset(p: &Path, mtime: f64, size: u64) -> Asset {
         seed,
         lyrics: if kind == "audio" { lyrics } else { None },
         duration,
+        music,
     }
+}
+
+/// A song's tempo, key, meter and language from its ACE-Step text encoder node.
+fn song_settings(json: &str) -> Option<serde_json::Value> {
+    let v = serde_json::from_str::<serde_json::Value>(json).ok()?;
+    let i = v.as_object()?.values().map(|n| &n["inputs"]).find(|i| i["bpm"].is_number() && i["keyscale"].is_string())?;
+    Some(serde_json::json!({
+        "bpm": i["bpm"],
+        "key": i["keyscale"],
+        "meter": i["timesignature"].as_str().map(String::from).or(i["timesignature"].as_u64().map(|n| n.to_string())),
+        "language": i["language"],
+    }))
 }
 
 /// Every image and video in ComfyUI's output folder, newest first.
