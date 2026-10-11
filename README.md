@@ -28,6 +28,23 @@
 
 ---
 
+## 🌟 Feature highlights
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/highlights/images-in-chat.jpg" alt="Images in chat: type /image and Qwen-Image paints it in the conversation"></td>
+    <td width="50%"><img src="docs/highlights/deep-research.jpg" alt="Deep Research: plans searches, reads the pages, cites every fact"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/highlights/storyboard.jpg" alt="Storyboard: a song and every shot planned before anything renders"></td>
+    <td><img src="docs/highlights/click-to-select.jpg" alt="Click to select: SAM 3.1 outlines it from one click"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/highlights/styles.jpg" alt="Eleven styles: Molded, Classic and nine living styles"></td>
+    <td><img src="docs/highlights/system.jpg" alt="System: load, VRAM, temperature and power for every card"></td>
+  </tr>
+</table>
+
 ## ✨ Made in Prestige
 
 Everything below was made on the reference PC (RTX 3060 12 GB) from inside the app.
@@ -127,14 +144,82 @@ transcript that's just its own words is ignored.
 
 ## 📸 Screenshots
 
+Real screenshots of 0.49.0 on the reference PC (RTX 3060 12 GB + RTX 2060 6 GB), Molded style with the Dragon theme.
+
 <table>
   <tr>
-    <td width="50%"><img src="docs/chat.jpg" alt="Chat"><br><p align="center"><b>Chat</b></p></td>
-    <td width="50%"><img src="docs/system.jpg" alt="System dashboard"><br><p align="center"><b>System</b></p></td>
+    <td width="50%"><img src="docs/chat.jpg" alt="Chat with /image"><br><p align="center"><b>Chat with /image</b></p></td>
+    <td width="50%"><img src="docs/shots/chat-streaming.jpg" alt="Streaming, with thinking"><br><p align="center"><b>Streaming, with thinking</b></p></td>
   </tr>
   <tr>
-    <td><img src="docs/studio.jpg" alt="Studio gallery"><br><p align="center"><b>Studio</b></p></td>
-    <td><img src="docs/voice.jpg" alt="Voice with the animated avatar"><br><p align="center"><b>Voice</b></p></td>
+    <td><img src="docs/studio.jpg" alt="Studio"><br><p align="center"><b>Studio</b></p></td>
+    <td><img src="docs/shots/render-queue.jpg" alt="Render queue"><br><p align="center"><b>Render queue</b></p></td>
+  </tr>
+  <tr>
+    <td><img src="docs/shots/research.jpg" alt="Deep Research report"><br><p align="center"><b>Deep Research report</b></p></td>
+    <td><img src="docs/shots/research-working.jpg" alt="Deep Research, working"><br><p align="center"><b>Deep Research, working</b></p></td>
+  </tr>
+  <tr>
+    <td><img src="docs/shots/storyboard.jpg" alt="Storyboard"><br><p align="center"><b>Storyboard</b></p></td>
+    <td><img src="docs/shots/canvas.jpg" alt="Canvas"><br><p align="center"><b>Canvas</b></p></td>
+  </tr>
+  <tr>
+    <td><img src="docs/shots/music.jpg" alt="Music"><br><p align="center"><b>Music</b></p></td>
+    <td><img src="docs/shots/song-editor.jpg" alt="Song editor"><br><p align="center"><b>Song editor</b></p></td>
+  </tr>
+  <tr>
+    <td><img src="docs/shots/click-to-select.jpg" alt="Click to select"><br><p align="center"><b>Click to select</b></p></td>
+    <td><img src="docs/shots/select-result.jpg" alt="…and the result"><br><p align="center"><b>…and the result</b></p></td>
+  </tr>
+  <tr>
+    <td><img src="docs/shots/paint-to-change.jpg" alt="Paint to change"><br><p align="center"><b>Paint to change</b></p></td>
+    <td><img src="docs/shots/right-click-menu.jpg" alt="Right-click menu"><br><p align="center"><b>Right-click menu</b></p></td>
+  </tr>
+  <tr>
+    <td><img src="docs/shots/laser.jpg" alt="Laser files"><br><p align="center"><b>Laser files</b></p></td>
+    <td><img src="docs/shots/characters.jpg" alt="Characters"><br><p align="center"><b>Characters</b></p></td>
+  </tr>
+  <tr>
+    <td><img src="docs/system.jpg" alt="System, two GPUs"><br><p align="center"><b>System, two GPUs</b></p></td>
+    <td><img src="docs/shots/system-models.jpg" alt="Models and what's in VRAM"><br><p align="center"><b>Models and what's in VRAM</b></p></td>
+  </tr>
+  <tr>
+    <td><img src="docs/voice.jpg" alt="Voice"><br><p align="center"><b>Voice</b></p></td>
+    <td><img src="docs/shots/live.jpg" alt="Live call (camera off)"><br><p align="center"><b>Live call (camera off)</b></p></td>
+  </tr>
+  <tr>
+    <td><img src="docs/shots/do-it-for-me.jpg" alt="Do it for me"><br><p align="center"><b>Do it for me</b></p></td>
+    <td><img src="docs/shots/get-more-tools.jpg" alt="Get more tools"><br><p align="center"><b>Get more tools</b></p></td>
+  </tr>
+  <tr>
+    <td><img src="docs/shots/knowledge.jpg" alt="Knowledge"><br><p align="center"><b>Knowledge</b></p></td>
+    <td><img src="docs/shots/missions.jpg" alt="Missions"><br><p align="center"><b>Missions</b></p></td>
+  </tr>
+  <tr>
+    <td><img src="docs/shots/model-catalog.jpg" alt="Model catalog"><br><p align="center"><b>Model catalog</b></p></td>
+    <td><img src="docs/shots/styles-picker.jpg" alt="Settings → Appearance"><br><p align="center"><b>Settings → Appearance</b></p></td>
+  </tr>
+</table>
+
+### 🎨 Eleven styles
+
+The same chat in each living style (Settings → Appearance → Style).
+
+<table>
+  <tr>
+    <td width="33%"><img src="docs/shots/style-cyberpunk.jpg" alt="Cyberpunk style"><br><p align="center"><b>Cyberpunk</b></p></td>
+    <td width="33%"><img src="docs/shots/style-living-matrix.jpg" alt="Living Matrix style"><br><p align="center"><b>Living Matrix</b></p></td>
+    <td width="33%"><img src="docs/shots/style-clockwork.jpg" alt="Clockwork style"><br><p align="center"><b>Clockwork</b></p></td>
+  </tr>
+  <tr>
+    <td width="33%"><img src="docs/shots/style-cosmic.jpg" alt="Cosmic style"><br><p align="center"><b>Cosmic</b></p></td>
+    <td width="33%"><img src="docs/shots/style-crystal.jpg" alt="Crystal style"><br><p align="center"><b>Crystal</b></p></td>
+    <td width="33%"><img src="docs/shots/style-energy.jpg" alt="Energy style"><br><p align="center"><b>Energy</b></p></td>
+  </tr>
+  <tr>
+    <td width="33%"><img src="docs/shots/style-frequency.jpg" alt="Frequency style"><br><p align="center"><b>Frequency</b></p></td>
+    <td width="33%"><img src="docs/shots/style-biological.jpg" alt="Biological style"><br><p align="center"><b>Biological</b></p></td>
+    <td width="33%"><img src="docs/shots/style-earth-nature.jpg" alt="Earth & Nature style"><br><p align="center"><b>Earth & Nature</b></p></td>
   </tr>
 </table>
 
