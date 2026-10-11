@@ -83,6 +83,10 @@ fn read_manifest(root: &Path) -> Result<Manifest, String> {
 /// The GPU plan and config files for the current settings, and a fresh services.json: by Prestige (prep.rs), or by
 /// start-all.ps1 -Manifest when that fails.
 fn prepare(root: &Path) -> Result<Manifest, String> {
+    // The Workstation's files at this Prestige's version first (they ship with it).
+    if let Err(e) = crate::engine::sync_if_needed(root) {
+        eprintln!("updating the Workstation's files: {e}");
+    }
     match crate::prep::prepare(root) {
         Ok(p) => serde_json::from_value(p.manifest).map_err(|e| format!("services.json: {e}")),
         Err(e) if script_manifest(root) => {

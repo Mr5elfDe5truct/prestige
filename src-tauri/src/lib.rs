@@ -14,8 +14,10 @@ mod toolstore;
 mod vram;
 mod transcribe;
 mod director;
+mod engine;
 mod laser;
 mod services;
+mod setup;
 mod studio;
 mod workstation;
 
@@ -554,6 +556,13 @@ pub fn run() {
             }
         })
         // The Canvas: pages the chat model wrote, on their own origin (canvas.rs).
+        // The Workstation's own files ship inside Prestige (engine.rs).
+        .setup(|app| {
+            if let Ok(dir) = app.path().resource_dir() {
+                let _ = engine::BUNDLED.set(dir.join("engine"));
+            }
+            Ok(())
+        })
         .register_uri_scheme_protocol("canvas", canvas::serve)
         .manage(canvas::Canvases::default())
         .manage(studio::GalleryCache::default())
@@ -651,7 +660,9 @@ pub fn run() {
             packs::pack_removal,
             packs::pack_remove,
             packs::engines,
-            packs::engine_action
+            packs::engine_action,
+            setup::setup_probe,
+            setup::setup_run
         ])
         .build(tauri::generate_context!())
         .expect("error while building Prestige")

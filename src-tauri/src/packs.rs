@@ -57,7 +57,7 @@ fn comfy_same(repo: &str, path: &str) -> Item {
     let (folder, _) = path.split_once('/').unwrap();
     comfy(repo, path, folder)
 }
-fn uv(args: &[&str]) -> Vec<String> {
+pub(crate) fn uv(args: &[&str]) -> Vec<String> {
     args.iter().map(|s| s.to_string()).collect()
 }
 
@@ -294,7 +294,7 @@ fn fit_notes(p: &Pack, plan: Option<&prep::Plan>, ram_gb: f64) -> Vec<String> {
 }
 
 #[derive(Default)]
-pub struct Jobs(Mutex<HashMap<String, Arc<AtomicBool>>>);
+pub struct Jobs(pub Mutex<HashMap<String, Arc<AtomicBool>>>);
 
 /// Every pack with what's on disk, whether it fits, and whether it's downloading now.
 #[tauri::command]
@@ -334,7 +334,7 @@ pub async fn packs_list(root: Option<String>, jobs: tauri::State<'_, Jobs>) -> R
 
 // ---------- getting a pack ----------
 
-fn emit(app: &AppHandle, id: &str, state: &str, step: usize, steps: usize, label: &str, done: u64, total: u64, error: Option<String>) {
+pub(crate) fn emit(app: &AppHandle, id: &str, state: &str, step: usize, steps: usize, label: &str, done: u64, total: u64, error: Option<String>) {
     let _ = app.emit("pack", json!({ "id": id, "state": state, "step": step, "steps": steps, "label": label, "done": done, "total": total, "error": error }));
 }
 
@@ -415,13 +415,13 @@ fn ollama_pull(name: &str, cancel: &AtomicBool, mut progress: impl FnMut(u64, u6
 }
 
 /// uv: on PATH, or where its installer puts it.
-fn uv_exe() -> PathBuf {
+pub(crate) fn uv_exe() -> PathBuf {
     let local = std::env::var_os("USERPROFILE").map(PathBuf::from).unwrap_or_default().join(".local").join("bin").join("uv.exe");
     if local.exists() { local } else { PathBuf::from("uv") }
 }
 
 /// Runs a command in `root`, its output appended to `log`; stops it if `cancel` is set.
-fn run_logged(root: &Path, exe: &Path, args: &[String], log: &Path, cancel: &AtomicBool) -> Result<(), String> {
+pub(crate) fn run_logged(root: &Path, exe: &Path, args: &[String], log: &Path, cancel: &AtomicBool) -> Result<(), String> {
     let out = fs::OpenOptions::new().create(true).append(true).open(log).map_err(|e| e.to_string())?;
     let err = out.try_clone().map_err(|e| e.to_string())?;
     let _ = writeln!(&out, "\n> {} {}", exe.display(), args.join(" "));
@@ -453,7 +453,7 @@ fn sha256_hex(path: &Path) -> Result<String, String> {
     text.lines().nth(1).map(|l| l.trim().replace(' ', "").to_lowercase()).ok_or_else(|| "certutil gave no hash".into())
 }
 
-fn unzip(zip: &Path, dir: &Path) -> Result<(), String> {
+pub(crate) fn unzip(zip: &Path, dir: &Path) -> Result<(), String> {
     let f = fs::File::open(zip).map_err(|e| e.to_string())?;
     let mut z = zip::ZipArchive::new(f).map_err(|e| e.to_string())?;
     z.extract(dir).map_err(|e| e.to_string())
@@ -525,37 +525,48 @@ fn after_pack(root: &Path, id: &str) {
     }
 }
 
+/// Gets everything a pack is missing (in the calling thread), with "pack" events. Setup runs packs this way too.
+pub fn run_pack(app: &AppHandle, root: &Path, id: &str, cancel: &AtomicBool) -> Result<usize, String> {
+    let (_, ollama_gb) = plan_and_ollama_gb(root);
+    let pack = catalog(ollama_gb).into_iter().find(|p| p.id == id).ok_or_else(|| format!("no pack called {id}"))?;
+    let tags = ollama_tags();
+    let todo: Vec<&Item> = pack.items.iter().filter(|i| present(root, i, tags.as_ref()) != Some(true)).collect();
+    for (n, item) in todo.iter().enumerate() {
+        get_item(app, root, id, n + 1, todo.len(), item, cancel)?;
+    }
+    after_pack(root, id);
+    Ok(todo.len())
+}
+
+/// Registers a running job; None when one with that id is already running.
+pub fn begin_job(app: &AppHandle, id: &str) -> Option<Arc<AtomicBool>> {
+    let jobs = app.state::<Jobs>();
+    let mut j = jobs.0.lock().unwrap();
+    if j.contains_key(id) {
+        return None;
+    }
+    let cancel = Arc::new(AtomicBool::new(false));
+    j.insert(id.to_string(), cancel.clone());
+    Some(cancel)
+}
+
+pub fn end_job(app: &AppHandle, id: &str, result: &Result<usize, String>) {
+    app.state::<Jobs>().0.lock().unwrap().remove(id);
+    match result {
+        Ok(_) => emit(app, id, "done", 0, 0, "", 0, 0, None),
+        Err(e) if e == "paused" => emit(app, id, "paused", 0, 0, "", 0, 0, None),
+        Err(e) => emit(app, id, "failed", 0, 0, "", 0, 0, Some(e.clone())),
+    }
+}
+
 /// Gets what a pack is missing, in the background, with "pack" events. Running it again after a pause carries on.
 #[tauri::command]
-pub fn pack_get(app: AppHandle, jobs: tauri::State<'_, Jobs>, root: Option<String>, id: String) -> Result<(), String> {
+pub fn pack_get(app: AppHandle, root: Option<String>, id: String) -> Result<(), String> {
     let root = stack_root(root);
-    let cancel = Arc::new(AtomicBool::new(false));
-    {
-        let mut j = jobs.0.lock().unwrap();
-        if j.contains_key(&id) {
-            return Err("already downloading".into());
-        }
-        j.insert(id.clone(), cancel.clone());
-    }
+    let cancel = begin_job(&app, &id).ok_or("already downloading")?;
     std::thread::spawn(move || {
-        let (_, ollama_gb) = plan_and_ollama_gb(&root);
-        let result = (|| {
-            let pack = catalog(ollama_gb).into_iter().find(|p| p.id == id).ok_or_else(|| format!("no pack called {id}"))?;
-            let tags = ollama_tags();
-            let todo: Vec<&Item> = pack.items.iter().filter(|i| present(&root, i, tags.as_ref()) != Some(true)).collect();
-            for (n, item) in todo.iter().enumerate() {
-                get_item(&app, &root, &id, n + 1, todo.len(), item, &cancel)?;
-            }
-            after_pack(&root, &id);
-            Ok::<_, String>(todo.len())
-        })();
-        let state = app.state::<Jobs>();
-        state.0.lock().unwrap().remove(&id);
-        match result {
-            Ok(_) => emit(&app, &id, "done", 0, 0, "", 0, 0, None),
-            Err(e) if e == "paused" => emit(&app, &id, "paused", 0, 0, "", 0, 0, None),
-            Err(e) => emit(&app, &id, "failed", 0, 0, "", 0, 0, Some(e)),
-        }
+        let result = run_pack(&app, &root, &id, &cancel);
+        end_job(&app, &id, &result);
     });
     Ok(())
 }
@@ -677,7 +688,7 @@ fn parse_llama_version(text: &str) -> Option<String> {
 }
 
 /// The driver's CUDA version picks llama.cpp's build: 13.x drivers get the CUDA 13 build, older ones CUDA 12.
-fn cuda_tag() -> &'static str {
+pub(crate) fn cuda_tag() -> &'static str {
     let out = hidden(&mut Command::new("nvidia-smi")).stdin(Stdio::null()).output().ok();
     let text = out.map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
     let major = text.split("CUDA Version:").nth(1).or_else(|| text.split("CUDA UMD Version:").nth(1)).and_then(|s| s.trim().split('.').next()?.parse::<u32>().ok()).unwrap_or(12);
@@ -685,7 +696,7 @@ fn cuda_tag() -> &'static str {
 }
 
 /// The newest llama.cpp release with a Windows build for this driver: (tag, [asset urls]).
-fn llama_latest() -> Result<(String, Vec<String>), String> {
+pub(crate) fn llama_latest() -> Result<(String, Vec<String>), String> {
     let tag = cuda_tag();
     let text = ureq::get("https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=30")
         .set("User-Agent", "Prestige")
@@ -725,7 +736,7 @@ fn comfy_info(root: &Path) -> Value {
     }
 }
 
-fn ollama_exe() -> PathBuf {
+pub(crate) fn ollama_exe() -> PathBuf {
     std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_default().join("Programs").join("Ollama").join("ollama.exe")
 }
 

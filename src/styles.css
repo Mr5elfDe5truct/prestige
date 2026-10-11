@@ -1138,3 +1138,18 @@ body[data-style="molded"] .sb-shot { border-radius: 16px; }
 .sheet.packs .engine-acts { display: flex; gap: 6px; }
 .sheet.confirm { width: min(520px, calc(100vw - 32px)); }
 .sheet.confirm #confirm-text { white-space: pre-wrap; word-break: break-word; max-height: 40vh; overflow: auto; }
+
+/* Setup sheet (setup.ts) */
+.sheet.setup { width: min(760px, calc(100vw - 32px)); }
+.sheet.setup .setup-pc { margin: 8px 0 12px; padding-left: 18px; font-size: 13px; line-height: 1.6; }
+.sheet.setup .setup-packs-list { display: flex; flex-direction: column; gap: 6px; max-height: 46vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.sheet.setup .setup-pack { font-size: 13px; line-height: 1.4; }
+.sheet.setup .setup-steps { list-style: none; padding: 0; margin: 8px 0; display: flex; flex-direction: column; gap: 6px; }
+.sheet.setup .setup-steps li { display: grid; grid-template-columns: 18px 1fr; gap: 0 8px; align-items: baseline; font-size: 13px; }
+.sheet.setup .setup-steps li small { grid-column: 2; font-size: 11.5px; word-break: break-word; }
+.sheet.setup .setup-steps li > i { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid color-mix(in srgb, currentColor 40%, transparent); display: inline-block; }
+.sheet.setup .setup-steps li.running > i { border-color: var(--gold); background: var(--gold); animation: setup-pulse 1.2s ease-in-out infinite; }
+.sheet.setup .setup-steps li.done > i { border-color: var(--ok); background: var(--ok); }
+.sheet.setup .setup-steps li.failed > i { border-color: var(--warn); background: var(--warn); }
+.sheet.setup #setup-result.ok { color: var(--ok); }
+@keyframes setup-pulse { 50% { opacity: .35; } }

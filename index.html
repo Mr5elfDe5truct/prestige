@@ -360,6 +360,7 @@
         <label>Workstation folder (holds start-all.ps1 and stop-all.ps1)<input id="stack-root" type="text" spellcheck="false" /></label>
         <button class="btn" type="button" id="open-workstation">Workstation settings… (GPUs, Ollama, llama.cpp models, services)</button>
         <button class="btn" type="button" id="open-packs">Packs… (model packs and engine updates)</button>
+        <button class="btn" type="button" id="open-setup">Set up or repair the Workstation…</button>
         <label class="check"><input id="keep-running" type="checkbox" /> Keep the AI services running when Prestige closes</label>
         <label class="check"><input id="live-phonon" type="checkbox" /> Live calls listen with Phonon-2 (on the CPU, English) instead of Whisper: quicker, and the GPU memory goes to the Live model. Needs the Workstation's transcribe pack</label>
         <h2 class="sub">Phone access</h2>
@@ -423,6 +424,42 @@
         <div class="acts">
           <button class="btn" type="button" id="packs-refresh">Refresh</button>
           <button class="btn primary" value="close">Done</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- Setup: makes or repairs the Workstation (setup.ts) -->
+    <dialog class="sheet setup" id="setup">
+      <form method="dialog">
+        <h2>Set up the Workstation</h2>
+        <div id="setup-where">
+          <p>Prestige installs the AI engines it runs on (Ollama, llama.cpp, ComfyUI, the voice and tool servers) and the models you pick, all on this PC. Anything already here is kept and skipped.</p>
+          <label>Folder<input id="setup-root" type="text" spellcheck="false" /></label>
+          <p class="muted">Not Program Files: the engines write logs, data and models here. A fast drive is best.</p>
+          <ul class="setup-pc" id="setup-pc"></ul>
+          <label id="setup-gpu-row">Several graphics cards<select id="setup-gpu">
+            <option value="split">Split: chat and voice on the small card, big models and images on the big one</option>
+            <option value="pool">Pool: like split, but the big model spreads over every card</option>
+            <option value="single">Single: only the biggest card</option>
+          </select></label>
+          <label class="check" id="setup-comfy-row"><input id="setup-own-comfy" type="checkbox" /> Comfy Desktop is installed and will be used for images and video. Tick to install a separate ComfyUI into the Workstation instead</label>
+        </div>
+        <div id="setup-packs" hidden>
+          <p>Pick the models to download. The suggested ones are ticked for this PC; add or remove any later in <b>Packs</b>.</p>
+          <div class="setup-packs-list" id="setup-packs-list"></div>
+          <p class="muted" id="setup-total"></p>
+          <label class="check"><input id="setup-check" type="checkbox" checked /> Start everything once at the end to check it works</label>
+        </div>
+        <div id="setup-run" hidden>
+          <ol class="setup-steps" id="setup-steps"></ol>
+          <p id="setup-result"></p>
+          <p class="muted">You can hide this and keep using Prestige; Setup carries on. Its log goes to the Workstation's logs\setup.log.</p>
+        </div>
+        <div class="acts">
+          <button class="btn" id="setup-close" value="close">Not now</button>
+          <button class="btn" type="button" id="setup-back" hidden>Back</button>
+          <button class="btn primary" type="button" id="setup-next">Next</button>
+          <button class="btn primary" type="button" id="setup-go" hidden>Install</button>
         </div>
       </form>
     </dialog>
