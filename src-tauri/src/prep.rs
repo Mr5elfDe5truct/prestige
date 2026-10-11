@@ -674,7 +674,7 @@ pub fn prepare(root: &Path) -> Result<Prepared, String> {
         b.off("comfyui", 8188, "switched off in the Workstation settings");
     } else if let Some((dir, python)) = find_comfy(root) {
         // The Workstation's own nodes, copied on every start so they follow this folder's version.
-        for n in ["workstation_gpus", "workstation_music"] {
+        for n in ["workstation_gpus", "workstation_music", "workstation_lora"] {
             let from = root.join("tools").join("comfy_nodes").join(n);
             if from.exists() {
                 if let Err(e) = copy_dir(&from, &dir.join("custom_nodes").join(n)) {
