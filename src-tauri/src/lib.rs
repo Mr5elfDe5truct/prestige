@@ -13,6 +13,7 @@ mod vram;
 mod transcribe;
 mod director;
 mod laser;
+mod services;
 mod studio;
 mod workstation;
 
@@ -624,7 +625,12 @@ pub fn run() {
             workstation::ws_write_json,
             workstation::ws_llama_set,
             workstation::ws_ini_write,
-            workstation::ws_stop_and_wait
+            workstation::ws_stop_and_wait,
+            services::svc_list,
+            services::svc_start,
+            services::svc_stop,
+            services::svc_restart,
+            services::svc_logs
         ])
         .build(tauri::generate_context!())
         .expect("error while building Prestige")

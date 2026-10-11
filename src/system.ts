@@ -51,6 +51,8 @@ interface Deps {
   toast: (msg: string, kind?: string) => void;
   nameFor: (id: string) => { name: string; role?: string; hide?: boolean; order: number };
   openCatalog: () => void;
+  /** The Workstation folder from Settings (null: the default). */
+  root: () => string | null;
 }
 
 const GB = 1024; // MiB per GiB
@@ -575,9 +577,68 @@ const SERVICES: [string, string, string][] = [
   ["Phonon server · Transcribe", ":8891", "http://127.0.0.1:8891/health"],
 ];
 
+// With a Workstation that has the service manager (services.rs), the list comes from its services.json and each row
+// can be started, stopped or restarted on its own, with its log a click away.
+interface SvcList {
+  supported: boolean;
+  prepared?: boolean;
+  services?: { name: string; port: number; up: boolean }[];
+  off?: { name: string; port: number; why: string }[];
+}
+const SVC_NAMES: Record<string, string> = {
+  ollama: "Ollama",
+  "llama-server": "llama.cpp router",
+  kokoro: "Kokoro voice",
+  voice: "Voice server · Whisper, VoxCPM2",
+  phonon: "Phonon server · Transcribe",
+  mcpo: "Tool server",
+  comfyui: "ComfyUI",
+  "comfyui-quick": "ComfyUI quick · click to select",
+  "open-webui": "Open WebUI",
+};
+const svcBusy = new Set<string>();
+
+async function serviceAction(name: string, action: "start" | "stop" | "restart") {
+  const label = SVC_NAMES[name] ?? name;
+  svcBusy.add(name);
+  refreshServices();
+  try {
+    if (action === "start") await invoke("svc_start", { root: deps.root(), names: [name] });
+    else await invoke(`svc_${action}`, { root: deps.root(), name });
+    deps.toast(action === "stop" ? `${label} stopped.` : `${label} is ${action === "start" ? "starting" : "restarting"}…`);
+  } catch (e) {
+    deps.toast(`Couldn't ${action} ${label}: ${errMsg(e)}`, "warn");
+  } finally {
+    svcBusy.delete(name);
+    refreshServices();
+  }
+}
+
+async function showLogs(name: string) {
+  const dlg = $("#svc-logs") as HTMLDialogElement;
+  $("#svc-logs-title").textContent = `${SVC_NAMES[name] ?? name} · log`;
+  const load = async () => {
+    try {
+      const l = await invoke<{ out: string; err: string; folder: string }>("svc_logs", { root: deps.root(), name });
+      $("#svc-logs-out").textContent = l.out.trim() || "(empty)";
+      $("#svc-logs-err").textContent = l.err.trim() || "(empty)";
+      $("#svc-logs-where").textContent = `${l.folder}\\${name}.log and ${name}.err.log`;
+      for (const pre of [$("#svc-logs-out"), $("#svc-logs-err")]) pre.scrollTop = pre.scrollHeight;
+    } catch (e) {
+      $("#svc-logs-out").textContent = errMsg(e);
+    }
+  };
+  ($("#svc-logs-refresh") as HTMLButtonElement).onclick = load;
+  await load();
+  if (!dlg.open) dlg.showModal();
+}
+
 async function refreshServices() {
+  const list = await invoke<SvcList>("svc_list", { root: deps.root() }).catch(() => ({ supported: false }) as SvcList);
+  if (list.supported && list.prepared) return managedServices(list);
   const ok = await Promise.all(SERVICES.map(([, , url]) => ping(url)));
   const box = $("#svc-list");
+  box.classList.remove("managed");
   box.innerHTML = "";
   SERVICES.forEach(([name, port], i) => {
     const dot = document.createElement("i");
@@ -590,6 +651,57 @@ async function refreshServices() {
     p.textContent = port;
     box.append(dot, n, p);
   });
+}
+
+function managedServices(list: SvcList) {
+  const box = $("#svc-list");
+  box.classList.add("managed");
+  box.innerHTML = "";
+  const btn = (text: string, title: string, f: () => void, disabled = false) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "linkish";
+    b.textContent = text;
+    b.title = title;
+    b.disabled = disabled;
+    b.addEventListener("click", f);
+    return b;
+  };
+  for (const s of list.services ?? []) {
+    const busy = svcBusy.has(s.name);
+    const dot = document.createElement("i");
+    dot.className = busy ? "" : s.up ? "ok" : "off";
+    dot.title = busy ? "working…" : s.up ? "running" : "not running";
+    const n = document.createElement("span");
+    n.textContent = SVC_NAMES[s.name] ?? s.name;
+    const p = document.createElement("span");
+    p.className = "port";
+    p.textContent = `:${s.port}`;
+    const acts = document.createElement("span");
+    acts.className = "svc-acts";
+    if (s.up) {
+      acts.append(btn("restart", "Stop it and start it again with the current settings", () => serviceAction(s.name, "restart"), busy));
+      acts.append(btn("stop", "Stop it (its GPU memory is freed)", () => serviceAction(s.name, "stop"), busy));
+    } else {
+      acts.append(btn("start", "Start it with the current settings", () => serviceAction(s.name, "start"), busy));
+    }
+    acts.append(btn("log", "What it printed last", () => showLogs(s.name)));
+    box.append(dot, n, p, acts);
+  }
+  for (const o of list.off ?? []) {
+    const dot = document.createElement("i");
+    dot.title = o.why;
+    const n = document.createElement("span");
+    n.textContent = SVC_NAMES[o.name] ?? o.name;
+    n.className = "muted";
+    const p = document.createElement("span");
+    p.className = "port";
+    p.textContent = `:${o.port}`;
+    const why = document.createElement("small");
+    why.className = "muted svc-acts";
+    why.textContent = o.why;
+    box.append(dot, n, p, why);
+  }
 }
 
 // ---------- the phone (System on a paired phone; main.ts passes its requests here) ----------

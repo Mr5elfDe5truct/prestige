@@ -322,11 +322,20 @@ pub fn add_llama_model(
     Ok(true)
 }
 
-/// Restarts only the llama.cpp router (it reads llama-models.ini at start) through start-all.ps1,
-/// which leaves the services that are already running alone.
+/// Restarts only the llama.cpp router (it reads llama-models.ini at start): through the service manager, or with an
+/// older Workstation through start-all.ps1, which leaves the services that are already running alone.
 #[tauri::command]
 pub fn restart_llama(root: Option<String>) -> Result<(), String> {
     let root = stack_root(root);
+    // A Workstation with the service manager: restart just the router, in the background.
+    if crate::services::supported(&root) {
+        std::thread::spawn(move || {
+            if let Err(e) = crate::services::restart(&root, "llama-server") {
+                eprintln!("restart llama.cpp: {e}");
+            }
+        });
+        return Ok(());
+    }
     let bin = root.join("bin").to_string_lossy().to_string();
     let script = root.join("start-all.ps1");
     let ps = format!(

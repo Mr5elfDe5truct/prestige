@@ -1093,3 +1093,10 @@ body[data-style="molded"] .sb-shot { border-radius: 16px; }
 .sheet.workstation .ws-apply { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; padding: 10px 12px; border: 1px solid var(--gold); border-radius: 10px; font-size: 13px; }
 .sheet.workstation .ws-apply[hidden] { display: none; }
 @media (max-width: 620px) { .sheet.workstation .ws-grid, .sheet.workstation .ws-grid.three { grid-template-columns: 1fr; } }
+
+/* Services with the service manager (system.ts): start, stop, restart and the log on each row */
+.svc.managed { grid-template-columns: auto 1fr auto auto; }
+.svc .svc-acts { display: flex; gap: 8px; justify-content: flex-end; font-size: 11.5px; }
+.svc .svc-acts .linkish:disabled { opacity: .4; cursor: default; }
+.sheet.svclogs { width: min(900px, calc(100vw - 32px)); }
+.sheet.svclogs .svc-log { max-height: 30vh; overflow: auto; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: 11.5px/1.45 var(--mono); white-space: pre-wrap; word-break: break-all; margin: 6px 0 12px; }
