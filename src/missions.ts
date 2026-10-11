@@ -9,7 +9,7 @@ import { isPermissionGranted, requestPermission, sendNotification } from "@tauri
 import { errMsg, streamChat, type ChatMessage, type ModelInfo } from "./backends";
 import { supportsTools } from "./caps";
 import { deepResearch } from "./research";
-import { GROUPS, loadTools, runTool, toolSpecs, type ToolStep } from "./tools";
+import { GROUPS, LAST_ROUND, TOOL_ROUNDS, loadTools, runTool, toolSpecs, type ToolStep } from "./tools";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
 
@@ -269,7 +269,7 @@ export async function runMission(m: Mission) {
   }
 }
 
-/** A chat mission: the model with the mission's read-only tools, up to six rounds of tool calls. */
+/** A chat mission: the model with the mission's read-only tools, up to TOOL_ROUNDS rounds of tool calls. */
 async function chatRun(m: Mission, model: ModelInfo, reply: SavedChat["messages"][number], signal: AbortSignal) {
   const today = new Date().toLocaleString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" });
   const messages: ChatMessage[] = [
@@ -286,10 +286,12 @@ async function chatRun(m: Mission, model: ModelInfo, reply: SavedChat["messages"
     if (specs) messages[0].content += `\n\n${deps.toolsHint}`;
   }
   let thinking = "";
-  for (let round = 0; round < 6; round++) {
+  for (let round = 0; round <= TOOL_ROUNDS; round++) {
     const before = reply.content.length;
-    const res = await streamChat(model, messages, { onToken: (t) => (reply.content += t), onThinking: (t) => (thinking += t), onStats: () => {} }, signal, specs);
-    if (!res.toolCalls.length || signal.aborted) break;
+    const last = round === TOOL_ROUNDS;
+    if (last) messages[messages.length - 1].content += LAST_ROUND;
+    const res = await streamChat(model, messages, { onToken: (t) => (reply.content += t), onThinking: (t) => (thinking += t), onStats: () => {} }, signal, last ? undefined : specs);
+    if (last || !res.toolCalls.length || signal.aborted) break;
     messages.push({ role: "assistant", content: reply.content.slice(before), tool_calls: res.toolCalls });
     for (const call of res.toolCalls) {
       const def = defs.find((d) => d.name === call.name);

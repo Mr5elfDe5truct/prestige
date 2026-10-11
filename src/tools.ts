@@ -176,6 +176,12 @@ export function toolSpecs(tools: ToolDef[], enabled: Set<string>) {
 
 const MAX_RESULT = 8000;
 
+/** Rounds of tool calls in one reply. A model that still wants more after these gets one more turn without tools,
+ *  with LAST_ROUND added to the newest result, so it answers from what it found instead of the reply just ending. */
+export const TOOL_ROUNDS = 8;
+export const LAST_ROUND =
+  "\n\n(That was the last tool call you can make for this reply. Answer now with what you have, and say what you couldn't get to.)";
+
 /** The chat being answered, so search_past_chats leaves it out. */
 export const toolContext = { chatId: "" };
 
@@ -221,6 +227,9 @@ export async function runTool(t: ToolDef, args: any, max = MAX_RESULT): Promise<
       { url: `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`, max_length: 4000 },
     );
   }
+  // fetch ends a long page with where to pick up (its start_index). Asked for more than fits here, that line was cut
+  // off with the rest, and the model refetched the same page over and over; so ask fetch for no more than fits.
+  if (t.op === "fetch") args = { ...args, max_length: Math.min(Number(args?.max_length) || 5000, max - 500) };
   const r = await http(`${MCPO}/${t.server}/${t.op}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

@@ -47,7 +47,7 @@ import {
 import { bestFor, capsFor, chipsHtml, supportsTools } from "./caps";
 import { initCatalog, openCatalog, phoneCatalog } from "./catalog";
 import { checkForUpdates, initUpdates } from "./updates";
-import { GROUPS, describeCall, loadTools, runTool, toolContext, toolSpecs, type ToolDef, type ToolStep } from "./tools";
+import { GROUPS, LAST_ROUND, TOOL_ROUNDS, describeCall, loadTools, runTool, toolContext, toolSpecs, type ToolDef, type ToolStep } from "./tools";
 import { errMsg, freeLlamaVram, http, nameFor, listModels, ping, streamChat, OLLAMA, LLAMA, type ChatMessage, type ModelInfo, type StreamStats } from "./backends";
 import { addMemory, memoryContext, listMemories, rememberRequest, DEFAULT_OWUI, type MemoryConfig } from "./memory";
 import { addStache } from "./talk";
@@ -2357,11 +2357,13 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
       onStats: (s: StreamStats) => (stat.textContent = statText(s, true)),
     };
     let stats: StreamStats | undefined;
-    for (let round = 0; round < 6; round++) {
+    for (let round = 0; round <= TOOL_ROUNDS; round++) {
       const before = reply.content.length;
-      const res = await streamChat(model, messages, handlers, busy.signal, specs, live ? { think: false, numCtx: LIVE_CTX, keepAlive: "30m" } : {});
+      const last = round === TOOL_ROUNDS;
+      if (last) messages[messages.length - 1].content += LAST_ROUND;
+      const res = await streamChat(model, messages, handlers, busy.signal, last ? undefined : specs, live ? { think: false, numCtx: LIVE_CTX, keepAlive: "30m" } : {});
       stats = res;
-      if (!res.toolCalls.length || !busy || busy.signal.aborted) break;
+      if (last || !res.toolCalls.length || !busy || busy.signal.aborted) break;
       messages.push({ role: "assistant", content: reply.content.slice(before), tool_calls: res.toolCalls });
       for (const call of res.toolCalls) {
         const def = toolDefs.find((d) => d.name === call.name);
