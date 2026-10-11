@@ -510,8 +510,20 @@ fn get_item(app: &AppHandle, root: &Path, id: &str, n: usize, steps: usize, item
     }
 }
 
-/// After the Nex pack: llama.cpp's router needs to know the model (as install.ps1 did).
+/// One value in data\service-settings.json (the Workstation settings), the rest kept.
+pub(crate) fn set_service_setting(root: &Path, key: &str, value: Value) {
+    let file = root.join("data").join("service-settings.json");
+    let mut v: Value = fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str(t.trim_start_matches('\u{feff}')).ok()).filter(Value::is_object).unwrap_or(json!({}));
+    v[key] = value;
+    let _ = fs::create_dir_all(root.join("data"));
+    let _ = fs::write(&file, serde_json::to_string_pretty(&v).unwrap_or_default() + "\n");
+}
+
+/// After a pack: llama.cpp's router needs to know Nex (as install.ps1 did); Open WebUI starts once it's there.
 fn after_pack(root: &Path, id: &str) {
+    if id == "openwebui" {
+        set_service_setting(root, "openWebUI", json!("on"));
+    }
     if id == "nex" {
         let _ = crate::models::add_llama_model(
             Some(root.to_string_lossy().into_owned()),
@@ -654,6 +666,9 @@ pub async fn pack_remove(root: Option<String>, id: String) -> Result<(), String>
             if let Err(e) = ureq::delete("http://127.0.0.1:11434/api/delete").set("Content-Type", "application/json").send_string(&json!({ "model": m }).to_string()) {
                 errors.push(format!("{m}: {e}"));
             }
+        }
+        if id == "openwebui" {
+            set_service_setting(&root, "openWebUI", json!("off"));
         }
         if errors.is_empty() { Ok(()) } else { Err(errors.join("; ")) }
     })

@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="470" viewBox="0 0 1000 470" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1020"/><stop offset="1" stop-color="#1a1240"/>
+    </linearGradient>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+  <rect width="1000" height="470" rx="16" fill="url(#bg)"/>
+
+  <!-- User -->
+  <rect x="400" y="24" width="200" height="44" rx="22" fill="#1e293b" stroke="#64748b"/>
+  <text x="500" y="52" text-anchor="middle" font-size="16" fill="#e2e8f0">You: browser, mic, webcam</text>
+  <line x1="500" y1="68" x2="500" y2="100" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Open WebUI -->
+  <rect x="150" y="102" width="700" height="78" rx="14" fill="#1e1b4b" stroke="#a78bfa" stroke-width="2"/>
+  <text x="500" y="134" text-anchor="middle" font-size="22" font-weight="700" fill="#c4b5fd">Open WebUI  :8080</text>
+  <text x="500" y="162" text-anchor="middle" font-size="14" fill="#cbd5e1">chat · voice/video call · shared long-term memory · web search · image button · tool calls</text>
+
+  <!-- arrows down -->
+  <g stroke="#94a3b8" stroke-width="2" marker-end="url(#arr)">
+    <line x1="230" y1="180" x2="110" y2="250"/>
+    <line x1="360" y1="180" x2="300" y2="250"/>
+    <line x1="500" y1="180" x2="500" y2="250"/>
+    <line x1="640" y1="180" x2="700" y2="250"/>
+    <line x1="770" y1="180" x2="890" y2="250"/>
+  </g>
+
+  <!-- services -->
+  <g font-size="13" fill="#cbd5e1" text-anchor="middle">
+    <rect x="20" y="252" width="180" height="120" rx="12" fill="#0f172a" stroke="#7dd3fc"/>
+    <text x="110" y="278" font-size="16" font-weight="700" fill="#7dd3fc">llama.cpp :8081</text>
+    <text x="110" y="302">Qwen3.6 35B-A3B</text>
+    <text x="110" y="320">uncensored (MoE→RAM)</text>
+    <text x="110" y="338">UI-TARS-1.5 7B</text>
+    <text x="110" y="358" fill="#94a3b8">router, 3 min idle unload</text>
+
+    <rect x="210" y="252" width="180" height="120" rx="12" fill="#0f172a" stroke="#7dd3fc"/>
+    <text x="300" y="278" font-size="16" font-weight="700" fill="#7dd3fc">Ollama :11434</text>
+    <text x="300" y="302">Gemma 4 (vision/webcam)</text>
+    <text x="300" y="320">Qwen3.5 9B uncensored</text>
+    <text x="300" y="338">coder models</text>
+    <text x="300" y="358" fill="#94a3b8">5 min idle unload</text>
+
+    <rect x="410" y="252" width="180" height="120" rx="12" fill="#0f172a" stroke="#f472b6"/>
+    <text x="500" y="278" font-size="16" font-weight="700" fill="#f9a8d4">ComfyUI :8188</text>
+    <text x="500" y="302">Z-Image-Turbo (images)</text>
+    <text x="500" y="320">LTX-2.3 (video + audio)</text>
+    <text x="500" y="338">Wan 2.2 I2V 4-step</text>
+    <text x="500" y="358" fill="#94a3b8">frees GPU after each job</text>
+
+    <rect x="610" y="252" width="180" height="120" rx="12" fill="#0f172a" stroke="#a78bfa"/>
+    <text x="700" y="278" font-size="16" font-weight="700" fill="#c4b5fd">mcpo tools :8200</text>
+    <text x="700" y="302">scout · webcam · video jobs</text>
+    <text x="700" y="320">fetch · filesystem</text>
+    <text x="700" y="338">shell · Playwright browser</text>
+    <text x="700" y="358" fill="#94a3b8">MCP → OpenAPI</text>
+
+    <rect x="800" y="252" width="180" height="120" rx="12" fill="#0f172a" stroke="#34d399"/>
+    <text x="890" y="278" font-size="16" font-weight="700" fill="#6ee7b7">Voice</text>
+    <text x="890" y="302">faster-whisper (STT)</text>
+    <text x="890" y="320">Kokoro :8880 (TTS)</text>
+    <text x="890" y="338">runs on CPU</text>
+  </g>
+
+  <!-- GPU bar -->
+  <rect x="20" y="400" width="960" height="46" rx="12" fill="#111827" stroke="#475569" stroke-dasharray="6 5"/>
+  <text x="500" y="429" text-anchor="middle" font-size="15" fill="#e2e8f0">RTX 3060 12 GB: one big model on the GPU at a time. Idle models unload, so chat, images and video take turns.</text>
+</svg>

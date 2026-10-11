@@ -1,0 +1,8 @@
+{
+  "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "sam3.1_multiplex_fp16.safetensors"}},
+  "2": {"class_type": "LoadImage", "inputs": {"image": "picture.png"}},
+  "3": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["1", 1], "text": "person"}},
+  "4": {"class_type": "SAM3_Detect", "inputs": {"model": ["1", 0], "image": ["2", 0], "conditioning": ["3", 0], "positive_coords": "[]", "negative_coords": "[]", "threshold": 0.5, "refine_iterations": 2, "individual_masks": false}},
+  "5": {"class_type": "MaskToImage", "inputs": {"mask": ["4", 0]}},
+  "6": {"class_type": "PreviewImage", "inputs": {"images": ["5", 0]}}
+}

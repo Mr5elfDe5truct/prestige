@@ -1,6 +1,6 @@
 // Setup: makes a Workstation from nothing, in Prestige (what install.ps1 did). Each step looks first and only does
 // what's missing, so it also repairs a Workstation and is safe to run again. The steps: tools (winget), the
-// Workstation's files (shipped inside Prestige, engine.rs; a git clone with an older Prestige), the GPU mode,
+// Workstation's files (shipped inside Prestige, engine.rs; engine\ from the Prestige repo when a build has none), the GPU mode,
 // llama.cpp, the Python environments, ComfyUI (Comfy Desktop's when it's there), the model packs picked (packs.rs),
 // and one start of everything to check it works. Progress goes to the UI as "setup" events.
 
@@ -14,7 +14,7 @@ use std::sync::atomic::AtomicBool;
 use tauri::AppHandle;
 use tauri::{Emitter, Manager};
 
-const WORKSTATION_REPO: &str = "https://github.com/Mr5elfDe5truct/custom-ai-workstation.git";
+const PRESTIGE_REPO: &str = "https://github.com/Mr5elfDe5truct/prestige.git";
 const KOKORO_REPO: &str = "https://github.com/remsky/Kokoro-FastAPI.git";
 const KOKORO_COMMIT: &str = "b4ef64b1ce60682debda4fe0a066259e284eb1b4";
 
@@ -195,6 +195,8 @@ fn step_tools(r: &Run) -> Result<(), String> {
 
 fn step_files(r: &Run) -> Result<(), String> {
     let root = &r.root;
+    // Open WebUI is optional now (Prestige keeps the memory): a new Workstation has it off until its pack is in.
+    let fresh = !root.join("start-all.ps1").exists() && !root.join("data").join("service-settings.json").exists() && !root.join("envs").join("open-webui").exists();
     if engine::install(root)? {
         r.emit("files", "done", "from Prestige");
     } else if root.join("start-all.ps1").exists() {
@@ -203,10 +205,16 @@ fn step_files(r: &Run) -> Result<(), String> {
         if root.exists() && fs::read_dir(root).map(|mut d| d.next().is_some()).unwrap_or(false) {
             return Err(format!("{} isn't empty; pick another folder", root.display()));
         }
+        // A build without the files (a dev build): engine\ from the Prestige repo, nothing else of it.
         r.emit("files", "running", "downloading the Workstation");
-        let parent = root.parent().unwrap_or(root);
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        r.cmd(parent, "git", &["clone", WORKSTATION_REPO, &root.to_string_lossy()])?;
+        let tmp = std::env::temp_dir().join(format!("prestige-engine-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let t = tmp.to_string_lossy().into_owned();
+        r.cmd(&std::env::temp_dir(), "git", &["clone", "--depth", "1", "--filter=blob:none", "--sparse", PRESTIGE_REPO, &t, "-q"])?;
+        r.cmd(&tmp, "git", &["sparse-checkout", "set", "engine"])?;
+        let copied = engine::sync(&tmp.join("engine"), root);
+        let _ = fs::remove_dir_all(&tmp);
+        copied?;
         r.emit("files", "done", "downloaded");
     }
     for d in ["apps", "bin", "envs", "logs", "data", r"models\gguf", r"models\ollama", r"models\comfy"] {
@@ -214,8 +222,13 @@ fn step_files(r: &Run) -> Result<(), String> {
     }
     // Prestige and install.ps1 look for the Workstation here when it isn't in the usual place.
     let rg = home().join("RG Studios");
-    let _ = fs::create_dir_all(&rg);
-    let _ = fs::write(rg.join("workstation-folder.txt"), root.to_string_lossy().as_bytes());
+    if *root != rg.join("Workstation") {
+        let _ = fs::create_dir_all(&rg);
+        let _ = fs::write(rg.join("workstation-folder.txt"), root.to_string_lossy().as_bytes());
+    }
+    if fresh {
+        packs::set_service_setting(root, "openWebUI", json!("off"));
+    }
     Ok(())
 }
 
@@ -343,6 +356,7 @@ fn step_comfy(r: &Run, own: bool) -> Result<(), String> {
 }
 
 fn step_packs(r: &Run, ids: &[String]) -> Result<(), String> {
+    // Picked here: Open WebUI goes back on once its pack is in (step_files turned it off for a new Workstation).
     if ids.is_empty() {
         r.emit("packs", "done", "none picked (add them any time in Packs)");
         return Ok(());

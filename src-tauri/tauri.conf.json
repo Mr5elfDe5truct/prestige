@@ -52,7 +52,24 @@
         "template": "windows/installer.nsi"
       }
     },
-    "createUpdaterArtifacts": true
+    "createUpdaterArtifacts": true,
+    "resources": {
+      "../engine/scripts/": "engine/scripts/",
+      "../engine/tools/": "engine/tools/",
+      "../engine/workflows/": "engine/workflows/",
+      "../engine/theme/": "engine/theme/",
+      "../engine/requirements/": "engine/requirements/",
+      "../engine/bin/": "engine/bin/",
+      "../engine/start-all.ps1": "engine/start-all.ps1",
+      "../engine/stop-all.ps1": "engine/stop-all.ps1",
+      "../engine/install.ps1": "engine/install.ps1",
+      "../engine/update-tools.ps1": "engine/update-tools.ps1",
+      "../engine/open-app.ps1": "engine/open-app.ps1",
+      "../engine/start-computer-use.ps1": "engine/start-computer-use.ps1",
+      "../engine/install-shortcut.ps1": "engine/install-shortcut.ps1",
+      "../engine/setup.cmd": "engine/setup.cmd",
+      "../engine/LICENSE": "engine/LICENSE"
+    }
   },
   "plugins": {
     "updater": {

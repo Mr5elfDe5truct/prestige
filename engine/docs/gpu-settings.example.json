@@ -1,0 +1,10 @@
+{
+  "mode": "auto",
+  "bigGpu": "auto",
+  "smallGpu": "auto",
+  "services": {},
+  "exclude": [],
+  "ollamaContext": "auto",
+  "llamaFit": "auto",
+  "tensorSplit": "auto"
+}

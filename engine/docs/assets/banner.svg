@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="320" viewBox="0 0 1280 320">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1020"/>
+      <stop offset="0.55" stop-color="#1a1240"/>
+      <stop offset="1" stop-color="#3a0d4a"/>
+    </linearGradient>
+    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7dd3fc"/>
+      <stop offset="0.5" stop-color="#a78bfa"/>
+      <stop offset="1" stop-color="#f472b6"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.82" cy="0.5" r="0.4">
+      <stop offset="0" stop-color="#a78bfa" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#a78bfa" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#ffffff" stroke-opacity="0.05"/>
+    </pattern>
+  </defs>
+  <rect width="1280" height="320" rx="18" fill="url(#bg)"/>
+  <rect width="1280" height="320" rx="18" fill="url(#grid)"/>
+  <rect width="1280" height="320" rx="18" fill="url(#glow)"/>
+
+  <!-- neural "chip" motif -->
+  <g transform="translate(1050 160)" fill="none" stroke-linecap="round">
+    <g stroke="#a78bfa" stroke-opacity="0.55" stroke-width="2">
+      <path d="M-150 -90 L-60 -40 M-150 0 L-60 0 M-150 90 L-60 40"/>
+      <path d="M150 -90 L60 -40 M150 0 L60 0 M150 90 L60 40"/>
+      <path d="M-40 -110 L-20 -60 M40 -110 L20 -60 M-40 110 L-20 60 M40 110 L20 60"/>
+    </g>
+    <rect x="-60" y="-60" width="120" height="120" rx="18" fill="#140f2e" stroke="url(#title)" stroke-width="3"/>
+    <text x="0" y="12" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="38" font-weight="700" fill="url(#title)">AI</text>
+    <g fill="#7dd3fc">
+      <circle cx="-150" cy="-90" r="6"/><circle cx="-150" cy="0" r="6"/><circle cx="-150" cy="90" r="6"/>
+      <circle cx="150" cy="-90" r="6" fill="#f472b6"/><circle cx="150" cy="0" r="6" fill="#f472b6"/><circle cx="150" cy="90" r="6" fill="#f472b6"/>
+      <circle cx="-40" cy="-110" r="5" fill="#a78bfa"/><circle cx="40" cy="-110" r="5" fill="#a78bfa"/>
+      <circle cx="-40" cy="110" r="5" fill="#a78bfa"/><circle cx="40" cy="110" r="5" fill="#a78bfa"/>
+    </g>
+  </g>
+
+  <g font-family="Segoe UI, Helvetica, Arial, sans-serif">
+    <text x="64" y="122" font-size="60" font-weight="800" fill="url(#title)">Custom AI Workstation</text>
+    <text x="66" y="172" font-size="24" fill="#e2e8f0" fill-opacity="0.9">A free, local, agentic AI stack for one 12 GB GPU</text>
+    <text x="66" y="212" font-size="18" fill="#cbd5e1" fill-opacity="0.75">Chat · Vision · Voice · Tools · Computer use · Images · Video with sound</text>
+    <g font-size="15" font-weight="600">
+      <rect x="64" y="244" width="132" height="32" rx="16" fill="#7dd3fc" fill-opacity="0.15" stroke="#7dd3fc" stroke-opacity="0.5"/>
+      <text x="130" y="265" text-anchor="middle" fill="#7dd3fc">100% local</text>
+      <rect x="208" y="244" width="152" height="32" rx="16" fill="#a78bfa" fill-opacity="0.15" stroke="#a78bfa" stroke-opacity="0.5"/>
+      <text x="284" y="265" text-anchor="middle" fill="#c4b5fd">No Docker, no WSL</text>
+      <rect x="372" y="244" width="150" height="32" rx="16" fill="#f472b6" fill-opacity="0.15" stroke="#f472b6" stroke-opacity="0.5"/>
+      <text x="447" y="265" text-anchor="middle" fill="#f9a8d4">Open weights</text>
+    </g>
+  </g>
+</svg>

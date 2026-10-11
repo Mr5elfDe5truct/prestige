@@ -1,0 +1,4 @@
+# pyopenjtalk only ships as source, so a PC without a C++ compiler can't build it. pyopenjtalk-plus
+# (pinned in kokoro.txt) installs the same pyopenjtalk module as a prebuilt Windows wheel, so drop the
+# pyopenjtalk that misaki[ja] asks for. A marker that is never true removes it from the resolution.
+pyopenjtalk ; sys_platform == "never"
