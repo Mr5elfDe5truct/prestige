@@ -134,7 +134,7 @@
             </div>
             <div class="ctx-right">
               <span class="is-thinking" id="thinking" hidden>● generating</span>
-              <button class="linkish" id="memory-status">Shared memory…</button>
+              <button class="linkish" id="memory-status">Memory…</button>
             </div>
           </div>
         </div>
@@ -163,7 +163,7 @@
         <div class="gpu-cards" id="gpu-cards"></div>
         <div class="two">
           <div class="card">
-            <div class="card-head"><h3>Models</h3><span class="credit" id="models-note"></span><button class="btn" id="sys-workstation" title="GPUs, Ollama, llama.cpp models and which services start">Workstation settings</button><button class="btn" id="sys-catalog">＋ Get more models</button></div>
+            <div class="card-head"><h3>Models</h3><span class="credit" id="models-note"></span><button class="btn" id="sys-workstation" title="GPUs, Ollama, llama.cpp models and which services start">Workstation settings</button><button class="btn" id="sys-packs" title="Model packs, and updates for llama.cpp, ComfyUI and Ollama">Packs</button><button class="btn" id="sys-catalog">＋ Get more models</button></div>
             <div class="list" id="model-rows"></div>
           </div>
           <div class="card">
@@ -359,6 +359,7 @@
         <h2 class="sub">Workstation</h2>
         <label>Workstation folder (holds start-all.ps1 and stop-all.ps1)<input id="stack-root" type="text" spellcheck="false" /></label>
         <button class="btn" type="button" id="open-workstation">Workstation settings… (GPUs, Ollama, llama.cpp models, services)</button>
+        <button class="btn" type="button" id="open-packs">Packs… (model packs and engine updates)</button>
         <label class="check"><input id="keep-running" type="checkbox" /> Keep the AI services running when Prestige closes</label>
         <label class="check"><input id="live-phonon" type="checkbox" /> Live calls listen with Phonon-2 (on the CPU, English) instead of Whisper: quicker, and the GPU memory goes to the Live model. Needs the Workstation's transcribe pack</label>
         <h2 class="sub">Phone access</h2>
@@ -407,6 +408,33 @@
         <div class="mem-list" id="mem-list"></div>
         <div class="acts">
           <button class="btn primary" value="close">Done</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- Packs: model packs and engine updates (packs.ts) -->
+    <dialog class="sheet packs" id="packs">
+      <form method="dialog">
+        <h2>Packs</h2>
+        <p class="muted" id="packs-where"></p>
+        <div class="packs-list" id="packs-list"></div>
+        <h2 class="sub">Engines</h2>
+        <div class="engines-list" id="engines-list"></div>
+        <div class="acts">
+          <button class="btn" type="button" id="packs-refresh">Refresh</button>
+          <button class="btn primary" value="close">Done</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- A yes / no question (main.ts confirmBox) -->
+    <dialog class="sheet confirm" id="confirm">
+      <form method="dialog">
+        <h2 id="confirm-title"></h2>
+        <p class="muted" id="confirm-text"></p>
+        <div class="acts">
+          <button class="btn" value="cancel">Cancel</button>
+          <button class="btn primary" id="confirm-ok" value="ok">OK</button>
         </div>
       </form>
     </dialog>

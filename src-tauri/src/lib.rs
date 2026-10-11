@@ -7,6 +7,7 @@ mod canvas;
 mod computer;
 mod knowledge;
 mod models;
+mod packs;
 mod phone;
 mod prep;
 mod toolstore;
@@ -561,6 +562,7 @@ pub fn run() {
         .manage(studio::ComfyListener::default())
         .manage(knowledge::Knowledge::default())
         .manage(phone::Phone::default())
+        .manage(packs::Jobs::default())
         .invoke_handler(tauri::generate_handler![
             gpu_stats,
             gpu_plan,
@@ -642,7 +644,14 @@ pub fn run() {
             services::svc_stop,
             services::svc_restart,
             services::svc_logs,
-            services::svc_stop_all
+            services::svc_stop_all,
+            packs::packs_list,
+            packs::pack_get,
+            packs::pack_pause,
+            packs::pack_removal,
+            packs::pack_remove,
+            packs::engines,
+            packs::engine_action
         ])
         .build(tauri::generate_context!())
         .expect("error while building Prestige")

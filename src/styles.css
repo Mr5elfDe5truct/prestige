@@ -1115,3 +1115,26 @@ body[data-style="molded"] .sb-shot { border-radius: 16px; }
 .sheet.memory .mem-text { white-space: pre-wrap; word-break: break-word; }
 .sheet.memory .mem-acts { display: flex; gap: 8px; font-size: 12px; }
 .sheet.memory .mem-row small { grid-column: 1 / -1; font-size: 11px; }
+
+/* Packs sheet (packs.ts) */
+.sheet.packs { width: min(860px, calc(100vw - 32px)); }
+.sheet.packs .packs-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; max-height: 52vh; overflow: auto; padding: 2px; }
+.sheet.packs .pack { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; background: var(--panel-2); }
+.sheet.packs .pack.installed { border-color: color-mix(in srgb, var(--ok, #4caf50) 45%, var(--line)); }
+.sheet.packs .pack p { margin: 0; font-size: 12px; line-height: 1.4; }
+.sheet.packs .pack-head { display: flex; gap: 8px; align-items: baseline; }
+.sheet.packs .pack-size { font-size: 11.5px; opacity: .7; }
+.sheet.packs .pack-state { margin-left: auto; font-size: 11.5px; }
+.sheet.packs .pack.installed .pack-state { color: var(--ok, #4caf50); }
+.sheet.packs .pack-warn { color: var(--warn); }
+.sheet.packs .pack-missing { word-break: break-word; }
+.sheet.packs .pack-bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.sheet.packs .pack-bar > i { display: block; height: 100%; background: linear-gradient(90deg, var(--red-deep), var(--red) 70%, var(--gold)); transition: width .3s; }
+.sheet.packs .pack-prog { font-size: 11.5px; opacity: .8; word-break: break-all; }
+.sheet.packs .pack-acts { display: flex; gap: 6px; margin-top: auto; padding-top: 4px; }
+.sheet.packs .engine { display: grid; grid-template-columns: 110px 1fr auto; gap: 4px 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.sheet.packs .engine:last-child { border-bottom: 0; }
+.sheet.packs .engine > p { grid-column: 1 / -1; margin: 0; font-size: 12px; }
+.sheet.packs .engine-acts { display: flex; gap: 6px; }
+.sheet.confirm { width: min(520px, calc(100vw - 32px)); }
+.sheet.confirm #confirm-text { white-space: pre-wrap; word-break: break-word; max-height: 40vh; overflow: auto; }
