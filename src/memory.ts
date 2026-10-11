@@ -129,7 +129,8 @@ export async function memoryContext(recentUserText: string): Promise<{ text: str
     }
   }
   const text = lines.length
-    ? "Long-term memory shared across all of the user's models (facts they asked you to remember):\n" + lines.map((l) => `- ${l}`).join("\n")
+    ? "Long-term memory shared across all of the user's models (facts they asked you to remember). This is all of it that " +
+      "matters here, so answer from it; don't search files, past chats or tools for memories:\n" + lines.map((l) => `- ${l}`).join("\n")
     : "";
   return { text, count: lines.length, total: s.facts.length };
 }
@@ -143,12 +144,13 @@ export async function addFact(content: string, owui: MemoryConfig | null): Promi
   const f: Fact = { id: newId(), content: content.trim(), type: "user", created: Date.now() };
   s.facts.push(f);
   await save();
+  // Waits a moment for Open WebUI (it's local and quick) so the Memory sheet shows the fact as shared straight away.
   if (owui) {
-    owuiAdd(owui, f.content)
-      .then(async (id) => {
-        if (id) (f.owui = id), await save();
-      })
-      .catch(() => {});
+    const late = new Promise<null>((ok) => setTimeout(() => ok(null), 5000));
+    const push = owuiAdd(owui, f.content).catch(() => null);
+    const id = await Promise.race([push, late]);
+    if (!id) push.then(async (later) => later && ((f.owui = later), await save()));
+    if (id) (f.owui = id), await save();
   }
   return f;
 }
