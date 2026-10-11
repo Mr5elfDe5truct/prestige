@@ -52,6 +52,7 @@ import { errMsg, freeLlamaVram, http, nameFor, listModels, ping, streamChat, OLL
 import { addFact, memoryContext, factCount, listFacts, listOwui, syncFromOwui, rememberRequest, DEFAULT_OWUI, type MemoryConfig } from "./memory";
 import { initMemoryPanel, openMemoryPanel } from "./memorypanel";
 import { initPacks } from "./packs";
+import { initSetup, openSetup } from "./setup";
 import { addStache } from "./talk";
 import { applyCachedLook, applyLook, closeAppearance, initAppearance, openAppearance, type Look } from "./theme";
 import { initMesa } from "./mesa";
@@ -2976,6 +2977,8 @@ function wire() {
   $("#start-services").addEventListener("click", async () => {
     const btn = $("#start-services") as HTMLButtonElement;
     if (!inTauri) return toast("Run start-all.ps1 in the Workstation folder.");
+    const have = await invoke<{ startScript: boolean }>("stack_info", { root: settings.stackRoot ?? null }).catch(() => ({ startScript: true }));
+    if (!have.startScript) return openSetup();
     btn.disabled = true;
     btn.textContent = "Starting… (about a minute)";
     try {
@@ -3125,6 +3128,20 @@ async function main() {
       await refreshModels();
       refreshMemoryStatus();
       toast(up ? "Services are back up with the new settings." : "The services didn't come back up. Check the Workstation folder in Settings.", up ? "" : "warn");
+    },
+  });
+  initSetup({
+    toast,
+    root: () => settings.stackRoot ?? null,
+    done: async (root) => {
+      const info = await invoke<{ default: string }>("stack_info", { root: null });
+      settings.stackRoot = root.toLowerCase() === info.default.toLowerCase() ? undefined : root;
+      await saveSettings();
+      const up = await startStack(bootRows());
+      await refreshModels();
+      refreshMemoryStatus();
+      toast(up ? "The Workstation is ready." : "Setup finished, but the services didn't answer yet. See System.", up ? "" : "warn");
+      if (!settings.welcomed && !settings.userName) setTimeout(showWelcome, 1200);
     },
   });
   initPacks({
@@ -3382,15 +3399,18 @@ async function main() {
   }
   updateToolsButton();
   updateSpeakButton();
-  // Like open-app.ps1: opening the app starts the workstation if it isn't running.
-  await runSplash(true);
+  // Like open-app.ps1: opening the app starts the workstation if it isn't running. With no Workstation yet, Setup
+  // makes one (setup.ts) and the welcome waits until it's done.
+  const info = inTauri ? await invoke<{ startScript: boolean }>("stack_info", { root: settings.stackRoot ?? null }).catch(() => ({ startScript: true })) : { startScript: true };
+  await runSplash(info.startScript);
   // Check for a new version shortly after start, then every 6 hours while Prestige stays open.
   initUpdates(toast).then(() => {
     setTimeout(() => checkForUpdates(true), 4000);
     setInterval(() => checkForUpdates(true), 6 * 60 * 60 * 1000);
   });
   greet($("#offline").hidden);
-  if (!settings.welcomed && !settings.userName) setTimeout(showWelcome, 2600);
+  if (!info.startScript) setTimeout(openSetup, 2400);
+  else if (!settings.welcomed && !settings.userName) setTimeout(showWelcome, 2600);
   renderHistory();
   pollGpu();
   setInterval(pollGpu, 1000);
