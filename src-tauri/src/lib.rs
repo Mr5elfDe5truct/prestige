@@ -16,6 +16,7 @@ mod transcribe;
 mod director;
 mod engine;
 mod laser;
+mod search;
 mod services;
 mod setup;
 mod studio;
@@ -570,6 +571,7 @@ pub fn run() {
         .manage(models::Downloads::default())
         .manage(studio::ComfyListener::default())
         .manage(knowledge::Knowledge::default())
+        .manage(search::Search::default())
         .manage(phone::Phone::default())
         .manage(packs::Jobs::default())
         .invoke_handler(tauri::generate_handler![
@@ -592,6 +594,9 @@ pub fn run() {
             store_set,
             sys_memory,
             file_sizes,
+            search::search_index,
+            search::search_status,
+            search::search_everything,
             studio::gallery_list,
             studio::thumbnail,
             studio::reveal,

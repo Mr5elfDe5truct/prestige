@@ -664,6 +664,16 @@ pub fn prepare(root: &Path) -> Result<Prepared, String> {
     if fermion.exists() {
         b.add("phonon", 8891, &fermion, "serve phonon-2 --port 8891".into(), root, None, common.clone());
     }
+    // 3d. Search everything (search pack): EmbeddingGemma 2 with its vision part, on Ollama's card (~1.2 GB; with two
+    // cards, the small one). Its own llama-server, so embedding never waits for a chat model to load.
+    let gguf = root.join("models").join("gguf");
+    if gguf.join(crate::search::MODEL).exists() {
+        let mut args = format!("-m {} --embedding -c 8192 -b 8192 -ub 8192 -ngl 99 --host 127.0.0.1 --port {}", quote(&gguf.join(crate::search::MODEL)), crate::search::PORT);
+        if gguf.join(crate::search::MMPROJ).exists() {
+            args += &format!(" --mmproj {}", quote(&gguf.join(crate::search::MMPROJ)));
+        }
+        b.add("search", crate::search::PORT, &root.join("bin").join("llama.cpp").join("llama-server.exe"), args, root, Some("ollama"), BTreeMap::new());
+    }
 
     // 4. The tool server, with --hot-reload so tools added in Prestige apply while it runs.
     let mcpo = root.join("envs").join("tools").join("Scripts").join("mcpo.exe");
