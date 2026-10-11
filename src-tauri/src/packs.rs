@@ -665,8 +665,11 @@ fn llama_version(dir: &Path) -> Option<String> {
 }
 
 fn parse_llama_version(text: &str) -> Option<String> {
+    // "version: 6543 (1a2b3c4)", or on newer builds "version: 0.5.0-dev (build 11270, commit 748d4225b)".
     let l = text.lines().find(|l| l.trim_start().starts_with("version:"))?;
-    let n: String = l.split(':').nth(1)?.trim().chars().take_while(char::is_ascii_digit).collect();
+    let v = l.split_once(':')?.1.trim();
+    let from = v.split_once("build ").map_or(v, |(_, rest)| rest);
+    let n: String = from.chars().take_while(char::is_ascii_digit).collect();
     (!n.is_empty()).then(|| format!("b{n}"))
 }
 
@@ -935,6 +938,7 @@ mod tests {
     #[test]
     fn llama_versions() {
         assert_eq!(parse_llama_version("ggml_cuda_init: found 2 CUDA devices\nversion: 6543 (1a2b3c4)\nbuilt with MSVC"), Some("b6543".into()));
+        assert_eq!(parse_llama_version("version: 0.5.0-dev (build 11270, commit 748d4225b)"), Some("b11270".into()));
         assert_eq!(parse_llama_version("nothing"), None);
     }
 }
