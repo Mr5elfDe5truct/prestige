@@ -1073,10 +1073,12 @@ body[data-style="molded"] .sb-shot { border-radius: 16px; }
 
 /* Workstation settings (workstation.ts) */
 .card-head .btn + .btn { margin-left: 0; }
-.sheet.workstation { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 32px); }
+.sheet.workstation { width: min(760px, calc(100vw - 32px)); height: min(820px, calc(100vh - 32px)); }
+/* One height for every tab, so the tabs stay put under the mouse; the body scrolls instead. */
+.sheet.workstation > form { display: flex; flex-direction: column; height: 100%; }
 .sheet.workstation .ws-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
 .sheet.workstation .ws-head h2 { margin: 0; }
-.sheet.workstation .ws-body { max-height: calc(100vh - 260px); overflow: auto; padding-right: 4px; }
+.sheet.workstation .ws-body { flex: 1; min-height: 0; overflow: auto; padding-right: 4px; }
 .sheet.workstation .ws-sub { margin: 18px 0 2px; font-size: 13px; color: var(--gold); }
 .sheet.workstation .ws-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
 .sheet.workstation .ws-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
