@@ -52,6 +52,7 @@ import { characterById, characters, faceBlob, onCharactersChange } from "./chara
 import { initInpaint, openInpaint, type SelectQuery } from "./inpaint";
 import { initLaser, openLaser } from "./laser";
 import { attachZoom, type Zoom } from "./zoom";
+import { checkOcr, ocrReady, readText } from "./ocr";
 import { INSTRUMENTAL_PARTS, STEMS, askSongEdit, editSecs, stemSecs, type EditTask, type SongEdit, type SongMusic, type SongSource } from "./songedit";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
@@ -1019,6 +1020,7 @@ let holdersTimer: number | undefined;
 export async function showStudio(on: boolean) {
   clearInterval(holdersTimer);
   if (!on) return;
+  checkOcr();
   // While Studio is open, a program starting or closing on ComfyUI's card updates the warnings (takenGB redraws).
   holdersTimer = window.setInterval(() => {
     const main = comfyCards().main;
@@ -2416,6 +2418,7 @@ function showMenu(e: MouseEvent, a: Asset) {
     ...(image && workflows.inpaint ? [{ label: "Paint to change…", run: () => paintToChange(a) }] : []),
     ...(image && workflows.select ? [{ label: "Select to change or cut out…", run: () => paintToChange(a, true), key: "SAM 3.1" }] : []),
     ...(image && workflows.cutout ? [{ label: "Remove background", run: () => removeBackground(a), key: "transparent PNG" }] : []),
+    ...(image && ocrReady() ? [{ label: "Read the text", run: () => (closeLightbox(), readText(a.path, a.name)), key: "Unlimited-OCR" }] : []),
     ...(a.kind === "video" && workflows.vidcut ? [{ label: "Cut out a subject…", run: () => videoCutout(a), key: "green screen" }] : []),
     ...upscaleItems(a),
     ...songEditItems(a),

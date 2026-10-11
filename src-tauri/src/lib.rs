@@ -7,6 +7,7 @@ mod canvas;
 mod computer;
 mod knowledge;
 mod models;
+mod ocr;
 mod packs;
 mod phone;
 mod prep;
@@ -592,6 +593,8 @@ pub fn run() {
             store_set,
             sys_memory,
             file_sizes,
+            ocr::ocr_status,
+            ocr::ocr_read,
             studio::gallery_list,
             studio::thumbnail,
             studio::reveal,

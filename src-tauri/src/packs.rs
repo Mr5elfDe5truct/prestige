@@ -171,6 +171,10 @@ pub fn catalog(ollama_gb: f64) -> Vec<Pack> {
             comfy_same("Comfy-Org/SeedVR2", "diffusion_models/seedvr2_3b_int8_convrot.safetensors"),
             comfy_same("Comfy-Org/SeedVR2", "vae/seedvr2_ema_vae_fp16.safetensors"),
         ], vram: 10.0, ram: 0.0, card: "comfyui" },
+        Pack { id: "ocr", title: "Read documents", text: "Unlimited-OCR 3B (llama.cpp): photos, scans and scanned PDFs to text and tables, for Studio and Knowledge".into(), gb: 2.8, items: vec![
+            gguf("42ailab/Unlimited-OCR-GGUF", crate::ocr::MODEL, crate::ocr::MODEL),
+            gguf("42ailab/Unlimited-OCR-GGUF", crate::ocr::MMPROJ, crate::ocr::MMPROJ),
+        ], vram: 5.0, ram: 0.0, card: "llama" },
         Pack { id: "openwebui", title: "Open WebUI", text: "Chat in a browser at localhost:8080 (optional: Prestige has chat, voice and memory)".into(), gb: 2.5, items: vec![
             Item::Env { name: "open-webui".into(), probe: r"envs\open-webui\Scripts\open-webui.exe".into(), steps: vec![
                 uv(&["venv", r"envs\open-webui", "--python", "3.11", "-q"]),

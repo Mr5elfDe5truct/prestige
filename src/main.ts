@@ -74,6 +74,7 @@ import { CANVAS_CMD, CANVAS_HINT, canvasOnChat, canvasReplyStart, findCanvas, in
 import {
   addDropped, addFiles, citeLabel, docById, hasDocs, initKnowledge, knowledgeFor, openKnowledge, openSource, phoneKnowledge, readyDocs, type KbDoc, type Source,
 } from "./knowledge";
+import { initOcr } from "./ocr";
 import { RESEARCH_CMD, deepResearch } from "./research";
 import { TRANSCRIBE_CMD, clock, isMedia, summaryPrompt, transcribeMedia, transcriptMd, type MediaSource } from "./transcribe";
 import { initMissions, phoneMissions } from "./missions";
@@ -3194,6 +3195,7 @@ async function main() {
     },
     onChange: () => renderChatFiles(),
   });
+  initOcr({ toast, root: () => settings.stackRoot ?? null });
   $("#kb-btn").addEventListener("click", () => openKnowledge());
   $("#ide-btn").addEventListener("click", async () => {
     try {

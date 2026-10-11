@@ -28,9 +28,21 @@ const TEXT_EXT: &[&str] = &[
 ];
 const SKIP_DIRS: &[&str] = &["node_modules", ".git", "target", "dist", "build", "__pycache__", ".venv", "venv", "envs", ".cache"];
 
+/// Pictures of pages (photos, scans, screenshots), read with Unlimited-OCR (ocr.rs).
+const IMAGE_EXT: &[&str] = &["png", "jpg", "jpeg", "webp"];
+/// A PDF page with less text than this is taken for a scan.
+const SCANNED: usize = 20;
+
+/// Documents, which a folder is searched for.
 pub fn supported(p: &Path) -> bool {
     let e = ext(p);
     e == "pdf" || e == "docx" || e == "html" || e == "htm" || TEXT_EXT.contains(&e.as_str())
+}
+
+/// What a file added on its own may be: a document, or a picture of a page (a folder's pictures are left out, as most
+/// aren't pages).
+fn readable(p: &Path) -> bool {
+    supported(p) || IMAGE_EXT.contains(&ext(p).as_str())
 }
 
 fn ext(p: &Path) -> String {
@@ -155,11 +167,23 @@ fn read_pages(path: &Path) -> Result<(Vec<String>, bool), String> {
         "pdf" => {
             let bytes = fs::read(path).map_err(|e| e.to_string())?;
             // pdf-extract panics on some unusual PDFs; treat that as an unreadable file instead of losing the app.
-            let pages = std::panic::catch_unwind(|| pdf_extract::extract_text_from_mem_by_pages(&bytes))
+            let mut pages = std::panic::catch_unwind(|| pdf_extract::extract_text_from_mem_by_pages(&bytes))
                 .map_err(|_| "this PDF couldn't be read".to_string())?
                 .map_err(|e| format!("this PDF couldn't be read: {e}"))?;
+            // Scanned pages have a picture instead of text: Unlimited-OCR reads them. A PDF that's all scans says
+            // what it needs; one with a scanned page or two is still read without it.
+            let scanned: Vec<usize> = (0..pages.len()).filter(|&i| pages[i].trim().len() < SCANNED).collect();
+            if !scanned.is_empty() && (crate::ocr::installed(&crate::ocr::current_root()) || scanned.len() == pages.len()) {
+                for (n, img) in crate::ocr::pdf_page_images(&bytes) {
+                    let i = n as usize - 1;
+                    if scanned.contains(&i) {
+                        pages[i] = crate::ocr::read_image(None, &img).map_err(|e| format!("page {n} is a scan: {e}"))?;
+                    }
+                }
+            }
             Ok((pages, true))
         }
+        e if IMAGE_EXT.contains(&e) => Ok((vec![crate::ocr::read_image(None, &fs::read(path).map_err(|e| e.to_string())?)?], false)),
         "docx" => Ok((vec![read_docx(path)?], false)),
         "html" | "htm" => Ok((vec![strip_tags(&read_text(path)?)], false)),
         _ => Ok((vec![read_text(path)?], false)),
@@ -387,7 +411,7 @@ fn index(app: &AppHandle, id: &str, model: &str) -> Result<(), String> {
         chunks.extend(chunk_page(p, paged.then_some(i as u32 + 1), !paged));
     }
     if chunks.is_empty() {
-        return Err(if paged { "no text in it (a scanned PDF needs OCR first)".into() } else { "no text in it".into() });
+        return Err(if paged { "no text in it (a scanned PDF needs the Read documents pack)".into() } else { "no text in it".into() });
     }
     let n = chunks.len();
     let Some(doc) = set(&|d| {
@@ -558,7 +582,7 @@ pub fn kb_add_paths(app: AppHandle, paths: Vec<String>, model: String) -> Result
             let folder = p.to_string_lossy().to_string();
             files.extend(found.into_iter().map(|f| (f, Some(folder.clone()), None)));
         } else if p.is_file() {
-            if !supported(&p) {
+            if !readable(&p) {
                 return Err(format!("{} isn't a kind of file Prestige can read yet", p.file_name().unwrap_or_default().to_string_lossy()));
             }
             files.push((p, None, None));
@@ -581,7 +605,7 @@ pub fn kb_add_bytes(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<
     let model = header("x-model").unwrap_or_default();
     let folder = header("x-folder").map(|f| percent_decode(&f)).filter(|f| !f.is_empty());
     let name: String = name.chars().map(|c| if r#"<>:"/\|?*"#.contains(c) || c.is_control() { '_' } else { c }).collect();
-    if !supported(Path::new(&name)) {
+    if !readable(Path::new(&name)) {
         return Err(format!("{name} isn't a kind of file Prestige can read yet"));
     }
     let copies = dir(&app)?.join("files");
@@ -629,6 +653,7 @@ pub async fn kb_pick(app: AppHandle, folder: bool, model: String) -> Result<Vec<
         } else {
             let mut exts = vec!["pdf", "docx", "html", "htm"];
             exts.extend_from_slice(TEXT_EXT);
+            exts.extend_from_slice(IMAGE_EXT);
             d.add_filter("Documents", &exts)
                 .blocking_pick_files()
                 .map(|v| v.into_iter().filter_map(|p| p.into_path().ok()).map(|p| p.to_string_lossy().to_string()).collect())
@@ -848,5 +873,7 @@ mod tests {
     fn finds_supported_files() {
         assert!(supported(Path::new("a.PDF")) && supported(Path::new("b.docx")) && supported(Path::new("c.md")));
         assert!(!supported(Path::new("d.exe")) && !supported(Path::new("e.png")));
+        // A picture of a page is read when it's added on its own, not when a folder is searched.
+        assert!(readable(Path::new("scan.JPG")) && readable(Path::new("c.md")) && !readable(Path::new("d.exe")));
     }
 }
