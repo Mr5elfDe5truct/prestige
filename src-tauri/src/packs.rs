@@ -574,16 +574,19 @@ pub fn pack_pause(jobs: tauri::State<'_, Jobs>, id: String) {
 fn removal(root: &Path, id: &str, ollama_gb: f64, tags: Option<&HashSet<String>>) -> (Vec<PathBuf>, Vec<String>, Vec<String>) {
     let all = catalog(ollama_gb);
     let Some(pack) = all.iter().find(|p| p.id == id) else { return (vec![], vec![], vec![]) };
-    // Other packs with anything on disk keep what they share with this one.
-    let others: Vec<&Pack> = all.iter().filter(|p| p.id != id && p.items.iter().any(|i| present(root, i, tags) == Some(true))).collect();
-    let shared = |item: &Item| {
-        others.iter().any(|p| p.items.iter().any(|o| match (o, item) {
-            (Item::File { dest: a, .. }, Item::File { dest: b, .. }) => a == b,
-            (Item::Ollama(a), Item::Ollama(b)) => a == b,
-            (Item::Env { name: a, .. }, Item::Env { name: b, .. }) => a == b,
-            _ => false,
-        }))
+    let same = |a: &Item, b: &Item| match (a, b) {
+        (Item::File { dest: a, .. }, Item::File { dest: b, .. }) => a == b,
+        (Item::Ollama(a), Item::Ollama(b)) => a == b,
+        (Item::Env { name: a, .. }, Item::Env { name: b, .. }) => a == b,
+        _ => false,
     };
+    // Other packs that are here keep what they share with this one. A pack only counts as here when it has something of
+    // its own on disk, not just the files it shares with this one (else removing Select would keep birefnet for 3D).
+    let others: Vec<&Pack> = all
+        .iter()
+        .filter(|p| p.id != id && p.items.iter().any(|i| !pack.items.iter().any(|m| same(i, m)) && present(root, i, tags) == Some(true)))
+        .collect();
+    let shared = |item: &Item| others.iter().any(|p| p.items.iter().any(|o| same(o, item)));
     let (mut files, mut models, mut envs) = (Vec::new(), Vec::new(), Vec::new());
     for item in pack.items.iter().filter(|i| !shared(i)) {
         match item {
