@@ -8,6 +8,7 @@ mod computer;
 mod knowledge;
 mod models;
 mod phone;
+mod prep;
 mod toolstore;
 mod vram;
 mod transcribe;
@@ -233,9 +234,15 @@ fn start_services(root: Option<String>) -> Result<(), String> {
     run_script(&stack_root(root), "start-all.ps1", &["-NoBrowser"])
 }
 
+/// Stops everything the Workstation runs (services::stop_all; stop-all.ps1 with a folder Prestige can't manage).
 #[tauri::command]
 fn stop_services(root: Option<String>) -> Result<(), String> {
-    run_script(&stack_root(root), "stop-all.ps1", &[])
+    let root = stack_root(root);
+    if services::supported(&root) {
+        std::thread::spawn(move || services::stop_all(&root));
+        return Ok(());
+    }
+    run_script(&root, "stop-all.ps1", &[])
 }
 
 /// Set while an update installs: the installer closes Prestige and starts the new version straight
@@ -260,8 +267,12 @@ fn stop_on_close(app: &AppHandle) {
     if ide_running() {
         return;
     }
-    let root = settings["stackRoot"].as_str().map(String::from);
-    let _ = run_script(&stack_root(root), "stop-all.ps1", &[]);
+    let root = stack_root(settings["stackRoot"].as_str().map(String::from));
+    if services::supported(&root) {
+        services::stop_all(&root);
+    } else {
+        let _ = run_script(&root, "stop-all.ps1", &[]);
+    }
 }
 
 /// Prestige IDE (github.com/Mr5elfDe5truct/prestige-ide) is open.
@@ -630,7 +641,8 @@ pub fn run() {
             services::svc_start,
             services::svc_stop,
             services::svc_restart,
-            services::svc_logs
+            services::svc_logs,
+            services::svc_stop_all
         ])
         .build(tauri::generate_context!())
         .expect("error while building Prestige")

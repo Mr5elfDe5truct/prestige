@@ -1,8 +1,8 @@
-// The service manager: Prestige starts, stops and restarts each Workstation service itself. The Workstation's
-// start-all.ps1 -Manifest still does the preparing (GPU plan, config files, model folders) and writes
-// data\runtime\services.json: each service's program, command line, folder and environment. Prestige runs them from
-// that, one at a time if need be, and reads their logs. An older Workstation without -Manifest falls back to running
-// start-all.ps1 whole (lib.rs).
+// The service manager: Prestige starts, stops and restarts each Workstation service itself. Before a start it gets
+// everything ready (prep.rs: GPU plan, config files, model folders) and writes data\runtime\services.json: each
+// service's program, command line, folder and environment. Prestige runs them from that, one at a time if need be,
+// reads their logs, and stops everything when it closes (stop_all, what stop-all.ps1 did). If preparing in Prestige
+// fails, a Workstation whose start-all.ps1 knows -Manifest prepares instead.
 
 use crate::{hidden, stack_root};
 use serde::Deserialize;
@@ -66,8 +66,13 @@ fn manifest_path(root: &Path) -> PathBuf {
 }
 
 /// The Workstation's start-all.ps1 knows -Manifest (2026-10-11 or newer).
-pub fn supported(root: &Path) -> bool {
+fn script_manifest(root: &Path) -> bool {
     fs::read_to_string(root.join("start-all.ps1")).map(|t| t.contains("[switch]$Manifest")).unwrap_or(false)
+}
+
+/// Prestige can prepare and start this Workstation itself.
+pub fn supported(root: &Path) -> bool {
+    (root.join("bin").exists() && root.join("tools").join("mcpo-config.json").exists()) || script_manifest(root)
 }
 
 fn read_manifest(root: &Path) -> Result<Manifest, String> {
@@ -75,8 +80,20 @@ fn read_manifest(root: &Path) -> Result<Manifest, String> {
     serde_json::from_str(text.trim_start_matches('\u{feff}')).map_err(|e| format!("services.json: {e}"))
 }
 
-/// Runs start-all.ps1 -Manifest: the GPU plan and config files for the current settings, and a fresh services.json.
+/// The GPU plan and config files for the current settings, and a fresh services.json: by Prestige (prep.rs), or by
+/// start-all.ps1 -Manifest when that fails.
 fn prepare(root: &Path) -> Result<Manifest, String> {
+    match crate::prep::prepare(root) {
+        Ok(p) => serde_json::from_value(p.manifest).map_err(|e| format!("services.json: {e}")),
+        Err(e) if script_manifest(root) => {
+            eprintln!("preparing in Prestige failed ({e}); using start-all.ps1 -Manifest");
+            prepare_with_script(root)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn prepare_with_script(root: &Path) -> Result<Manifest, String> {
     let script = root.join("start-all.ps1");
     let out = hidden(&mut Command::new("powershell.exe"))
         .args(["-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File"])
@@ -93,7 +110,7 @@ fn prepare(root: &Path) -> Result<Manifest, String> {
     read_manifest(root)
 }
 
-fn listening(port: u16) -> bool {
+pub(crate) fn listening(port: u16) -> bool {
     TcpStream::connect_timeout(&SocketAddr::from(([127, 0, 0, 1], port)), Duration::from_millis(250)).is_ok()
 }
 
@@ -149,10 +166,9 @@ fn stop_one(s_name: &str, port: u16) -> Result<(), String> {
         let _ = hidden(&mut Command::new("taskkill")).args(["/PID", &pid.to_string(), "/T", "/F"]).output();
     }
     if s_name == "ollama" {
-        // Ollama's model runner can outlive "ollama serve" and keep its VRAM (as in stop-all.ps1).
-        let _ = hidden(&mut Command::new("powershell.exe"))
-            .args(["-NoProfile", "-Command", "Get-Process llama-server -ErrorAction SilentlyContinue | Where-Object { $_.Path -like \"$env:LOCALAPPDATA\\Programs\\Ollama\\*\" } | Stop-Process -Force"])
-            .output();
+        // Ollama's model runner can outlive "ollama serve" and keep its VRAM.
+        let mut sys = processes();
+        kill_where(&mut sys, |_, exe, _| ollama_runner(exe));
     }
     let until = Instant::now() + Duration::from_secs(15);
     while listening(port) {
@@ -200,6 +216,99 @@ pub fn restart(root: &Path, name: &str) -> Result<(), String> {
     start(root, &[name.to_string()]).map(|_| ())
 }
 
+// ---------- stopping everything ----------
+
+fn processes() -> sysinfo::System {
+    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, UpdateKind};
+    let mut sys = sysinfo::System::new();
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::nothing().with_exe(UpdateKind::Always).with_cmd(UpdateKind::Always),
+    );
+    sys
+}
+
+fn lower(p: &Path) -> String {
+    p.to_string_lossy().to_lowercase()
+}
+
+/// Ollama's model runner: a llama-server.exe in Ollama's own folder (not the Workstation's llama.cpp).
+fn ollama_runner(exe: &str) -> bool {
+    let dir = std::env::var_os("LOCALAPPDATA").map(|d| lower(&PathBuf::from(d).join("Programs").join("Ollama")));
+    exe.ends_with("llama-server.exe") && dir.is_some_and(|d| exe.starts_with(&d))
+}
+
+/// Kills every process `pick` chooses (name, exe path and command line, all lowercase), never Prestige itself or what
+/// started it. Returns how many.
+fn kill_where(sys: &mut sysinfo::System, pick: impl Fn(&str, &str, &str) -> bool) -> usize {
+    let me = sysinfo::Pid::from_u32(std::process::id());
+    let mut keep = vec![me];
+    let mut at = sys.process(me).and_then(|p| p.parent());
+    while let Some(pid) = at {
+        if keep.contains(&pid) {
+            break;
+        }
+        keep.push(pid);
+        at = sys.process(pid).and_then(|p| p.parent());
+    }
+    let mut n = 0;
+    for (pid, p) in sys.processes() {
+        if keep.contains(pid) {
+            continue;
+        }
+        let name = p.name().to_string_lossy().to_lowercase();
+        // Prestige's own window (WebView2) is never the Workstation's.
+        if name == "msedgewebview2.exe" {
+            continue;
+        }
+        let exe = p.exe().map(lower).unwrap_or_default();
+        let cmd = p.cmd().iter().map(|a| a.to_string_lossy().to_lowercase()).collect::<Vec<_>>().join(" ");
+        if pick(&name, &exe, &cmd) && p.kill() {
+            n += 1;
+        }
+    }
+    n
+}
+
+/// Everything start-all.ps1 or Prestige started, as stop-all.ps1 did: Open WebUI's app window, every program in the
+/// Workstation folder (Prestige itself excepted, even a build run from inside it), the headless ComfyUI (it runs from
+/// Comfy Desktop's folder, so by port) and Ollama with its model runner. Comfy Desktop's own app is left alone.
+pub fn stop_all(root: &Path) -> usize {
+    let mut sys = processes();
+    let rootl = {
+        let mut r = lower(root);
+        if !r.ends_with('\\') && !r.ends_with('/') {
+            r.push(std::path::MAIN_SEPARATOR);
+        }
+        r
+    };
+    let profile = lower(&root.join("data").join("app-profile"));
+    let mut n = kill_where(&mut sys, |name, exe, cmd| {
+        ((name == "chrome.exe" || name == "msedge.exe") && cmd.contains(&profile))
+            || (!exe.is_empty() && exe.starts_with(&rootl))
+            || name == "ollama.exe"
+            || ollama_runner(exe)
+    });
+    for port in [8188, 8189] {
+        if let Some(pid) = port_pid(port) {
+            let _ = hidden(&mut Command::new("taskkill")).args(["/PID", &pid.to_string(), "/T", "/F"]).output();
+            n += 1;
+        }
+    }
+    n
+}
+
+/// Stops everything and waits (up to 20 s) for the services' ports to free up.
+pub fn stop_all_and_wait(root: &Path) {
+    stop_all(root);
+    let ports: Vec<u16> = read_manifest(root).map(|m| m.services.iter().map(|s| s.port).collect()).unwrap_or_else(|_| vec![11434, 8081, 8880, 8890, 8891, 8200, 8188, 8189, 8080]);
+    let until = Instant::now() + Duration::from_secs(20);
+    while ports.iter().any(|p| listening(*p)) && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(300));
+    }
+}
+
 // ---------- commands ----------
 
 /// Every service in services.json with whether it's answering on its port, plus the ones switched off.
@@ -220,10 +329,23 @@ pub async fn svc_list(root: Option<String>) -> serde_json::Value {
             .as_ref()
             .map(|m| m.off.iter().map(|o| serde_json::json!({ "name": o.name, "port": o.port, "why": o.why })).collect())
             .unwrap_or_default();
-        serde_json::json!({ "supported": true, "prepared": m.is_some(), "services": services, "off": off })
+        // Anything the last prepare needed to say (a bad setting, a GPU note).
+        let notes = fs::read_to_string(manifest_path(&root))
+            .ok()
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(t.trim_start_matches('\u{feff}')).ok())
+            .map(|v| v["notes"].clone())
+            .unwrap_or(serde_json::json!([]));
+        serde_json::json!({ "supported": true, "prepared": m.is_some(), "services": services, "off": off, "notes": notes })
     })
     .await
     .unwrap_or(serde_json::json!({ "supported": false }))
+}
+
+/// Stops every service and waits for them to go.
+#[tauri::command]
+pub async fn svc_stop_all(root: Option<String>) -> Result<(), String> {
+    let root = stack_root(root);
+    tauri::async_runtime::spawn_blocking(move || stop_all_and_wait(&root)).await.map_err(|e| e.to_string())
 }
 
 /// Starts services (all when `names` is empty or missing). Errors with "unsupported" on an older Workstation.

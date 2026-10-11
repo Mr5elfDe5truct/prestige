@@ -1098,5 +1098,6 @@ body[data-style="molded"] .sb-shot { border-radius: 16px; }
 .svc.managed { grid-template-columns: auto 1fr auto auto; }
 .svc .svc-acts { display: flex; gap: 8px; justify-content: flex-end; font-size: 11.5px; }
 .svc .svc-acts .linkish:disabled { opacity: .4; cursor: default; }
+.svc .svc-note { grid-column: 1 / -1; font-size: 11.5px; color: var(--warn, #d9a441); line-height: 1.4; }
 .sheet.svclogs { width: min(900px, calc(100vw - 32px)); }
 .sheet.svclogs .svc-log { max-height: 30vh; overflow: auto; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: 11.5px/1.45 var(--mono); white-space: pre-wrap; word-break: break-all; margin: 6px 0 12px; }
