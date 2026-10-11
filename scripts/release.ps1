@@ -2,13 +2,15 @@
 #   .\scripts\release.ps1 -Notes "What changed"            build + publish the version in tauri.conf.json
 #   .\scripts\release.ps1 -Notes "..." -Title "Prestige 0.8.0 · Updates itself"
 #   .\scripts\release.ps1 -Notes "..." -NoPublish           build and write latest.json only
+#   .\scripts\release.ps1 -NotesFile release-notes\0.50.0.md  notes from a file (quotes and line breaks are fine)
 #
 # Needs the updater signing key (made once with `npx tauri signer generate`), kept outside the repo:
 #   %USERPROFILE%\RG Studios\keys\prestige-updater.key      private key (never commit or share it)
 #   %USERPROFILE%\RG Studios\keys\prestige-updater.password its password
 # Override the location with $env:PRESTIGE_KEYS.
 param(
-    [Parameter(Mandatory)][string]$Notes,
+    [string]$Notes,
+    [string]$NotesFile,
     [string]$Title,
     [switch]$NoPublish
 )
@@ -17,6 +19,8 @@ $Repo = "Mr5elfDe5truct/prestige"
 $Root = Split-Path $PSScriptRoot -Parent
 $Keys = if ($env:PRESTIGE_KEYS) { $env:PRESTIGE_KEYS } else { Join-Path $env:USERPROFILE "RG Studios\keys" }
 
+if ($NotesFile) { $Notes = [IO.File]::ReadAllText((Resolve-Path $NotesFile)) }
+if (-not $Notes) { throw "Give -Notes or -NotesFile" }
 $conf = Get-Content (Join-Path $Root "src-tauri\tauri.conf.json") -Raw | ConvertFrom-Json
 $version = $conf.version
 if (-not $Title) { $Title = "Prestige $version" }
@@ -66,6 +70,9 @@ try {
 }
 
 if ($NoPublish) { return }
-gh release create "v$version" @files --repo $Repo --title $Title --notes $Notes --latest
+# The notes go through a file: passed on the command line, quotes in them broke gh's arguments.
+$notesTmp = Join-Path $env:TEMP "prestige-release-notes.md"
+[IO.File]::WriteAllText($notesTmp, $Notes, (New-Object Text.UTF8Encoding $false))
+gh release create "v$version" @files --repo $Repo --title $Title --notes-file $notesTmp --latest
 if ($LASTEXITCODE) { throw "gh release failed" }
 Write-Host "Published https://github.com/$Repo/releases/tag/v$version"

@@ -23,7 +23,8 @@
 <p align="center">
   <b>Your own AI, in a top hat.</b><br>
   A desktop app that chats, talks back, sees through your webcam and makes images, videos and songs,<br>
-  and runs entirely on your PC. No accounts, no cloud, no subscriptions.
+  and runs entirely on your PC. No accounts, no cloud, no subscriptions.<br>
+  <b>One installer:</b> Prestige sets up its own AI engines and models, then starts and stops them for you.
 </p>
 
 ---
@@ -42,6 +43,10 @@
   <tr>
     <td><img src="docs/highlights/styles.jpg" alt="Eleven styles: Molded, Classic and nine living styles"></td>
     <td><img src="docs/highlights/system.jpg" alt="System: load, VRAM, temperature and power for every card"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/highlights/setup.jpg" alt="Sets itself up: one installer fetches the engines, models and tools"></td>
+    <td><img src="docs/highlights/memory.jpg" alt="Remembers you: facts you share are kept on your PC and used in every chat"></td>
   </tr>
 </table>
 
@@ -147,7 +152,30 @@ transcript that's just its own words is ignored.
 
 ## 📸 Screenshots
 
-Real screenshots of 0.49.0 on the reference PC (RTX 3060 12 GB + RTX 2060 6 GB), Molded style with the Dragon theme.
+Real screenshots on the reference PC (RTX 3060 12 GB + RTX 2060 6 GB), Molded style with the Dragon theme.
+
+### New in 0.50.0: everything in one app
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/shots/setup-where.jpg" alt="Setup: where and how"><br><p align="center"><b>Setup: where and how</b></p></td>
+    <td width="50%"><img src="docs/shots/setup-packs.jpg" alt="Setup: pick the packs"><br><p align="center"><b>Setup: pick the packs</b></p></td>
+  </tr>
+  <tr>
+    <td><img src="docs/shots/setup-run.jpg" alt="Setup, installing"><br><p align="center"><b>Setup, installing</b></p></td>
+    <td><img src="docs/shots/packs.jpg" alt="Packs and Engines"><br><p align="center"><b>Packs and Engines</b></p></td>
+  </tr>
+  <tr>
+    <td><img src="docs/shots/memory.jpg" alt="Memory"><br><p align="center"><b>Memory</b></p></td>
+    <td><img src="docs/shots/memory-chat.jpg" alt="Remember that…"><br><p align="center"><b>"Remember that…"</b></p></td>
+  </tr>
+  <tr>
+    <td><img src="docs/shots/services.jpg" alt="Services, started by Prestige"><br><p align="center"><b>Services, started by Prestige</b></p></td>
+    <td><img src="docs/shots/workstation-settings.jpg" alt="Workstation settings"><br><p align="center"><b>Workstation settings</b></p></td>
+  </tr>
+</table>
+
+### Everything else
 
 <table>
   <tr>
@@ -245,6 +273,11 @@ Grab **`Prestige_<version>_x64-setup.exe`** from the [Releases](https://github.c
 page and run it. It installs to `C:\Program Files\RG Studios\Prestige` (Windows asks for admin approval once) and adds
 Prestige to the Start Menu and the desktop.
 
+On the first start, **Setup** opens by itself: pick a folder (default `%USERPROFILE%\RG Studios\Workstation`) and the
+model packs (the ones that suit your PC are ticked), and it installs the AI engines, the models and everything they need,
+showing each step as it goes. Add or remove packs any time in **System → Packs**. Already have a Workstation? Prestige
+finds it and keeps its files in step with each release (your own `llama-models.ini` is never overwritten).
+
 ### 🛠️ Build from source
 
 You need [Node.js](https://nodejs.org) LTS, [Rust](https://rustup.rs) (stable, MSVC) and
@@ -265,8 +298,8 @@ in the greeting and tells every model who it's talking to. Change them any time 
 
 Open **Settings** (the gear, top right):
 
-1. **Workstation folder**: where the Custom AI Workstation stack lives (the folder with `start-all.ps1`). The default is
-   `%USERPROFILE%\RG Studios\Workstation` (for example `C:\Users\you\RG Studios\Workstation`).
+1. **Workstation folder**: where the AI engines and models live (Setup fills this in). The default is
+   `%USERPROFILE%\RG Studios\Workstation`. **Set up or repair the Workstation…** runs Setup again.
 2. Optional: **Open WebUI API key**. Prestige keeps its own memory (**Memory…** in Settings, or click the memory line under the chat box); with Open WebUI connected, its memory is copied in and the two stay in step. Open WebUI also gives speech-to-text when the voice pack isn't installed:
    1. In Open WebUI (http://localhost:8080) open **Admin Panel → Settings → General** and turn on **Enable API Keys**.
    2. Open **Settings → Account → API keys → Create new secret key** and copy it.
@@ -275,7 +308,7 @@ Open **Settings** (the gear, top right):
 4. Optional: **Workstation settings…** (also on the System screen) changes how the Workstation runs without opening a
    file: which GPU each service uses, Ollama's context, keep-alive and KV cache, each llama.cpp model's context,
    experts in RAM and cache, whether ComfyUI and Open WebUI start, and the whole `llama-models.ini` if you want it.
-   Save, then **Restart services now**. Needs a Workstation from 2026-10-11 or newer for the Services tab.
+   Save, then **Restart services now**.
 
 Mic or camera blocked? Check **Windows Settings → Privacy & security → Microphone / Camera → let desktop apps access**.
 
@@ -283,8 +316,9 @@ Mic or camera blocked? Check **Windows Settings → Privacy & security → Micro
 
 | Part | What |
 |---|---|
-| `src/` (TypeScript + Vite) | `main.ts` chat (and images, songs, read-aloud and search in it) · `songwriter.ts` lyrics for songs · `songedit.ts` the song editor · `knowledge.ts` chat with your files · `research.ts` Deep Research · `missions.ts` Missions · `transcribe.ts` Transcribe · `computer.ts` Do it for me · `characters.ts` Characters · `talking.ts` Make it talk · `director.ts` Director · `inpaint.ts` Paint to change and click to select · `phone.ts` Phone access settings · `toolstore.ts` the tool store · `theme.ts` + `embers.ts` + `mesa.ts` + `skins/` Appearance and styles · `emotes.ts` reactions · `talk.ts` the talking mustache · `canvas.ts` the Canvas · `model3d.ts` the 3D viewer · `system.ts` dashboard · `studio.ts` gallery and generation · `reference.ts` reference images · `voice.ts` + `speech.ts` voice · `live.ts` + `livespeech.ts` + `mic-worklet.js` Live calls · `camera.ts` webcam · `tools.ts` chat tools · `memory.ts` + `memorypanel.ts` memory and the Memory sheet · `backends.ts` Ollama / llama.cpp |
-| `src-tauri/` (Rust + Tauri 2) | Knowledge's file reading (PDF pages, .docx, text), passages, embeddings and vector search (`knowledge.rs`), the Canvas's own origin (`canvas.rs`), a small JSON store (characters), the phone server and its page (`phone.rs`, `phone/index.html`), the tool store's added servers and sign-ins (`toolstore.rs`), running the Workstation's transcriber (`transcribe.rs`), joining a Director's shots, song and subtitles with ffmpeg (`director.rs`), screenshots, mouse and keyboard for Do it for me (`computer.rs`), GPU (every card) and RAM readouts, the workstation's GPU plan, chat files, chat search and settings, the Workstation's settings files (`workstation.rs`), starting, stopping and restarting each service and reading its log (`services.rs`), start/stop scripts, gallery thumbnails, ComfyUI websocket and uploads, mic and camera permissions |
+| `src/` (TypeScript + Vite) | `main.ts` chat (and images, songs, read-aloud and search in it) · `songwriter.ts` lyrics for songs · `songedit.ts` the song editor · `knowledge.ts` chat with your files · `research.ts` Deep Research · `missions.ts` Missions · `transcribe.ts` Transcribe · `computer.ts` Do it for me · `characters.ts` Characters · `talking.ts` Make it talk · `director.ts` Director · `inpaint.ts` Paint to change and click to select · `phone.ts` Phone access settings · `toolstore.ts` the tool store · `theme.ts` + `embers.ts` + `mesa.ts` + `skins/` Appearance and styles · `emotes.ts` reactions · `talk.ts` the talking mustache · `canvas.ts` the Canvas · `model3d.ts` the 3D viewer · `system.ts` dashboard · `studio.ts` gallery and generation · `reference.ts` reference images · `voice.ts` + `speech.ts` voice · `live.ts` + `livespeech.ts` + `mic-worklet.js` Live calls · `camera.ts` webcam · `tools.ts` chat tools · `memory.ts` + `memorypanel.ts` memory and the Memory sheet · `packs.ts` Packs and Engines · `setup.ts` Setup · `backends.ts` Ollama / llama.cpp |
+| `src-tauri/` (Rust + Tauri 2) | Knowledge's file reading (PDF pages, .docx, text), passages, embeddings and vector search (`knowledge.rs`), the Canvas's own origin (`canvas.rs`), a small JSON store (characters), the phone server and its page (`phone.rs`, `phone/index.html`), the tool store's added servers and sign-ins (`toolstore.rs`), running the Workstation's transcriber (`transcribe.rs`), joining a Director's shots, song and subtitles with ffmpeg (`director.rs`), screenshots, mouse and keyboard for Do it for me (`computer.rs`), GPU (every card) and RAM readouts, the workstation's GPU plan, chat files, chat search and settings, the Workstation's settings files (`workstation.rs`), starting, stopping and restarting each service and reading its log (`services.rs`), getting the Workstation ready to start: GPU plan, config files and each service's command line (`prep.rs`), model packs and engine updates (`packs.rs`), Setup (`setup.rs`), keeping the Workstation's files in step with the ones Prestige ships (`engine.rs`), gallery thumbnails, ComfyUI websocket and uploads, mic and camera permissions |
+| `engine/` (PowerShell, Python) | The Workstation's own files, shipped inside every release: the tool server's config and the Reddit / Hugging Face / GitHub scout, the voice server (Whisper + VoxCPM2) and transcriber, ComfyUI workflows and nodes, the Open WebUI theme, and the scripted installer (`engine/install.ps1`) |
 | `android/` (Java, no Gradle) | The Android app: `MainActivity.java` the WebView, permissions, file picking and saving · `Relay.java` the local relay to the PC · `SetupServer.java` + `assets/setup.html` connecting and QR scanning (jsQR, Apache-2.0) · `build.ps1` builds and signs the APK |
 | Look | Dragon red & gold · fonts Rye, Oxanium, IBM Plex Sans and JetBrains Mono, bundled from Fontsource (SIL OFL) |
 
