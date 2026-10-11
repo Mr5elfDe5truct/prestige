@@ -54,6 +54,7 @@ import { addStache } from "./talk";
 import { applyCachedLook, applyLook, closeAppearance, initAppearance, openAppearance, type Look } from "./theme";
 import { initMesa } from "./mesa";
 import { initScrollLock } from "./scrolllock";
+import { initWorkstation, openWebUIOn } from "./workstation";
 // the living styles: their shared hooks, then each one (theme.ts lists them; skins/backgrounds.ts draws behind them)
 import "./skins/living.css";
 import "./skins/matrix.css";
@@ -2713,7 +2714,8 @@ function startStack(spans: HTMLElement[]): Promise<boolean> {
         }
       });
       chatUp = ok[0] || ok[1];
-      if (ok[0] && ok[1] && ok[2]) break;
+      // Open WebUI can be switched off in the Workstation settings; then there's no need to wait for it.
+      if (ok[0] && ok[1] && (ok[2] || !openWebUIOn())) break;
     }
     return chatUp;
   })().finally(() => (starting = null));
@@ -3102,6 +3104,19 @@ async function main() {
   greet(true);
   wire();
   initSystem({ toast, nameFor, openCatalog: () => openCatalog() });
+  initWorkstation({
+    toast,
+    root: () => settings.stackRoot ?? null,
+    restartAll: async () => {
+      toast("Restarting the AI services with the new settings…");
+      await invoke("ws_stop_and_wait", { root: settings.stackRoot ?? null });
+      const up = await startStack(bootRows());
+      await refreshPlan(settings.stackRoot ?? null);
+      await refreshModels();
+      refreshMemoryStatus();
+      toast(up ? "Services are back up with the new settings." : "The services didn't come back up. Check the Workstation folder in Settings.", up ? "" : "warn");
+    },
+  });
   initCanvas({
     toast,
     send: (text) => {

@@ -1070,3 +1070,24 @@ body[data-style="molded"] .sb-shot { border-radius: 16px; }
 .sheet.songedit [hidden] { display: none !important; }
 .se-stems { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px 14px; margin-top: 8px; }
 .sheet .se-stems label.check { margin-top: 0; }
+
+/* Workstation settings (workstation.ts) */
+.card-head .btn + .btn { margin-left: 0; }
+.sheet.workstation { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 32px); }
+.sheet.workstation .ws-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.sheet.workstation .ws-head h2 { margin: 0; }
+.sheet.workstation .ws-body { max-height: calc(100vh - 260px); overflow: auto; padding-right: 4px; }
+.sheet.workstation .ws-sub { margin: 18px 0 2px; font-size: 13px; color: var(--gold); }
+.sheet.workstation .ws-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
+.sheet.workstation .ws-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.sheet.workstation select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font: 13px var(--body); padding: 8px 10px; text-transform: none; letter-spacing: 0; }
+.sheet.workstation label small { text-transform: none; letter-spacing: 0; font: 11.5px var(--body); }
+.sheet.workstation textarea { width: 100%; font: 12.5px var(--mono); white-space: pre; }
+.sheet.workstation .warn { color: var(--gold); font-size: 13px; }
+.sheet.workstation .ws-model { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px 12px; margin-top: 12px; }
+.sheet.workstation .ws-model-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.sheet.workstation .ws-model-head small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sheet.workstation .ws-model > small { display: block; margin-top: 8px; overflow-wrap: anywhere; }
+.sheet.workstation .ws-apply { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; padding: 10px 12px; border: 1px solid var(--gold); border-radius: 10px; font-size: 13px; }
+.sheet.workstation .ws-apply[hidden] { display: none; }
+@media (max-width: 620px) { .sheet.workstation .ws-grid, .sheet.workstation .ws-grid.three { grid-template-columns: 1fr; } }
