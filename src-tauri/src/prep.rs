@@ -569,10 +569,9 @@ impl Builder<'_> {
     }
 }
 
-/// What a prepare did, for the UI: where the GPU plan put things and anything that needs saying.
+/// What a prepare wrote (services.json, with its notes).
 pub struct Prepared {
     pub manifest: Value,
-    pub notes: Vec<String>,
 }
 
 /// Everything start-all.ps1 -Manifest does: the settings, the GPU plan, the config files in data\runtime, the
@@ -759,7 +758,7 @@ pub fn prepare(root: &Path) -> Result<Prepared, String> {
     let written = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let manifest = json!({ "version": 1, "by": "prestige", "written": written, "root": root, "services": b.services, "off": b.off, "notes": notes });
     write(&runtime.join("services.json"), &serde_json::to_string_pretty(&manifest).unwrap())?;
-    Ok(Prepared { manifest, notes })
+    Ok(Prepared { manifest })
 }
 
 #[cfg(test)]

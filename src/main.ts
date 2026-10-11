@@ -51,6 +51,7 @@ import { GROUPS, describeCall, loadTools, runTool, toolContext, toolSpecs, type 
 import { errMsg, freeLlamaVram, http, nameFor, listModels, ping, streamChat, OLLAMA, LLAMA, type ChatMessage, type ModelInfo, type StreamStats } from "./backends";
 import { addFact, memoryContext, factCount, listFacts, listOwui, syncFromOwui, rememberRequest, DEFAULT_OWUI, type MemoryConfig } from "./memory";
 import { initMemoryPanel, openMemoryPanel } from "./memorypanel";
+import { initPacks } from "./packs";
 import { addStache } from "./talk";
 import { applyCachedLook, applyLook, closeAppearance, initAppearance, openAppearance, type Look } from "./theme";
 import { initMesa } from "./mesa";
@@ -3058,6 +3059,17 @@ function wire() {
   });
 }
 
+/** A yes / no question in Prestige's own style; true for the OK button. */
+function confirmBox(title: string, text: string, ok = "OK"): Promise<boolean> {
+  const dlg = $("#confirm") as HTMLDialogElement;
+  $("#confirm-title").textContent = title;
+  $("#confirm-text").textContent = text;
+  $("#confirm-ok").textContent = ok;
+  dlg.returnValue = "";
+  dlg.showModal();
+  return new Promise((res) => dlg.addEventListener("close", () => res(dlg.returnValue === "ok"), { once: true }));
+}
+
 // ---------- screens ----------
 function go(name: string) {
   $$("[data-screen]").forEach((s) => (s.hidden = s.dataset.screen !== name));
@@ -3113,6 +3125,16 @@ async function main() {
       await refreshModels();
       refreshMemoryStatus();
       toast(up ? "Services are back up with the new settings." : "The services didn't come back up. Check the Workstation folder in Settings.", up ? "" : "warn");
+    },
+  });
+  initPacks({
+    toast,
+    root: () => settings.stackRoot ?? null,
+    confirm: confirmBox,
+    restartServices: async () => {
+      await invoke("ws_stop_and_wait", { root: settings.stackRoot ?? null });
+      await startStack(bootRows());
+      await refreshModels();
     },
   });
   initCanvas({

@@ -207,6 +207,24 @@ pub fn start(root: &Path, names: &[String]) -> Result<Vec<String>, String> {
     }
 }
 
+/// Stops one service by name (its port from services.json, or the usual one).
+pub fn stop_named(root: &Path, name: &str) -> Result<(), String> {
+    let usual = match name {
+        "ollama" => 11434,
+        "llama-server" => 8081,
+        "kokoro" => 8880,
+        "voice" => 8890,
+        "phonon" => 8891,
+        "mcpo" => 8200,
+        "comfyui" => 8188,
+        "comfyui-quick" => 8189,
+        "open-webui" => 8080,
+        _ => return Err(format!("no service called {name}")),
+    };
+    let port = read_manifest(root).ok().and_then(|m| m.services.iter().find(|s| s.name == name).map(|s| s.port)).unwrap_or(usual);
+    stop_one(name, port)
+}
+
 pub fn restart(root: &Path, name: &str) -> Result<(), String> {
     let port = read_manifest(root)
         .ok()
