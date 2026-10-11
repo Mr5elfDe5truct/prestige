@@ -3,7 +3,7 @@
 // makes, and asks first before anything that changes files, runs commands, drives the browser,
 // uses the camera or starts a render.
 import { invoke } from "@tauri-apps/api/core";
-import { errMsg, http } from "./backends";
+import { errMsg, http, type ChatMessage } from "./backends";
 import { libraryNote, readyDocs, searchFilesTool } from "./knowledge";
 
 export const MCPO = "http://127.0.0.1:8200";
@@ -177,10 +177,34 @@ export function toolSpecs(tools: ToolDef[], enabled: Set<string>) {
 const MAX_RESULT = 8000;
 
 /** Rounds of tool calls in one reply. A model that still wants more after these gets one more turn without tools,
- *  with LAST_ROUND added to the newest result, so it answers from what it found instead of the reply just ending. */
+ *  with LAST_ROUND after the results, so it answers from what it found instead of the reply just ending. */
 export const TOOL_ROUNDS = 8;
-export const LAST_ROUND =
-  "\n\n(That was the last tool call you can make for this reply. Answer now with what you have, and say what you couldn't get to.)";
+export const LAST_ROUND: ChatMessage = {
+  role: "user",
+  content: "(No more tool calls for this reply. Answer now with what you have, and say what you couldn't get to.)",
+};
+
+/** Without tools on offer, Qwen sometimes still types a call (<tool_call>…</tool_call>) into its answer; drop it. */
+export const withoutToolCalls = (text: string) => text.replace(/<tool_call>[\s\S]*?(<\/tool_call>|$)/g, "").trim();
+
+/** A rough token count: about 3 characters a token (HTML runs nearer 2.8, prose nearer 4). */
+export const tokensIn = (text: string) => Math.ceil(text.length / 3);
+
+const SHORTENED = "(An earlier result, shortened to fit the model's context. Its start:)";
+
+/** Tool results pile up over a reply's rounds, and a small context (Qwen3.8 27B's 20k) overflowed after a few long
+ *  pages, so llama.cpp refused the request. Before each round this cuts the oldest results, never the newest one, to
+ *  a few lines each until `reserve` tokens are left for the answer. False when it still doesn't fit. */
+export function fitToolResults(messages: ChatMessage[], ctx: number, reserve: number): boolean {
+  const used = () => messages.reduce((n, m) => n + tokensIn(m.content) + (m.tool_calls ? tokensIn(JSON.stringify(m.tool_calls)) : 0), 0);
+  const fits = () => used() + reserve <= ctx;
+  const results = messages.filter((m) => m.role === "tool");
+  for (const m of results.slice(0, -1)) {
+    if (fits()) return true;
+    if (!m.content.startsWith(SHORTENED)) m.content = `${SHORTENED}\n${m.content.slice(0, 300)}…`;
+  }
+  return fits();
+}
 
 /** The chat being answered, so search_past_chats leaves it out. */
 export const toolContext = { chatId: "" };

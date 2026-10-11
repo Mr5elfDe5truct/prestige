@@ -47,8 +47,8 @@ import {
 import { bestFor, capsFor, chipsHtml, supportsTools } from "./caps";
 import { initCatalog, openCatalog, phoneCatalog } from "./catalog";
 import { checkForUpdates, initUpdates } from "./updates";
-import { GROUPS, LAST_ROUND, TOOL_ROUNDS, describeCall, loadTools, runTool, toolContext, toolSpecs, type ToolDef, type ToolStep } from "./tools";
-import { errMsg, freeLlamaVram, http, nameFor, listModels, ping, streamChat, OLLAMA, LLAMA, type ChatMessage, type ModelInfo, type StreamStats } from "./backends";
+import { GROUPS, LAST_ROUND, TOOL_ROUNDS, describeCall, fitToolResults, withoutToolCalls, loadTools, runTool, toolContext, tokensIn, toolSpecs, type ToolDef, type ToolStep } from "./tools";
+import { ctxOf, errMsg, freeLlamaVram, http, nameFor, listModels, ping, streamChat, OLLAMA, LLAMA, type ChatMessage, type ModelInfo, type StreamStats } from "./backends";
 import { addMemory, memoryContext, listMemories, rememberRequest, DEFAULT_OWUI, type MemoryConfig } from "./memory";
 import { addStache } from "./talk";
 import { applyCachedLook, applyLook, closeAppearance, initAppearance, openAppearance, type Look } from "./theme";
@@ -352,8 +352,7 @@ const facts = (n: number | null) => `${n ?? 0} ${n === 1 ? "fact" : "facts"}`;
 
 /** The selected model's context: Ollama's from the GPU plan (sized to its card), a llama.cpp model's from its preset. */
 function ctxLabel() {
-  const a = current?.backend === "llama" ? (current.args ?? []) : null;
-  const n = a ? Number(a[a.indexOf("--ctx-size") + 1]) || 32768 : ollamaCtx();
+  const n = current ? ctxOf(current) : ollamaCtx();
   return `${Math.round(n / 1024)}k context`;
 }
 onPlanChange(() => refreshMemoryStatus());
@@ -2357,12 +2356,18 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
       onStats: (s: StreamStats) => (stat.textContent = statText(s, true)),
     };
     let stats: StreamStats | undefined;
+    let cutOff = false;
+    // Room the answer needs: a Canvas page is rewritten whole, so about as long as the newest one; else a quarter.
+    const ctx = ctxOf(model);
+    const reserve = canvasTurn && newestPage >= 0 ? tokensIn(history[newestPage].content) + 1024 : Math.round(ctx / 4);
     for (let round = 0; round <= TOOL_ROUNDS; round++) {
       const before = reply.content.length;
-      const last = round === TOOL_ROUNDS;
-      if (last) messages[messages.length - 1].content += LAST_ROUND;
+      // Out of rounds, or out of room for more results: answer with what's here.
+      const last = round === TOOL_ROUNDS || (round > 0 && !fitToolResults(messages, ctx, reserve));
+      if (last) messages.push(LAST_ROUND);
       const res = await streamChat(model, messages, handlers, busy.signal, last ? undefined : specs, live ? { think: false, numCtx: LIVE_CTX, keepAlive: "30m" } : {});
       stats = res;
+      cutOff = res.cutOff;
       if (last || !res.toolCalls.length || !busy || busy.signal.aborted) break;
       messages.push({ role: "assistant", content: reply.content.slice(before), tool_calls: res.toolCalls });
       for (const call of res.toolCalls) {
@@ -2409,6 +2414,9 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
       if (!reply.content) body.innerHTML = `<span class="status-line">Reading the results…</span>`;
     }
     reply.stats = stats;
+    reply.content = withoutToolCalls(reply.content);
+    // Without this the reply just stopped mid-sentence (or mid-page), as if Prestige had hung.
+    if (cutOff) reply.content += `\n\n*(Cut off: this reply filled ${model.name}'s ${Math.round(ctxOf(model) / 1024)}k context. Start a new chat, or pick a model with more context, to go further.)*`;
     // Llama 3.1 sometimes types a pretend tool call as plain text ({"name": ..., "parameters": ...}) instead
     // of calling a tool. Drop it when it doesn't name a real tool, so only the actual answer is shown.
     const fake = reply.content.match(/^\s*\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"parameters"\s*:\s*\{[^}]*\}\s*\}\s*/);

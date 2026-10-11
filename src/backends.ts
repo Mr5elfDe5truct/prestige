@@ -37,6 +37,12 @@ export interface ModelInfo {
   inputModalities?: string[];
 }
 
+/** A model's context in tokens: a llama.cpp model's from its preset, Ollama's from the GPU plan (sized to its card). */
+export function ctxOf(model: ModelInfo): number {
+  const a = model.backend === "llama" ? (model.args ?? []) : null;
+  return a ? Number(a[a.indexOf("--ctx-size") + 1]) || 32768 : ollamaCtx();
+}
+
 /** The models from the last listModels() call, for screens that need their details. */
 export let lastModels: ModelInfo[] = [];
 
@@ -291,8 +297,10 @@ export async function streamChat(
   signal: AbortSignal,
   tools?: any[],
   extra: ChatExtra = {},
-): Promise<StreamStats & { toolCalls: ToolCall[] }> {
+): Promise<StreamStats & { toolCalls: ToolCall[]; cutOff: boolean }> {
   const toolCalls: ToolCall[] = [];
+  // The model stopped because the context was full (or its token limit), not because it was done.
+  let cutOff = false;
   const withTools = tools?.length ? { tools } : {};
   const start = performance.now();
   let first = 0;
@@ -336,6 +344,7 @@ export async function streamChat(
       for (const c of j.message?.tool_calls ?? []) {
         toolCalls.push({ id: `call_${toolCalls.length}`, name: c.function?.name, arguments: parseArgs(c.function?.arguments) });
       }
+      if (j.done && j.done_reason === "length") cutOff = true;
       if (j.done && j.eval_count) {
         const secs = (j.eval_duration ?? 0) / 1e9;
         final = {
@@ -371,6 +380,7 @@ export async function streamChat(
       if (data === "[DONE]") return;
       const j = JSON.parse(data);
       if (j.error) throw new Error(j.error.message ?? String(j.error));
+      if (j.choices?.[0]?.finish_reason === "length") cutOff = true;
       const d = j.choices?.[0]?.delta;
       if (d?.reasoning_content) {
         h.onThinking(d.reasoning_content);
@@ -410,5 +420,5 @@ export async function streamChat(
   }
   const secs = first ? (performance.now() - first) / 1000 : 0;
   const stats = final ?? { tokens: chunks, tps: secs ? chunks / secs : 0, seconds: (performance.now() - start) / 1000 };
-  return { ...stats, toolCalls };
+  return { ...stats, toolCalls, cutOff };
 }
