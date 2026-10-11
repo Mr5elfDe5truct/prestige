@@ -2237,6 +2237,9 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
         $("#memory-status").textContent = `Memory unavailable · ${errMsg(e)}`;
       }
     }
+    // The model mustn't go looking for a way to save what Prestige already saved.
+    if (fact && reply.note)
+      memoryText += `${memoryText ? "\n\n" : ""}Prestige has already saved this to memory: "${fact}". Confirm it in a few words; don't call any tool to save or look for it.`;
 
     // Knowledge: passages from the user's files that match this question (and the one before, for follow-ups).
     let kbText = "";
