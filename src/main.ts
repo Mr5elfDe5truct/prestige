@@ -49,7 +49,8 @@ import { initCatalog, openCatalog, phoneCatalog } from "./catalog";
 import { checkForUpdates, initUpdates } from "./updates";
 import { GROUPS, describeCall, loadTools, runTool, toolContext, toolSpecs, type ToolDef, type ToolStep } from "./tools";
 import { errMsg, freeLlamaVram, http, nameFor, listModels, ping, streamChat, OLLAMA, LLAMA, type ChatMessage, type ModelInfo, type StreamStats } from "./backends";
-import { addMemory, memoryContext, listMemories, rememberRequest, DEFAULT_OWUI, type MemoryConfig } from "./memory";
+import { addFact, memoryContext, factCount, listFacts, listOwui, syncFromOwui, rememberRequest, DEFAULT_OWUI, type MemoryConfig } from "./memory";
+import { initMemoryPanel, openMemoryPanel } from "./memorypanel";
 import { addStache } from "./talk";
 import { applyCachedLook, applyLook, closeAppearance, initAppearance, openAppearance, type Look } from "./theme";
 import { initMesa } from "./mesa";
@@ -359,19 +360,13 @@ function ctxLabel() {
 }
 onPlanChange(() => refreshMemoryStatus());
 
+// The memory is Prestige's own (memory.ts); with Open WebUI connected, what it learns is copied in here too.
 async function refreshMemoryStatus() {
   const el = $("#memory-status");
   const cfg = memCfg();
-  if (!cfg) {
-    el.textContent = "Shared memory off · connect Open WebUI";
-    return;
-  }
-  try {
-    memoryTotal = (await listMemories(cfg)).length;
-    el.textContent = `Shared memory on · ${facts(memoryTotal)} · ${ctxLabel()}`;
-  } catch (e) {
-    el.textContent = `Shared memory unavailable · ${errMsg(e)}`;
-  }
+  if (cfg) await syncFromOwui(cfg).catch(() => 0);
+  memoryTotal = await factCount();
+  el.textContent = `Memory · ${facts(memoryTotal)} · ${ctxLabel()}`;
 }
 
 // ---------- rendering ----------
@@ -1090,8 +1085,7 @@ function beginLiveChat() {
   chat.title = `Live call${c ? ` with ${c.name}` : ""} · ${when}`;
   renderChat();
   renderHistory();
-  const cfg = memCfg();
-  liveMemory = cfg ? memoryContext(cfg, "").then((m) => m.text).catch(() => "") : Promise.resolve("");
+  liveMemory = activeCharacter()?.sharedMemory === false ? Promise.resolve("") : memoryContext("").then((m) => m.text).catch(() => "");
 }
 
 /** Takes the last turn back out of the chat (a reply cut off before it said anything) and returns what the user said. */
@@ -2209,7 +2203,7 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
   try {
     // Shared memory: "remember that …" saves a fact; every reply gets the relevant facts. Talking to a character, the
     // fact goes into its own memory, and it gets the shared memory only when that's switched on for it.
-    const cfg = char?.sharedMemory === false ? null : memCfg();
+    const shared = char?.sharedMemory !== false;
     let memoryText = "";
     const fact = rememberRequest(text);
     const savedNote = (note: string) => {
@@ -2223,24 +2217,24 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
       await remember(char, fact);
       savedNote(`saved to ${char.name}'s memory: ${fact}`);
     }
-    if (cfg) {
-      if (fact && !char) {
-        try {
-          await addMemory(cfg, fact);
-          savedNote(`saved to shared memory: ${fact}`);
-        } catch (e) {
-          toast(`Couldn't save that memory: ${errMsg(e)}`, "warn");
-        }
+    if (fact && !char) {
+      try {
+        await addFact(fact, memCfg());
+        savedNote(`saved to memory: ${fact}`);
+      } catch (e) {
+        toast(`Couldn't save that memory: ${errMsg(e)}`, "warn");
       }
+    }
+    if (shared) {
       if (live) memoryText = await liveMemory;
       else try {
         const recent = chat.messages.filter((m) => m.role === "user").slice(-7).map((m) => m.content).join("\n\n");
-        const mem = await memoryContext(cfg, recent);
+        const mem = await memoryContext(recent);
         memoryText = mem.text;
         memoryTotal = mem.total;
-        $("#memory-status").textContent = `Shared memory on · ${facts(mem.total)} · ${mem.count} in this reply`;
+        $("#memory-status").textContent = `Memory · ${facts(mem.total)} · ${mem.count} in this reply`;
       } catch (e) {
-        $("#memory-status").textContent = `Shared memory unavailable · ${errMsg(e)}`;
+        $("#memory-status").textContent = `Memory unavailable · ${errMsg(e)}`;
       }
     }
 
@@ -2581,22 +2575,19 @@ async function phoneSettings(action: string, a: any) {
     settings.kbAll = a.on ? undefined : false;
     saveSettings();
   } else if (action === "remember") {
-    const cfg = memCfg();
-    if (!cfg) throw new Error("Shared memory isn't set up (Settings → Shared memory on the PC).");
     const fact = String(a.fact ?? "").trim();
     if (!fact) throw new Error("Say what to remember.");
-    await addMemory(cfg, fact);
+    await addFact(fact, memCfg());
+    refreshMemoryStatus();
   } else if (action === "memories") {
-    const cfg = memCfg();
-    if (!cfg) return { memories: null };
-    return { memories: (await listMemories(cfg)).map((m) => m.content) };
+    return { memories: (await listFacts()).map((m) => m.content) };
   } else if (action !== "list") throw new Error(`unknown Settings action ${action}`);
   const on = enabledGroups();
   const { tools } = await loadTools();
   return {
     tools: GROUPS.map((g) => ({ id: g.id, label: g.label, hint: g.hint, on: on.has(g.id), count: tools.filter((t) => t.group === g.id).length })),
     kbAll: settings.kbAll !== false,
-    memory: !!memCfg(),
+    memory: true,
   };
 }
 
@@ -2658,7 +2649,7 @@ function livePersona() {
 const BOOT: { label: string; url: string }[] = [
   { label: "Ollama", url: `${OLLAMA}/api/version` },
   { label: "llama.cpp · Qwen3.6 35B", url: `${LLAMA}/models` },
-  { label: "Open WebUI · shared memory", url: `${DEFAULT_OWUI}/api/config` },
+  { label: "Open WebUI", url: `${DEFAULT_OWUI}/api/config` },
   { label: "ComfyUI", url: "http://127.0.0.1:8188/system_stats" },
   { label: "Kokoro voice", url: "http://127.0.0.1:8880/v1/models" },
 ];
@@ -3020,7 +3011,8 @@ function wire() {
     dlg.returnValue = ""; // Esc keeps the last return value: don't let it count as Save
     dlg.showModal();
   };
-  $("#memory-status").addEventListener("click", openSettings);
+  $("#memory-status").addEventListener("click", () => openMemoryPanel());
+  $("#open-memory").addEventListener("click", () => openMemoryPanel());
   $("#settings-btn").addEventListener("click", openSettings);
   $("#test-key").addEventListener("click", async () => {
     const out = $("#settings-test");
@@ -3031,8 +3023,8 @@ function wire() {
     }
     out.textContent = "Testing…";
     try {
-      const n = (await listMemories({ key: keyInput.value.trim(), url })).length;
-      out.textContent = `Connected. ${n} memories found.`;
+      const n = (await listOwui({ key: keyInput.value.trim(), url })).length;
+      out.textContent = `Connected. Open WebUI has ${n} memories; they're copied into Prestige's memory when you save.`;
     } catch (e) {
       const m = errMsg(e);
       out.textContent = m.includes("isn't running")
@@ -3056,6 +3048,8 @@ function wire() {
     settings.keepRunning = keepInput.checked || undefined;
     settings.liveStt = ($("#live-phonon") as HTMLInputElement).checked ? "phonon" : undefined;
     await saveSettings();
+    const cfg = memCfg();
+    if (cfg) syncFromOwui(cfg, true).then((n) => n && toast(`Copied ${facts(n)} from Open WebUI into Prestige's memory.`)).catch(() => {});
     if (inTauri) {
       const info = await invoke<{ startScript: boolean }>("stack_info", { root: settings.stackRoot ?? null });
       if (!info.startScript) toast("start-all.ps1 isn't in that folder.", "warn");
@@ -3138,6 +3132,7 @@ async function main() {
       ta.setSelectionRange(text.length, text.length);
     },
   });
+  initMemoryPanel({ owui: memCfg, toast, onChange: () => refreshMemoryStatus() });
   initKnowledge({
     toast,
     useAll: () => settings.kbAll !== false,
