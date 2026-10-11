@@ -2695,12 +2695,12 @@ async function checkAll(spans: HTMLElement[]) {
 
 let starting: Promise<boolean> | null = null;
 
-/** Runs start-all.ps1 and ticks each service as it comes up. True once a chat backend answers. */
+/** Starts the Workstation's services and ticks each as it comes up. True once a chat backend answers. */
 function startStack(spans: HTMLElement[]): Promise<boolean> {
   if (starting) return starting;
   starting = (async () => {
     try {
-      // Prestige's own service manager (services.rs); an older Workstation runs start-all.ps1 whole instead.
+      // Prestige's own service manager (services.rs, prep.rs); a folder it can't manage runs start-all.ps1 whole instead.
       await invoke("svc_start", { root: settings.stackRoot ?? null, names: null }).catch(async (e) => {
         if (errMsg(e) !== "unsupported") throw e;
         await invoke("start_services", { root: settings.stackRoot ?? null });

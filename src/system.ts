@@ -584,6 +584,7 @@ interface SvcList {
   prepared?: boolean;
   services?: { name: string; port: number; up: boolean }[];
   off?: { name: string; port: number; why: string }[];
+  notes?: string[] | null;
 }
 const SVC_NAMES: Record<string, string> = {
   ollama: "Ollama",
@@ -701,6 +702,12 @@ function managedServices(list: SvcList) {
     why.className = "muted svc-acts";
     why.textContent = o.why;
     box.append(dot, n, p, why);
+  }
+  for (const note of list.notes ?? []) {
+    const line = document.createElement("small");
+    line.className = "svc-note warn";
+    line.textContent = `! ${note}`;
+    box.append(line);
   }
 }
 

@@ -112,24 +112,28 @@ fn backup_once(path: &Path) {
     }
 }
 
-/// Stops every service (stop-all.ps1) and waits until it's done; the UI starts them again, ticking each as it comes up.
+/// Stops every service and waits until it's done; the UI starts them again, ticking each as it comes up.
 #[tauri::command]
 pub async fn ws_stop_and_wait(root: Option<String>) -> Result<(), String> {
     let root = stack_root(root);
     tauri::async_runtime::spawn_blocking(move || {
-        let script = root.join("stop-all.ps1");
-        if !script.exists() {
-            return Err(format!("stop-all.ps1 not found in {}", root.display()));
-        }
-        let out = hidden(&mut Command::new("powershell.exe"))
-            .args(["-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File"])
-            .arg(&script)
-            .current_dir(&root)
-            .stdin(Stdio::null())
-            .output()
-            .map_err(|e| format!("could not run stop-all.ps1: {e}"))?;
-        if !out.status.success() {
-            return Err(format!("stop-all.ps1 failed: {}", String::from_utf8_lossy(&out.stderr).chars().take(300).collect::<String>()));
+        if crate::services::supported(&root) {
+            crate::services::stop_all_and_wait(&root);
+        } else {
+            let script = root.join("stop-all.ps1");
+            if !script.exists() {
+                return Err(format!("stop-all.ps1 not found in {}", root.display()));
+            }
+            let out = hidden(&mut Command::new("powershell.exe"))
+                .args(["-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File"])
+                .arg(&script)
+                .current_dir(&root)
+                .stdin(Stdio::null())
+                .output()
+                .map_err(|e| format!("could not run stop-all.ps1: {e}"))?;
+            if !out.status.success() {
+                return Err(format!("stop-all.ps1 failed: {}", String::from_utf8_lossy(&out.stderr).chars().take(300).collect::<String>()));
+            }
         }
         // Give Windows a moment to release the ports and the VRAM.
         std::thread::sleep(std::time::Duration::from_secs(2));
