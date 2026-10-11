@@ -163,7 +163,7 @@
         <div class="gpu-cards" id="gpu-cards"></div>
         <div class="two">
           <div class="card">
-            <div class="card-head"><h3>Models</h3><span class="credit" id="models-note"></span><button class="btn" id="sys-catalog">＋ Get more models</button></div>
+            <div class="card-head"><h3>Models</h3><span class="credit" id="models-note"></span><button class="btn" id="sys-workstation" title="GPUs, Ollama, llama.cpp models and which services start">Workstation settings</button><button class="btn" id="sys-catalog">＋ Get more models</button></div>
             <div class="list" id="model-rows"></div>
           </div>
           <div class="card">
@@ -358,6 +358,7 @@
         <button class="linkish" id="look-reset" type="button">Back to the Dragon look</button>
         <h2 class="sub">Workstation</h2>
         <label>Workstation folder (holds start-all.ps1 and stop-all.ps1)<input id="stack-root" type="text" spellcheck="false" /></label>
+        <button class="btn" type="button" id="open-workstation">Workstation settings… (GPUs, Ollama, llama.cpp models, services)</button>
         <label class="check"><input id="keep-running" type="checkbox" /> Keep the AI services running when Prestige closes</label>
         <label class="check"><input id="live-phonon" type="checkbox" /> Live calls listen with Phonon-2 (on the CPU, English) instead of Whisper: quicker, and the GPU memory goes to the Live model. Needs the Workstation's transcribe pack</label>
         <h2 class="sub">Phone access</h2>
@@ -385,6 +386,31 @@
           <button class="btn" value="cancel">Cancel</button>
           <button class="btn" id="test-key" type="button">Test</button>
           <button class="btn primary" id="save-settings" value="save">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- Workstation settings: the files start-all.ps1 reads (workstation.ts) -->
+    <dialog class="sheet workstation" id="workstation">
+      <form method="dialog">
+        <div class="ws-head">
+          <h2>Workstation settings</h2>
+          <span class="gen-tabs" role="tablist">
+            <button type="button" data-ws-tab="gpus" class="on">GPUs</button>
+            <button type="button" data-ws-tab="services">Services</button>
+            <button type="button" data-ws-tab="models">Models</button>
+            <button type="button" data-ws-tab="file">Model file</button>
+          </span>
+        </div>
+        <p class="muted" id="ws-where"></p>
+        <div class="ws-body" id="ws-body"></div>
+        <div class="ws-apply" id="ws-apply" hidden>
+          <span id="ws-apply-text">Saved. The services use the new settings once they restart.</span>
+          <button class="btn primary" type="button" id="ws-restart">Restart services now</button>
+        </div>
+        <div class="acts">
+          <button class="btn" value="cancel" id="ws-close">Close</button>
+          <button class="btn primary" type="button" id="ws-save">Save</button>
         </div>
       </form>
     </dialog>

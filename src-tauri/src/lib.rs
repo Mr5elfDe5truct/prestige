@@ -14,6 +14,7 @@ mod transcribe;
 mod director;
 mod laser;
 mod studio;
+mod workstation;
 
 use serde::Serialize;
 use std::fs;
@@ -618,7 +619,12 @@ pub fn run() {
             computer::cu_panel,
             background::background_set,
             background::background_path,
-            background::background_prune
+            background::background_prune,
+            workstation::ws_read,
+            workstation::ws_write_json,
+            workstation::ws_llama_set,
+            workstation::ws_ini_write,
+            workstation::ws_stop_and_wait
         ])
         .build(tauri::generate_context!())
         .expect("error while building Prestige")
