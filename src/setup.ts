@@ -56,8 +56,8 @@ function show(pane: "where" | "packs" | "run") {
   ($("#setup-close") as HTMLButtonElement).textContent = pane === "run" ? (running ? "Hide" : "Close") : "Not now";
 }
 
-function renderWhere(p: Probe) {
-  ($("#setup-root") as HTMLInputElement).value = p.root || p.defaultRoot;
+function renderWhere(p: Probe, keepFolder = false) {
+  if (!keepFolder) ($("#setup-root") as HTMLInputElement).value = p.root || p.defaultRoot;
   const gpus = p.gpus.length ? p.gpus.map((g) => `${esc(g.name)} ${g.gb} GB`).join(" + ") : "no NVIDIA GPU found";
   const missing = p.tools.filter((t) => !t.have).map((t) => t.name);
   $("#setup-pc").innerHTML = `
@@ -129,6 +129,20 @@ export function initSetup(d: Deps) {
   $("#open-setup")?.addEventListener("click", () => openSetup());
   $("#setup-next").addEventListener("click", () => show("packs"));
   $("#setup-back").addEventListener("click", () => show("where"));
+  // A different folder: look again (what's already there, the free space on its drive).
+  let again = 0;
+  $("#setup-root").addEventListener("input", () => {
+    clearTimeout(again);
+    again = window.setTimeout(async () => {
+      const root = ($("#setup-root") as HTMLInputElement).value.trim();
+      if (!root || running) return;
+      const p = await invoke<Probe>("setup_probe", { root }).catch(() => null);
+      if (!p || ($("#setup-root") as HTMLInputElement).value.trim() !== root) return;
+      probe = p;
+      renderWhere(p, true);
+      total();
+    }, 600);
+  });
   $("#setup-go").addEventListener("click", async () => {
     const root = ($("#setup-root") as HTMLInputElement).value.trim();
     const gpuMode = probe && probe.gpus.length > 1 ? ($("#setup-gpu") as HTMLSelectElement).value : null;
@@ -137,7 +151,7 @@ export function initSetup(d: Deps) {
     running = true;
     show("run");
     try {
-      await invoke("setup_run", { opts: { root, gpuMode, packs: picked(), ownComfy: ($("#setup-own-comfy") as HTMLInputElement).checked, check: true } });
+      await invoke("setup_run", { opts: { root, gpuMode, packs: picked(), ownComfy: ($("#setup-own-comfy") as HTMLInputElement).checked, check: ($("#setup-check") as HTMLInputElement).checked } });
     } catch (e) {
       running = false;
       $("#setup-result").textContent = errMsg(e);

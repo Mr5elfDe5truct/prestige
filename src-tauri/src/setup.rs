@@ -97,7 +97,9 @@ pub async fn setup_probe(root: Option<String>) -> Value {
         let gpus = prep::nvidia_gpus();
         let ram_gb = crate::sys_memory().ok().and_then(|m| m["total"].as_f64()).map(|m| (m / 1024.0).round()).unwrap_or(0.0);
         let vram = gpus.iter().map(prep::Gpu::gb).fold(0.0, f64::max);
-        let free = crate::models::disk_free(root.parent().unwrap_or(&root).to_string_lossy().into_owned()).unwrap_or(0);
+        // A new folder doesn't exist yet: the free space is that of the nearest folder that does.
+        let near = root.ancestors().find(|p| p.exists()).unwrap_or(&root);
+        let free = crate::models::disk_free(near.to_string_lossy().into_owned()).unwrap_or(0);
         json!({
             "root": root,
             "defaultRoot": default_root,
@@ -401,8 +403,13 @@ pub fn setup_run(app: AppHandle, opts: Opts) -> Result<(), String> {
     let cancel = packs::begin_job(&app, "setup").ok_or("Setup is already running")?;
     drop(cancel);
     std::thread::spawn(move || {
-        let _ = fs::create_dir_all(&root);
-        let log = std::env::temp_dir().join("prestige-setup.log");
+        // The log goes straight into the Workstation, so it's there even when Setup stops or Prestige is closed midway.
+        let _ = fs::create_dir_all(root.join("logs"));
+        let log = root.join("logs").join("setup.log");
+        if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&log) {
+            use std::io::Write;
+            let _ = writeln!(f, "\n==== Setup by Prestige {} ====", env!("CARGO_PKG_VERSION"));
+        }
         let r = Run { app: &app, root: root.clone(), log, cancel: AtomicBool::new(false) };
         refresh_path();
         let result = (|| {
@@ -415,10 +422,11 @@ pub fn setup_run(app: AppHandle, opts: Opts) -> Result<(), String> {
             step_packs(&r, &opts.packs)?;
             if opts.check {
                 step_check(&r)?;
+            } else {
+                r.emit("check", "skipped", "not asked for");
             }
             Ok::<(), String>(())
         })();
-        let _ = fs::copy(&r.log, root.join("logs").join("setup.log"));
         app.state::<packs::Jobs>().0.lock().unwrap().remove("setup");
         let _ = app.emit("setup", json!({ "step": "all", "state": if result.is_ok() { "done" } else { "failed" }, "text": result.err().unwrap_or_default(), "root": root }));
     });
