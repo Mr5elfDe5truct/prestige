@@ -272,7 +272,9 @@ function servicesHtml(v: Json, s: WsState): string {
     ${s.servicesError ? `<p class="warn">data\\service-settings.json couldn't be read (${esc(s.servicesError)}). Saving here writes a fresh one.</p>` : ""}
     <h3 class="ws-sub">Which services start</h3>
     ${check("services.comfyui", on("comfyui"), "ComfyUI: images, video, songs and 3D", { on: null, off: "off" })}
-    ${check("services.openWebUI", on("openWebUI"), "Open WebUI, chat in a browser. Prestige keeps its own memory, so this can be off; off saves about 1 GB of RAM", { on: null, off: "off" })}
+    ${s.openWebUIInstalled === false
+      ? `<label class="check"><input type="checkbox" disabled /> Open WebUI, chat in a browser: not installed (get it in Packs)</label>`
+      : check("services.openWebUI", on("openWebUI"), "Open WebUI, chat in a browser. Prestige keeps its own memory, so this can be off; off saves about 1 GB of RAM", { on: null, off: "off" })}
     <h3 class="ws-sub">Ollama</h3>
     <div class="ws-grid">
       ${opt("ollamaKeepAlive", [["0", "Unload at once"], ["1m", "1 minute"], ["5m", "5 minutes"], ["15m", "15 minutes"], ["30m", "30 minutes"], ["1h", "1 hour"], ["-1", "Until unloaded"]], "Keep an idle model loaded")}

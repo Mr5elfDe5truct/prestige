@@ -195,6 +195,8 @@ fn step_tools(r: &Run) -> Result<(), String> {
 
 fn step_files(r: &Run) -> Result<(), String> {
     let root = &r.root;
+    // Open WebUI is optional now (Prestige keeps the memory): a new Workstation has it off until its pack is in.
+    let fresh = !root.join("start-all.ps1").exists() && !root.join("data").join("service-settings.json").exists() && !root.join("envs").join("open-webui").exists();
     if engine::install(root)? {
         r.emit("files", "done", "from Prestige");
     } else if root.join("start-all.ps1").exists() {
@@ -220,8 +222,13 @@ fn step_files(r: &Run) -> Result<(), String> {
     }
     // Prestige and install.ps1 look for the Workstation here when it isn't in the usual place.
     let rg = home().join("RG Studios");
-    let _ = fs::create_dir_all(&rg);
-    let _ = fs::write(rg.join("workstation-folder.txt"), root.to_string_lossy().as_bytes());
+    if *root != rg.join("Workstation") {
+        let _ = fs::create_dir_all(&rg);
+        let _ = fs::write(rg.join("workstation-folder.txt"), root.to_string_lossy().as_bytes());
+    }
+    if fresh {
+        packs::set_service_setting(root, "openWebUI", json!("off"));
+    }
     Ok(())
 }
 
@@ -349,10 +356,7 @@ fn step_comfy(r: &Run, own: bool) -> Result<(), String> {
 }
 
 fn step_packs(r: &Run, ids: &[String]) -> Result<(), String> {
-    // Open WebUI is optional now (Prestige keeps the memory): a new Workstation starts it only with its pack.
-    if !ids.iter().any(|i| i == "openwebui") && !r.root.join("data").join("service-settings.json").exists() && !r.root.join("envs").join("open-webui").exists() {
-        packs::set_service_setting(&r.root, "openWebUI", json!("off"));
-    }
+    // Picked here: Open WebUI goes back on once its pack is in (step_files turned it off for a new Workstation).
     if ids.is_empty() {
         r.emit("packs", "done", "none picked (add them any time in Packs)");
         return Ok(());
