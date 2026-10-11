@@ -2690,7 +2690,11 @@ function startStack(spans: HTMLElement[]): Promise<boolean> {
   if (starting) return starting;
   starting = (async () => {
     try {
-      await invoke("start_services", { root: settings.stackRoot ?? null });
+      // Prestige's own service manager (services.rs); an older Workstation runs start-all.ps1 whole instead.
+      await invoke("svc_start", { root: settings.stackRoot ?? null, names: null }).catch(async (e) => {
+        if (errMsg(e) !== "unsupported") throw e;
+        await invoke("start_services", { root: settings.stackRoot ?? null });
+      });
     } catch (e) {
       toast(`Couldn't start the services: ${errMsg(e)}`, "warn");
       return false;
@@ -3103,7 +3107,7 @@ async function main() {
   initScrollLock();
   greet(true);
   wire();
-  initSystem({ toast, nameFor, openCatalog: () => openCatalog() });
+  initSystem({ toast, nameFor, openCatalog: () => openCatalog(), root: () => settings.stackRoot ?? null });
   initWorkstation({
     toast,
     root: () => settings.stackRoot ?? null,

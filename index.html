@@ -390,6 +390,22 @@
       </form>
     </dialog>
 
+    <!-- A service's log (system.ts) -->
+    <dialog class="sheet svclogs" id="svc-logs">
+      <form method="dialog">
+        <h2 id="svc-logs-title">Log</h2>
+        <p class="muted" id="svc-logs-where"></p>
+        <span class="look-label">Output</span>
+        <pre class="svc-log" id="svc-logs-out"></pre>
+        <span class="look-label">Errors and progress</span>
+        <pre class="svc-log" id="svc-logs-err"></pre>
+        <div class="acts">
+          <button class="btn" type="button" id="svc-logs-refresh">Refresh</button>
+          <button class="btn primary" value="close">Close</button>
+        </div>
+      </form>
+    </dialog>
+
     <!-- Workstation settings: the files start-all.ps1 reads (workstation.ts) -->
     <dialog class="sheet workstation" id="workstation">
       <form method="dialog">
