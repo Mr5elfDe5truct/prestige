@@ -1,4 +1,5 @@
-﻿# Custom AI Workstation installer, by R.G. Studios.
+﻿# Custom AI Workstation installer, by R.G. Studios. The Workstation is now part of Prestige (the engine\ folder of
+# github.com/Mr5elfDe5truct/prestige) and Prestige's own Setup does all of this; this script is kept for scripted installs.
 # Sets up the whole local AI stack on a Windows PC with an NVIDIA GPU: tools, llama.cpp, the Python
 # environments, ComfyUI, the models you pick, shortcuts and (optionally) the Prestige desktop app.
 # Safe to run again: anything already in place is skipped.
@@ -11,7 +12,7 @@
 #   .\install.ps1 -GpuMode pool                 with several GPUs: split (default), pool or single
 #   .\install.ps1 -Packs computer -Nex          computer use, with Nex-N2.5-mini for Prestige's Do it for me
 # Without cloning first, from PowerShell:
-#   irm https://raw.githubusercontent.com/Mr5elfDe5truct/custom-ai-workstation/main/install.ps1 -OutFile "$env:TEMP\install.ps1"
+#   irm https://raw.githubusercontent.com/Mr5elfDe5truct/prestige/main/engine/install.ps1 -OutFile "$env:TEMP\install.ps1"
 #   powershell -ExecutionPolicy Bypass -File "$env:TEMP\install.ps1"
 param(
     [string]$Root,
@@ -28,7 +29,7 @@ param(
 )
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"   # Invoke-WebRequest's progress bar is very slow in Windows PowerShell
-$Repo = "Mr5elfDe5truct/custom-ai-workstation"
+$Repo = "Mr5elfDe5truct/prestige"   # the Workstation is its engine\ folder
 
 # ---------- look and feel ----------
 function Say($text, $color = "Gray") { Write-Host $text -ForegroundColor $color }
@@ -260,10 +261,17 @@ if (Test-Path (Join-Path $Root "start-all.ps1")) {
     Skip "already here"
 } else {
     if ((Test-Path $Root) -and (Get-ChildItem $Root -Force | Select-Object -First 1)) { throw "$Root exists and isn't empty. Pick another folder." }
-    New-Item -ItemType Directory -Force (Split-Path $Root) | Out-Null
-    git clone --branch $Branch "https://github.com/$Repo.git" $Root
+    New-Item -ItemType Directory -Force $Root | Out-Null
+    # Only engine\ of the Prestige repo is the Workstation.
+    $tmp = Join-Path $env:TEMP "prestige-engine-$PID"
+    if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
+    git clone --depth 1 --filter=blob:none --sparse --branch $Branch "https://github.com/$Repo.git" $tmp -q
     if ($LASTEXITCODE) { throw "git clone failed" }
-    Ok "cloned $Repo"
+    git -C $tmp sparse-checkout set engine
+    if ($LASTEXITCODE) { throw "git sparse-checkout failed" }
+    Copy-Item -Recurse -Force (Join-Path $tmp "engine\*") $Root
+    Remove-Item -Recurse -Force $tmp
+    Ok "copied from $Repo"
 }
 Set-Location $Root
 # Prestige looks for the Workstation in %USERPROFILE%\RG Studios\Workstation, then in the folder named here.

@@ -25,6 +25,10 @@
   Nothing leaves the machine except the web lookups the AI makes with its research tools.
 </p>
 
+> **The Workstation is now part of [Prestige](../README.md).** This `engine/` folder is the Workstation's scripts,
+> servers, workflows and theme; Prestige ships them, and its **Setup** installs and repairs the whole stack. The old
+> custom-ai-workstation repo is archived. The rest of this page describes the stack itself.
+
 ---
 
 ## ✨ Showcase
@@ -178,16 +182,16 @@ without touching a file; [docs/SETTINGS.md](docs/SETTINGS.md) lists what each se
 
 ## 🚀 Quick start
 
-This repo holds the glue: launch scripts, configs, ComfyUI workflows, and the custom tool server. The installer
+This folder holds the glue: launch scripts, configs, ComfyUI workflows, and the custom tool server. The installer
 adds everything else (see [PLAN.md](PLAN.md) for the full build log and every source).
 
 **1. Install.** You need Windows 10/11 (64-bit), an NVIDIA GPU with a current driver, and
-about 40 GB free. One card of 6 GB or more works; 12 GB is what it's tuned for, and more cards are used if you have them. Download **Workstation-Setup.zip** from
-[Releases](https://github.com/Mr5elfDe5truct/custom-ai-workstation/releases/latest), unzip it and double-click
-**setup.cmd**. Or from PowerShell:
+about 40 GB free. One card of 6 GB or more works; 12 GB is what it's tuned for, and more cards are used if you have them.
+Install [Prestige](https://github.com/Mr5elfDe5truct/prestige/releases/latest); its Setup opens on the first start and
+does everything below. For a scripted install, from PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/Mr5elfDe5truct/custom-ai-workstation/main/install.ps1 -OutFile "$env:TEMP\install.ps1"
+irm https://raw.githubusercontent.com/Mr5elfDe5truct/prestige/main/engine/install.ps1 -OutFile "$env:TEMP\install.ps1"
 powershell -ExecutionPolicy Bypass -File "$env:TEMP\install.ps1"
 ```
 

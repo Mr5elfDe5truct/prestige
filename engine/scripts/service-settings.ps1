@@ -9,7 +9,7 @@ $ServiceDefaults = [ordered]@{
     llamaIdleSeconds     = 180      # llama.cpp unloads its model after this long idle (0: never)
     llamaModelsMax       = 1        # llama.cpp models loaded at once
     comfyui              = "on"     # on, off: the headless ComfyUI (images, video, songs, 3D)
-    openWebUI            = "on"     # on, off: Open WebUI (Prestige's shared memory uses it)
+    openWebUI            = "on"     # on, off: Open WebUI (optional; Prestige keeps its own memory)
     theme                = "dragon" # Open WebUI's default theme: dragon, neon, glass, hud, off
 }
 

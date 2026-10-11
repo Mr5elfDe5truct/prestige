@@ -228,14 +228,14 @@ The same chat in each living style (Settings → Appearance → Style).
 
 ## 🖥️ Requirements
 
-- **The [Custom AI Workstation](https://github.com/Mr5elfDe5truct/custom-ai-workstation) stack**, installed with its models.
-  Prestige is its front end: it talks to Ollama, llama.cpp, Open WebUI, ComfyUI, Kokoro and the voice server on `127.0.0.1`,
-  and starts and stops the stack's services itself. Whisper turbo and the VoxCPM2 voices come with the workstation's
+- **The AI stack (the Workstation)**, which ships inside Prestige ([`engine/`](engine)). On the first start **Setup**
+  installs it with the model packs you pick, and **Packs** adds more later. Prestige talks to Ollama, llama.cpp, ComfyUI,
+  Kokoro, the voice server and (optionally) Open WebUI on `127.0.0.1`, and starts and stops them itself. Whisper turbo and the VoxCPM2 voices come with the workstation's
   `voice` pack; without it, Prestige uses Open WebUI's Whisper and Kokoro.
 - **An NVIDIA GPU.** Built and tested on an RTX 3060 12 GB with 32 GB of RAM, and on an RTX 3060 12 GB + RTX 2060 6 GB.
   With several cards Prestige shows meters for each, and checks every fit against the card the model will load on (the
   workstation decides which service runs where; see its
-  [GPU guide](https://github.com/Mr5elfDe5truct/custom-ai-workstation/blob/main/docs/GPUS.md)). Smaller cards work too:
+  [GPU guide](engine/docs/GPUS.md)). Smaller cards work too:
   fit chips, context sizes and Studio's warnings follow the VRAM that's there, less what other programs hold on the card.
 - **Windows 11** (WebView2 is built in). Linux and macOS are the next goal.
 
@@ -288,10 +288,10 @@ Mic or camera blocked? Check **Windows Settings → Privacy & security → Micro
 | `android/` (Java, no Gradle) | The Android app: `MainActivity.java` the WebView, permissions, file picking and saving · `Relay.java` the local relay to the PC · `SetupServer.java` + `assets/setup.html` connecting and QR scanning (jsQR, Apache-2.0) · `build.ps1` builds and signs the APK |
 | Look | Dragon red & gold · fonts Rye, Oxanium, IBM Plex Sans and JetBrains Mono, bundled from Fontsource (SIL OFL) |
 
-## 🔗 Part of the Custom AI Workstation
+## 🔗 The Workstation inside
 
-Prestige is the desktop app for **[Custom AI Workstation](https://github.com/Mr5elfDe5truct/custom-ai-workstation)**:
-one folder, one script, one 12 GB GPU. The workstation holds the services, models and tools; Prestige is the way to use them.
+Prestige and the **Custom AI Workstation** are one product now: [`engine/`](engine) holds the services' scripts, Python
+servers, ComfyUI workflows and theme, and every Prestige release ships them. The old custom-ai-workstation repo is archived.
 
 For code there's **[Prestige IDE](https://github.com/Mr5elfDe5truct/prestige-ide)**, an agent that builds, fixes and explains
 code in your projects on the same models. The code button in the top bar opens it (or its download page), and closing
