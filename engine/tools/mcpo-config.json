@@ -1,0 +1,41 @@
+{
+  "mcpServers": {
+    "workstation": {
+      "command": "{ROOT}\\envs\\tools\\Scripts\\python.exe",
+      "args": [
+        "{ROOT}\\tools\\scout_mcp.py"
+      ]
+    },
+    "fetch": {
+      "command": "{ROOT}\\envs\\tools\\Scripts\\mcp-server-fetch.exe",
+      "args": []
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "{ROOT}",
+        "{HOME}\\Documents",
+        "{HOME}\\Downloads",
+        "{HOME}\\Pictures"
+      ]
+    },
+    "desktop": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@wonderwhy-er/desktop-commander"
+      ]
+    },
+    "browser": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@latest",
+        "--browser",
+        "chrome"
+      ]
+    }
+  }
+}

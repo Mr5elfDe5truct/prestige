@@ -1,0 +1,10 @@
+{
+  "ollamaKeepAlive": "5m",
+  "ollamaFlashAttention": "on",
+  "ollamaKvCache": "q8_0",
+  "llamaIdleSeconds": 180,
+  "llamaModelsMax": 1,
+  "comfyui": "on",
+  "openWebUI": "on",
+  "theme": "dragon"
+}

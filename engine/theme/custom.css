@@ -1,0 +1,364 @@
+/*
+  Custom AI workstation themes for Open WebUI.
+  start-all.ps1 copies this file (and loader.js) into Open WebUI's static folder on every start,
+  so it survives Open WebUI updates. loader.js sets <html data-cai-theme="...">; Ctrl+Alt+T cycles.
+  Themes only apply in Open WebUI's dark mode (Settings > General > Theme: Dark or System).
+
+  Open WebUI builds its whole dark palette from the --color-gray-* variables, so each theme
+  re-tints those, then adds accents, fonts and glow on top.
+*/
+
+@import url("https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Orbitron:wght@500;700&family=Share+Tech+Mono&family=Inter:wght@400;500;600&display=swap");
+
+/* ---------- shared rules, driven by each theme's variables ---------- */
+
+html.dark[data-cai-theme]:not([data-cai-theme="off"]) {
+  accent-color: var(--cai-accent);
+  scrollbar-color: var(--cai-accent-dim) transparent;
+}
+
+html.dark[data-cai-theme]:not([data-cai-theme="off"]) body {
+  background: var(--cai-bg) !important;
+}
+
+/* Ambient light: a fixed, click-through glow laid over the whole app */
+html.dark[data-cai-theme]:not([data-cai-theme="off"]) body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  background: var(--cai-ambient);
+}
+
+html.dark[data-cai-theme]:not([data-cai-theme="off"]) ::selection {
+  background: var(--cai-accent);
+  color: var(--cai-on-accent);
+}
+
+html.dark[data-cai-theme]:not([data-cai-theme="off"]) ::-webkit-scrollbar-thumb {
+  background-color: var(--cai-accent-dim) !important;
+}
+
+/* Sidebar: accent edge and title */
+html.dark[data-cai-theme]:not([data-cai-theme="off"]) #sidebar {
+  box-shadow: inset -1px 0 0 var(--cai-edge), 6px 0 30px -12px var(--cai-glow);
+}
+
+html.dark[data-cai-theme]:not([data-cai-theme="off"]) #sidebar-webui-name {
+  font-family: var(--cai-display-font);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--cai-accent2);
+  text-shadow: 0 0 12px var(--cai-glow);
+}
+
+html.dark[data-cai-theme]:not([data-cai-theme="off"]) #sidebar-new-chat-button:hover,
+html.dark[data-cai-theme]:not([data-cai-theme="off"]) #sidebar-chat-item:hover {
+  box-shadow: inset 2px 0 0 var(--cai-accent);
+}
+
+/* Chat input: glowing frame, brighter while typing */
+html.dark[data-cai-theme]:not([data-cai-theme="off"]) #message-input-container {
+  border-color: var(--cai-edge) !important;
+  box-shadow: 0 0 0 1px var(--cai-edge), 0 0 24px -6px var(--cai-glow);
+  transition: box-shadow 0.25s ease;
+}
+
+html.dark[data-cai-theme]:not([data-cai-theme="off"]) #message-input-container:focus-within {
+  box-shadow: 0 0 0 1px var(--cai-accent), 0 0 32px -4px var(--cai-glow);
+}
+
+/* Send button */
+html.dark[data-cai-theme]:not([data-cai-theme="off"]) #send-message-button:not(:disabled) {
+  background: var(--cai-accent-gradient) !important;
+  color: var(--cai-on-accent) !important;
+  box-shadow: 0 0 14px var(--cai-glow);
+}
+
+html.dark[data-cai-theme]:not([data-cai-theme="off"]) #message-input-container button[aria-label="Voice mode"] {
+  background: var(--cai-accent-gradient) !important;
+  color: var(--cai-on-accent) !important;
+  box-shadow: 0 0 14px var(--cai-glow);
+}
+
+/* Welcome title on a new chat */
+html.dark[data-cai-theme]:not([data-cai-theme="off"]) .text-3xl.text-center .line-clamp-1 {
+  font-family: var(--cai-display-font);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  background: var(--cai-title-gradient, none);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: var(--cai-title-color, inherit);
+  filter: drop-shadow(0 0 10px var(--cai-glow));
+}
+
+/* Headings, links and code */
+html.dark[data-cai-theme]:not([data-cai-theme="off"]) :is(h1, h2, h3) {
+  font-family: var(--cai-display-font);
+  letter-spacing: 0.02em;
+}
+
+html.dark[data-cai-theme]:not([data-cai-theme="off"]) #messages-container a {
+  color: var(--cai-accent2);
+}
+
+html.dark[data-cai-theme]:not([data-cai-theme="off"]) #messages-container strong {
+  color: var(--cai-accent2);
+}
+
+html.dark[data-cai-theme]:not([data-cai-theme="off"]) #messages-container :not(pre) > code {
+  color: var(--cai-accent2);
+}
+
+html.dark[data-cai-theme]:not([data-cai-theme="off"]) #messages-container pre {
+  box-shadow: 0 0 0 1px var(--cai-edge);
+}
+
+/* Model name at the top of the chat */
+html.dark[data-cai-theme]:not([data-cai-theme="off"]) nav button[aria-label] .line-clamp-1,
+html.dark[data-cai-theme]:not([data-cai-theme="off"]) #model-selector-0-button {
+  font-family: var(--cai-display-font);
+  letter-spacing: 0.04em;
+}
+
+/* Theme-switch toast (from loader.js) */
+#cai-theme-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  z-index: 10000;
+  padding: 8px 18px;
+  border-radius: 999px;
+  font: 600 13px/1.2 system-ui, sans-serif;
+  letter-spacing: 0.06em;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.8);
+  border: 1px solid var(--cai-accent, #888);
+  box-shadow: 0 0 20px var(--cai-glow, transparent);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+#cai-theme-toast.show { opacity: 1; }
+
+/* Theme picker (from loader.js), bottom-right corner */
+#cai-theme-button {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  z-index: 10000;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--cai-accent2, #aaa);
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--cai-edge, rgba(255, 255, 255, 0.2));
+  opacity: 0.45;
+  cursor: pointer;
+  transition: opacity 0.2s ease, box-shadow 0.2s ease;
+}
+#cai-theme-button:hover { opacity: 1; box-shadow: 0 0 14px var(--cai-glow, transparent); }
+html:not(.dark) #cai-theme-button { color: #555; background: rgba(255, 255, 255, 0.8); border-color: rgba(0, 0, 0, 0.15); }
+@media (max-width: 900px) { #cai-theme-button { display: none; } }
+
+#cai-theme-menu {
+  position: fixed;
+  right: 14px;
+  bottom: 52px;
+  z-index: 10000;
+  display: none;
+  min-width: 200px;
+  padding: 6px;
+  border-radius: 12px;
+  background: rgba(12, 10, 14, 0.95);
+  border: 1px solid var(--cai-edge, rgba(255, 255, 255, 0.15));
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6), 0 0 24px -8px var(--cai-glow, transparent);
+  font: 500 13px/1.2 system-ui, sans-serif;
+}
+#cai-theme-menu.open { display: block; }
+#cai-theme-menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: #e8e8e8;
+  text-align: left;
+  cursor: pointer;
+}
+#cai-theme-menu button:hover { background: rgba(255, 255, 255, 0.08); }
+#cai-theme-menu button[aria-checked="true"] { background: rgba(255, 255, 255, 0.12); font-weight: 700; }
+#cai-theme-menu .cai-swatch { width: 14px; height: 14px; border-radius: 999px; flex: none; border: 1px solid rgba(255, 255, 255, 0.3); }
+#cai-theme-menu [data-theme="dragon"] .cai-swatch { background: linear-gradient(135deg, #e11d2a, #f5b83d); }
+#cai-theme-menu [data-theme="neon"] .cai-swatch { background: linear-gradient(135deg, #00e5ff, #ff2bd6); }
+#cai-theme-menu [data-theme="glass"] .cai-swatch { background: linear-gradient(135deg, #3b2a8a, #0e6e8c, #8a2a6a); }
+#cai-theme-menu [data-theme="hud"] .cai-swatch { background: #39ff14; }
+#cai-theme-menu [data-theme="off"] .cai-swatch { background: #333; }
+
+/* ---------- Dragon Red & Gold: black and crimson, gold highlights ---------- */
+
+html.dark[data-cai-theme="dragon"] {
+  --cai-title-gradient: linear-gradient(90deg, #f5b83d, #ff5a4a 70%, #e11d2a);
+  --cai-title-color: transparent;
+  --color-gray-50: #fbf5ea;
+  --color-gray-100: #f3e8d3;
+  --color-gray-200: #e6d4b4;
+  --color-gray-300: #cdb48c;
+  --color-gray-400: #a8906c;
+  --color-gray-500: #86705a;
+  --color-gray-600: #5e3e36;
+  --color-gray-700: #45211f;
+  --color-gray-800: #2c1113;
+  --color-gray-850: #1d0a0c;
+  --color-gray-900: #130607;
+  --color-gray-950: #0a0304;
+
+  --cai-accent: #e11d2a;
+  --cai-accent2: #f5b83d;
+  --cai-accent-dim: #6b1a1f;
+  --cai-on-accent: #fff7e6;
+  --cai-edge: rgba(225, 29, 42, 0.45);
+  --cai-glow: rgba(225, 29, 42, 0.55);
+  --cai-accent-gradient: linear-gradient(135deg, #ff3a3a 0%, #c10f1c 55%, #f5b83d 140%);
+  --cai-display-font: "Rajdhani", "Segoe UI", sans-serif;
+  --cai-bg: #0a0304;
+  --cai-ambient:
+    radial-gradient(1100px 420px at 100% 100%, rgba(200, 16, 30, 0.13), transparent 70%),
+    radial-gradient(700px 300px at 0% 0%, rgba(245, 184, 61, 0.05), transparent 70%);
+}
+
+html.dark[data-cai-theme="dragon"] #sidebar-webui-name {
+  background: linear-gradient(90deg, #f5b83d, #ff4d4d);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ---------- Cyberpunk Neon: midnight blue, cyan and magenta glow ---------- */
+
+html.dark[data-cai-theme="neon"] {
+  --cai-title-gradient: linear-gradient(90deg, #00e5ff, #ff2bd6);
+  --cai-title-color: transparent;
+  --color-gray-50: #f2f7ff;
+  --color-gray-100: #e1ebff;
+  --color-gray-200: #c6d4f5;
+  --color-gray-300: #9fb0de;
+  --color-gray-400: #7d88bd;
+  --color-gray-500: #5f6598;
+  --color-gray-600: #3d3a6e;
+  --color-gray-700: #2a2554;
+  --color-gray-800: #1b1740;
+  --color-gray-850: #130f30;
+  --color-gray-900: #0c0a22;
+  --color-gray-950: #070616;
+
+  --cai-accent: #00e5ff;
+  --cai-accent2: #ff2bd6;
+  --cai-accent-dim: #3b2f7a;
+  --cai-on-accent: #07061a;
+  --cai-edge: rgba(0, 229, 255, 0.45);
+  --cai-glow: rgba(255, 43, 214, 0.5);
+  --cai-accent-gradient: linear-gradient(135deg, #00e5ff 0%, #8a5cff 50%, #ff2bd6 100%);
+  --cai-display-font: "Orbitron", "Segoe UI", sans-serif;
+  --cai-bg: #070616;
+  --cai-ambient:
+    radial-gradient(900px 400px at 100% 0%, rgba(255, 43, 214, 0.09), transparent 70%),
+    radial-gradient(900px 400px at 0% 100%, rgba(0, 229, 255, 0.08), transparent 70%);
+}
+
+html.dark[data-cai-theme="neon"] #sidebar-webui-name {
+  color: #00e5ff;
+  text-shadow: 0 0 6px #00e5ff, 0 0 18px #ff2bd6;
+}
+
+/* ---------- Glass: frosted panels over a colorful wallpaper ---------- */
+
+html.dark[data-cai-theme="glass"] {
+  --cai-title-gradient: linear-gradient(90deg, #ffffff, #c4a7ff);
+  --cai-title-color: transparent;
+  --color-gray-50: #f8fafc;
+  --color-gray-100: #eef2f7;
+  --color-gray-200: #dde3ec;
+  --color-gray-300: #c3cbd8;
+  --color-gray-400: #9aa5b8;
+  --color-gray-500: #7a859a;
+  --color-gray-600: rgba(120, 130, 160, 0.55);
+  --color-gray-700: rgba(90, 100, 135, 0.5);
+  --color-gray-800: rgba(40, 46, 70, 0.55);
+  --color-gray-850: rgba(28, 32, 52, 0.55);
+  --color-gray-900: rgba(16, 18, 32, 0.45);
+  --color-gray-950: rgba(10, 12, 24, 0.55);
+
+  --cai-accent: #8ab4ff;
+  --cai-accent2: #c4a7ff;
+  --cai-accent-dim: rgba(255, 255, 255, 0.25);
+  --cai-on-accent: #0b1020;
+  --cai-edge: rgba(255, 255, 255, 0.18);
+  --cai-glow: rgba(138, 180, 255, 0.35);
+  --cai-accent-gradient: linear-gradient(135deg, #8ab4ff, #c4a7ff);
+  --cai-display-font: "Inter", "Segoe UI", sans-serif;
+  --cai-bg:
+    radial-gradient(900px 700px at 15% 20%, #3b2a8a 0%, transparent 60%),
+    radial-gradient(800px 700px at 85% 30%, #0e6e8c 0%, transparent 60%),
+    radial-gradient(900px 800px at 60% 100%, #8a2a6a 0%, transparent 60%),
+    #0b0d1c;
+  --cai-ambient: none;
+}
+
+html.dark[data-cai-theme="glass"] body {
+  background-attachment: fixed !important;
+}
+
+html.dark[data-cai-theme="glass"] #sidebar,
+html.dark[data-cai-theme="glass"] #message-input-container,
+html.dark[data-cai-theme="glass"] [role="dialog"] > div,
+html.dark[data-cai-theme="glass"] [role="menu"] {
+  -webkit-backdrop-filter: blur(22px) saturate(1.4);
+  backdrop-filter: blur(22px) saturate(1.4);
+}
+
+/* ---------- Terminal / HUD: phosphor green on black, monospace ---------- */
+
+html.dark[data-cai-theme="hud"] {
+  --cai-title-color: #39ff14;
+  --color-gray-50: #eaffe6;
+  --color-gray-100: #c8ffbf;
+  --color-gray-200: #a4f59a;
+  --color-gray-300: #7bdc70;
+  --color-gray-400: #58b04f;
+  --color-gray-500: #3f8a39;
+  --color-gray-600: #265c23;
+  --color-gray-700: #173d16;
+  --color-gray-800: #0d240d;
+  --color-gray-850: #081808;
+  --color-gray-900: #040d04;
+  --color-gray-950: #010501;
+
+  --cai-accent: #39ff14;
+  --cai-accent2: #b6ff5c;
+  --cai-accent-dim: #1f5a1a;
+  --cai-on-accent: #010501;
+  --cai-edge: rgba(57, 255, 20, 0.4);
+  --cai-glow: rgba(57, 255, 20, 0.4);
+  --cai-accent-gradient: linear-gradient(135deg, #39ff14, #1fbf0a);
+  --cai-display-font: "Share Tech Mono", Consolas, monospace;
+  --cai-bg: #010501;
+  --cai-ambient:
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.18) 0 1px, transparent 1px 3px),
+    radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.45) 100%);
+}
+
+html.dark[data-cai-theme="hud"] body,
+html.dark[data-cai-theme="hud"] body * {
+  font-family: "Share Tech Mono", Consolas, monospace !important;
+}
+
+html.dark[data-cai-theme="hud"] #messages-container {
+  text-shadow: 0 0 4px rgba(57, 255, 20, 0.35);
+}

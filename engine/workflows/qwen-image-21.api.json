@@ -1,0 +1,10 @@
+{
+  "1": {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": "qwen-image-2.1-UC-Q4_K_M.gguf"}},
+  "2": {"class_type": "CLIPLoaderGGUF", "inputs": {"clip_name": "Qwen3-VL-8B-Instruct-UD-Q4_K_XL.gguf", "type": "qwen_image"}},
+  "3": {"class_type": "VAELoader", "inputs": {"vae_name": "qwen_image_2.1_vae_bf16.safetensors"}},
+  "4": {"class_type": "TextEncodeQwenImage21", "inputs": {"clip": ["2", 0], "prompt": "a cozy cabin in snowy mountains at dusk, warm window light, a hand-painted wooden sign above the door reads \"WORKSTATION\"", "negative_prompt": "", "resolution": 1024}},
+  "5": {"class_type": "EmptyLatentImage", "inputs": {"width": 1024, "height": 1024, "batch_size": 1}},
+  "6": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "positive": ["4", 0], "negative": ["4", 1], "latent_image": ["5", 0], "seed": 42, "steps": 20, "cfg": 1, "sampler_name": "euler", "scheduler": "simple", "denoise": 1}},
+  "7": {"class_type": "VAEDecode", "inputs": {"samples": ["6", 0], "vae": ["3", 0]}},
+  "8": {"class_type": "SaveImage", "inputs": {"images": ["7", 0], "filename_prefix": "qwen-image"}}
+}
