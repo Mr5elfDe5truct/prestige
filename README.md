@@ -44,6 +44,10 @@
     <td><img src="docs/highlights/styles.jpg" alt="Eleven styles: Molded, Classic and nine living styles"></td>
     <td><img src="docs/highlights/system.jpg" alt="System: load, VRAM, temperature and power for every card"></td>
   </tr>
+  <tr>
+    <td><img src="docs/highlights/setup.jpg" alt="Sets itself up: one installer fetches the engines, models and tools"></td>
+    <td><img src="docs/highlights/memory.jpg" alt="Remembers you: facts you share are kept on your PC and used in every chat"></td>
+  </tr>
 </table>
 
 ## ✨ Made in Prestige
@@ -148,7 +152,30 @@ transcript that's just its own words is ignored.
 
 ## 📸 Screenshots
 
-Real screenshots of 0.49.0 on the reference PC (RTX 3060 12 GB + RTX 2060 6 GB), Molded style with the Dragon theme.
+Real screenshots on the reference PC (RTX 3060 12 GB + RTX 2060 6 GB), Molded style with the Dragon theme.
+
+### New in 0.50.0: everything in one app
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/shots/setup-where.jpg" alt="Setup: where and how"><br><p align="center"><b>Setup: where and how</b></p></td>
+    <td width="50%"><img src="docs/shots/setup-packs.jpg" alt="Setup: pick the packs"><br><p align="center"><b>Setup: pick the packs</b></p></td>
+  </tr>
+  <tr>
+    <td><img src="docs/shots/setup-run.jpg" alt="Setup, installing"><br><p align="center"><b>Setup, installing</b></p></td>
+    <td><img src="docs/shots/packs.jpg" alt="Packs and Engines"><br><p align="center"><b>Packs and Engines</b></p></td>
+  </tr>
+  <tr>
+    <td><img src="docs/shots/memory.jpg" alt="Memory"><br><p align="center"><b>Memory</b></p></td>
+    <td><img src="docs/shots/memory-chat.jpg" alt="Remember that…"><br><p align="center"><b>"Remember that…"</b></p></td>
+  </tr>
+  <tr>
+    <td><img src="docs/shots/services.jpg" alt="Services, started by Prestige"><br><p align="center"><b>Services, started by Prestige</b></p></td>
+    <td><img src="docs/shots/workstation-settings.jpg" alt="Workstation settings"><br><p align="center"><b>Workstation settings</b></p></td>
+  </tr>
+</table>
+
+### Everything else
 
 <table>
   <tr>
