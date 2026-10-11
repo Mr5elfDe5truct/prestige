@@ -613,7 +613,9 @@ pub fn prepare(root: &Path) -> Result<Prepared, String> {
     let mut b = Builder { root, plan, services: Vec::new(), off: Vec::new() };
     let py = |env: &str| root.join("envs").join(env).join("Scripts").join("python.exe");
     let mut common = BTreeMap::new();
-    set(&mut common, &[("PYTHONUTF8", "1"), ("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")]);
+    // Every service numbers cards as nvidia-smi does (start-all.ps1 left this set for all of them), so a service with
+    // no CUDA_VISIBLE_DEVICES still sees cuda:0 as the first card, not the fastest.
+    set(&mut common, &[("PYTHONUTF8", "1"), ("HF_HUB_DISABLE_SYMLINKS_WARNING", "1"), ("CUDA_DEVICE_ORDER", "PCI_BUS_ID")]);
     common.insert("PYTHONPATH".into(), None);
 
     // 1. Ollama: fast chat, vision, Live calls. With several cards it runs on the small one.
