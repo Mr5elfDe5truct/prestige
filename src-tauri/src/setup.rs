@@ -341,6 +341,10 @@ fn step_comfy(r: &Run, own: bool) -> Result<(), String> {
 }
 
 fn step_packs(r: &Run, ids: &[String]) -> Result<(), String> {
+    // Open WebUI is optional now (Prestige keeps the memory): a new Workstation starts it only with its pack.
+    if !ids.iter().any(|i| i == "openwebui") && !r.root.join("data").join("service-settings.json").exists() && !r.root.join("envs").join("open-webui").exists() {
+        packs::set_service_setting(&r.root, "openWebUI", json!("off"));
+    }
     if ids.is_empty() {
         r.emit("packs", "done", "none picked (add them any time in Packs)");
         return Ok(());

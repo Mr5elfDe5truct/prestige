@@ -61,6 +61,8 @@ pub fn ws_read(root: Option<String>) -> serde_json::Value {
         "found": root.join("start-all.ps1").exists(),
         // An older Workstation's start-all.ps1 doesn't read service-settings.json yet.
         "servicesSupported": root.join("scripts").join("service-settings.ps1").exists(),
+        // Open WebUI is optional (the Open WebUI pack): without it there's nothing to wait for.
+        "openWebUIInstalled": root.join("envs").join("open-webui").join("Scripts").join("open-webui.exe").exists(),
         "gpu": gpu,
         "gpuError": gpu_err,
         "services": services,

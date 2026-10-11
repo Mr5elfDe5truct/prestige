@@ -22,6 +22,7 @@ interface WsState {
   root: string;
   found: boolean;
   servicesSupported: boolean;
+  openWebUIInstalled?: boolean;
   gpu: Json;
   gpuError: string | null;
   services: Json;
@@ -69,7 +70,7 @@ let pending: "all" | "llama" | null = null;
 
 const dlg = () => $("#workstation") as HTMLDialogElement;
 
-/** Open WebUI is switched off in the Workstation settings (start-all.ps1 then doesn't start it). */
+/** Open WebUI is switched off in the Workstation settings, or not installed (an optional pack): nothing to wait for. */
 let owuiOff = false;
 export const openWebUIOn = () => !owuiOff;
 
@@ -92,7 +93,7 @@ export function initWorkstation(d: Deps) {
 
 async function load(): Promise<WsState> {
   state = await invoke<WsState>("ws_read", { root: deps.root() });
-  owuiOff = state.services.openWebUI === "off" || state.services.openWebUI === false;
+  owuiOff = state.services.openWebUI === "off" || state.services.openWebUI === false || state.openWebUIInstalled === false;
   return state;
 }
 
