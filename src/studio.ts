@@ -54,6 +54,7 @@ import { initLaser, openLaser } from "./laser";
 import { attachZoom, type Zoom } from "./zoom";
 import { checkOcr, ocrReady, readText } from "./ocr";
 import { checkTranslate, openTranslate, translateReady } from "./translate";
+import { initTrain, openTrain, trainedLoras, type TrainedLora } from "./train";
 import { INSTRUMENTAL_PARTS, STEMS, askSongEdit, editSecs, stemSecs, type EditTask, type SongEdit, type SongMusic, type SongSource } from "./songedit";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
@@ -1011,6 +1012,7 @@ const age = (ms: number) => {
 
 export function initStudio(d: Deps) {
   initInpaint();
+  initTrain({ toast: d.toast, root: d.root, freeGpu: d.freeGpu, onLoras: () => renderCreate() });
   $("#rq-clear").addEventListener("click", () => {
     for (let i = rq.length - 1; i >= 0; i--) if (!["waiting", "running"].includes(rq[i].state)) rq.splice(i, 1);
     renderQueue();
@@ -1054,6 +1056,8 @@ export function initStudio(d: Deps) {
     }
     if (t.closest(".opt.model")) flipModel(mode === "video");
     if (t.closest(".opt.board")) deps.storyboard("");
+    // The pictures selected in the gallery start the photo set.
+    if (t.closest(".opt.teach")) openTrain(items.filter((a) => a.kind === "image" && selected.has(a.path)).map((a) => a.path));
   });
   onSettingsChange(() => renderCreate());
   initSongWriter();
@@ -1212,8 +1216,10 @@ function renderCreate() {
   const shown = chain ? { ...p, secs: p.secs + plan(first, ref, frameSize()).secs } : p;
   const what = gm === "song" ? "Length, tempo, key, language, seed" : `Size, quality, seed${isVideo(gm) ? ", length" : ", count"}`;
   const gear = `<button type="button" class="opt pick set${settingsOpen ? " on" : ""}" title="${what}…" aria-expanded="${settingsOpen}">⚙ Settings</button>`;
+  // Qwen-Image modes can learn a face or a style (train.ts); select pictures in the gallery first to start from them.
+  const teach = QWEN_LORA_MODES.includes(gm) ? `<button type="button" class="opt pick teach" title="Teach Qwen-Image a face or a style from your photos (select pictures in the gallery first to use them)">✦ Teach a face or style</button>` : "";
   $("#gen-opts").innerHTML = wf
-    ? chip + summary(gm, shown).map((o) => `<span class="opt"><b>${o}</b></span>`).join("") + gear
+    ? chip + summary(gm, shown).map((o) => `<span class="opt"><b>${o}</b></span>`).join("") + gear + teach
     : `<span class="opt">workflows\\${esc(missing)} not found, so this mode is off</span>`;
   const warn = $("#gen-warn");
   warn.hidden = !wf || !p.warn;
@@ -1477,6 +1483,8 @@ function summary(gm: GenMode, p: Plan): string[] {
   if (p.count > 1) out.push(`${p.count} images`);
   if (m.note) out.push(m.note);
   if (gm === "refvideo") out.push(chained(gm) ? "your reference in a new first frame" : "your reference as the first frame");
+  const lora = activeLora(gm);
+  if (lora) out.push(`with ${lora.name || lora.trigger}`);
   out.push(s.seed != null ? `seed ${s.seed}` : "random seed");
   out.push(aboutTime(p.secs));
   return out;
@@ -1578,6 +1586,17 @@ function settingsFields(gm: GenMode, src: Source | null = srcAsset): Field[] {
     field("Quality", "quality", levels(m).map((l) => [l, `${QUALITY_NAMES[l]} · ${m.steps![l]} steps`]), q);
   }
   if (m.family === "image") field("How many", "count", [1, 2, 3, 4].map((n) => [n, n === 1 ? "1 image" : `${n} images`]), settings().image.count);
+  // A face or style taught with Fizgig; its trigger word goes into the prompt by itself.
+  if (QWEN_LORA_MODES.includes(gm) && trainedLoras().length) {
+    const cur = settings().image.lora ?? "";
+    field(
+      "Your LoRA",
+      "lora",
+      [["", "None"], ...trainedLoras().map((l): [string, string] => [l.file, `${l.name || l.trigger} · ${l.kind === "style" ? "style" : "face"}`])],
+      cur,
+      "Taught with ✦ Teach a face or style; its word goes into the prompt by itself",
+    );
+  }
   return f;
 }
 
@@ -1585,7 +1604,7 @@ function settingsFields(gm: GenMode, src: Source | null = srcAsset): Field[] {
  *  stay words. "size" is both: the long video's longest side, and an image's Small / Standard / Large, which Number()
  *  turned into NaN (saved as null). A song's meter is a digit too, but ACE-Step takes it as text ("4", "6"). */
 function fieldValue(k: string, raw: string) {
-  const model = k === "high" || k === "low";
+  const model = k === "high" || k === "low" || k === "lora";
   return /^\d+$/.test(raw) && k !== "meter" ? Number(raw) : model ? raw || null : raw;
 }
 
@@ -2851,12 +2870,30 @@ let jobIds = 1;
 /** Renders whose workflow has no Studio settings (and so no seed setting of their own). */
 const NO_SETTINGS: Family[] = ["talk", "select", "cutout", "vidcut", "upscale", "songedit"];
 
+/** The modes that render with Qwen-Image-2.1, so a face or style taught with Fizgig can join them. */
+const QWEN_LORA_MODES: GenMode[] = ["image", "fast", "edit", "inpaint", "ref", "reffast"];
+
+/** The taught face or style picked in the image settings, if this mode can use it and it's still there. */
+function activeLora(gm: GenMode): TrainedLora | null {
+  const file = settings().image.lora;
+  if (!file || !QWEN_LORA_MODES.includes(gm)) return null;
+  return trainedLoras().find((l) => l.file === file) ?? null;
+}
+
 /** Builds a render's workflow now, with the current settings and a fresh seed (it may run much later). */
 function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpts) {
   const wf = workflows[gm];
   if (!wf) throw new Error(`workflows\\${MODES[gm].file} wasn't found`);
   const m = modeOf(gm);
   const graph = structuredClone(wf);
+  // A taught face or style rides along on Qwen-Image (not Z-Image-Turbo), with its trigger word in the prompt.
+  const lora = activeLora(gm);
+  const qwen = /qwen/i.test(String(graph["1"]?.inputs?.unet_name ?? ""));
+  if (lora && qwen) {
+    if (!new RegExp(`\\b${lora.trigger}\\b`, "i").test(prompt)) prompt = `${lora.trigger}, ${prompt}`;
+    graph["40"] = { class_type: "LoraLoaderModelOnly", inputs: { model: ["1", 0], lora_name: lora.file, strength_model: 1 } };
+    graph["6"].inputs.model = ["40", 0];
+  }
   if (m.promptNode) graph[m.promptNode].inputs[m.promptKey ?? "text"] = gm === "ref" || gm === "reffast" ? refPrompt(opts.kind ?? "auto", prompt) : prompt;
   // Renders without generation settings keep their seed to themselves, rather than taking the Image settings' one.
   const seed = NO_SETTINGS.includes(m.family) ? Math.floor(Math.random() * 2 ** 32) : takeSeed(settingsKey(gm));
@@ -3615,7 +3652,7 @@ export async function phoneStudio(action: string, a: any = {}): Promise<unknown>
         update(key, { seed: a.value === "last" ? (lastSeed(key) ?? null) : a.value == null || a.value === "" || !Number.isFinite(n) || n < 0 ? null : n });
       } else {
         const k = String(a.k);
-        if (!["aspect", "size", "quality", "count", "res", "seconds", "fps", "shots", "frames", "high", "low", "bpm", "key", "meter", "language"].includes(k)) throw new Error(`unknown setting ${k}`);
+        if (!["aspect", "size", "quality", "count", "res", "seconds", "fps", "shots", "frames", "high", "low", "bpm", "key", "meter", "language", "lora"].includes(k)) throw new Error(`unknown setting ${k}`);
         update(key, { [k]: fieldValue(k, String(a.value ?? "")) } as any);
       }
       return phoneInfo(a.create ?? { mode: "image" });

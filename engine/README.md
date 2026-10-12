@@ -90,6 +90,7 @@ Everything below was generated on the workstation itself (RTX 3060 12 GB, 32 GB 
 | 📄 | **Read any document** (Prestige) | Unlimited-OCR 3B (Baidu, MIT; 42ailab's Q4_K_M GGUF) in llama.cpp's router as `unlimited-ocr`, added to `bin\llama-models.ini` the first time it's used: photos, scans and scanned PDFs to Markdown and tables |
 | ✍️ | **Make it sound human** (Prestige) | humanizer 12B Q4_K_M (Gemma 4 fine-tune, Apache-2.0) in llama.cpp's router as `humanizer`, added to `bin\llama-models.ini` the first time it's used; its exact training prompt through the completion endpoint |
 | 🌐 | **Translate** (Prestige) | Index-Translate 35B-A3B Q4_K_M + its vision part (bilibili's IndexTeam, Apache-2.0) in llama.cpp's router as `index-translate`, 25 expert layers in system RAM; added to `bin\llama-models.ini` the first time it's used. Its files are in `models\gguf\Index-Translate` (a folder of their own, so it can be a junction to another drive) |
+| ✦ | **Teach it a face or style** (Prestige) | Fizgig v7.3 (Apache-2.0) in `apps\Fizgig` with its own venv and Qwen-Image-2.1 training weights; Prestige runs its caption, cache and train scripts headless and puts the LoRA in `models\comfy\loras` (needs `tools\comfy_nodes\workstation_lora` to load on the GGUF model) |
 
 ## 🎩 Prestige desktop app
 

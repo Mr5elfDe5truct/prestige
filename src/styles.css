@@ -817,6 +817,18 @@ dialog.knowledge.drop { outline: 2px dashed var(--gold); outline-offset: -8px; }
 .sr-t small { font-size: 12px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .sr-score { font: 11px var(--mono); color: var(--muted); }
 .sr-empty { padding: 10px 4px; margin: 0; }
+/* Teach a face or style (train.ts) */
+.train .tr-row { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+.train .tr-row label { margin: 0; flex: 1; min-width: 150px; }
+.train .tr-row input, .train .tr-row select { width: 100%; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font: 13px var(--body); padding: 8px 10px; text-transform: none; letter-spacing: 0; }
+.tn-photos { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; max-height: 180px; overflow: auto; }
+.tn-photos img { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); }
+.tn-job { position: relative; display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px 12px; background: var(--panel-2); }
+.tn-job::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: 4px; height: 3px; border-radius: 2px; background: linear-gradient(90deg, var(--red), var(--gold)) no-repeat; background-size: calc(var(--v, 0) * 1%) 100%; }
+.tn-job small { color: var(--muted); font: 11.5px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tn-job .linkish { align-self: flex-start; }
+.tn-lora { display: flex; flex-direction: column; padding: 6px 8px; }
+.tn-lora small { color: var(--muted); font: 11px var(--mono); }
 .kb-acts { display: flex; gap: 10px; opacity: 0; }
 .kb-doc:hover .kb-acts, .kb-doc:focus-within .kb-acts { opacity: 1; }
 .chat-files { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
