@@ -837,6 +837,40 @@
       </form>
     </dialog>
 
+    <!-- Teach it a face or style (train.ts) -->
+    <dialog class="sheet knowledge train" id="train">
+      <div class="kb-head">
+        <div>
+          <h2>Teach a face or style</h2>
+          <p class="muted">Give Prestige 10 to 30 photos of someone (or a character, a pet, a thing), or of a look, and it learns them: then Qwen-Image can put that face or style in any picture. It trains on this PC with Fizgig.</p>
+        </div>
+        <button class="btn" id="tn-close" type="button">Close</button>
+      </div>
+      <div class="kb-model" id="tn-setup" hidden>
+        <span>Training needs Fizgig and the full Qwen-Image-2.1 model it trains on: about 57 GB to download, once.</span>
+        <button class="btn primary" id="tn-setup-go" type="button">Set up training</button>
+      </div>
+      <div id="tn-form" hidden>
+        <div class="tr-row">
+          <label>Name<input id="tn-name" type="text" autocomplete="off" placeholder="e.g. Mira, or Neon noir" /></label>
+          <label>It's<select id="tn-kind"><option value="face">A face or character</option><option value="style">A style or look</option></select></label>
+          <label>Rounds<select id="tn-epochs"><option value="20">20 · quicker</option><option value="30" selected>30 · Fizgig's default</option><option value="40">40 · stronger</option></select></label>
+        </div>
+        <div class="tn-photos" id="tn-photos"></div>
+        <p class="muted talk-file-row"><button type="button" class="btn" id="tn-pick">Add photos…</button><button type="button" class="linkish" id="tn-clear">clear</button><span id="tn-count"></span></p>
+        <p class="muted" id="tn-est"></p>
+        <p class="credit">Mix close-ups with wider shots, and different light and clothes; for a style, pictures of different things in that style. Only use photos of real people with their permission.</p>
+        <div class="acts"><button type="button" class="btn primary" id="tn-go">Start training</button></div>
+      </div>
+      <div class="tn-job" id="tn-job" hidden>
+        <b id="tn-stage"></b>
+        <small id="tn-line"></small>
+        <button type="button" class="linkish" id="tn-stop" hidden>stop</button>
+      </div>
+      <div class="kb-list-head"><span class="eyebrow">Learned so far</span></div>
+      <div class="kb-list" id="tn-list"></div>
+    </dialog>
+
     <dialog class="sheet" id="ask">
       <form method="dialog">
         <h2 id="ask-title"></h2>

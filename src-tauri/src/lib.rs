@@ -19,6 +19,7 @@ mod laser;
 mod services;
 mod setup;
 mod studio;
+mod train;
 mod workstation;
 
 use serde::Serialize;
@@ -570,6 +571,7 @@ pub fn run() {
         .manage(models::Downloads::default())
         .manage(studio::ComfyListener::default())
         .manage(knowledge::Knowledge::default())
+        .manage(train::Train::default())
         .manage(phone::Phone::default())
         .manage(packs::Jobs::default())
         .invoke_handler(tauri::generate_handler![
@@ -592,6 +594,11 @@ pub fn run() {
             store_set,
             sys_memory,
             file_sizes,
+            train::train_status,
+            train::train_start,
+            train::train_stop,
+            train::train_setup,
+            train::train_pick,
             studio::gallery_list,
             studio::thumbnail,
             studio::reveal,
