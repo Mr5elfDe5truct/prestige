@@ -751,6 +751,52 @@
       </form>
     </dialog>
 
+    <dialog class="sheet talk" id="reshoot">
+      <form method="dialog">
+        <h2>New camera angle</h2>
+        <div class="talk-top">
+          <img id="rs-pic" alt="" />
+          <div class="talk-fields">
+            <label>Where the camera goes<select id="rs-az"></select></label>
+            <label>How high<select id="rs-el"></select></label>
+            <label class="check"><input type="checkbox" id="rs-close" /> Close-up</label>
+            <label class="check"><input type="checkbox" id="rs-turn" /> All four sides (front, right, back, left)</label>
+          </div>
+        </div>
+        <p class="muted" id="rs-est"></p>
+        <p class="credit">Multiple-Angles LoRA v2 for Qwen-Image-2.1 by akhaliq: the same subject, seen from where the camera moves to.</p>
+        <div class="acts">
+          <button class="btn" value="cancel">Cancel</button>
+          <button class="btn primary" value="go">Reshoot</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="sheet talk" id="outfit">
+      <form method="dialog">
+        <h2>Try on outfit</h2>
+        <div class="talk-top">
+          <img id="of-pic" alt="" />
+          <div class="talk-fields">
+            <p class="muted talk-file-row">
+              <button type="button" class="btn" id="of-pick">Choose the outfit picture…</button>
+              <span id="of-name"></span>
+            </p>
+            <input type="file" id="of-file" accept="image/*" hidden />
+            <img id="of-outfit" class="of-outfit" alt="The outfit" hidden />
+            <label>What is it?<input id="of-what" type="text" autocomplete="off" placeholder="Optional, e.g. red leather jacket and black jeans" /></label>
+            <label class="check"><input type="checkbox" id="of-shoes" /> Keep their own shoes and legwear</label>
+          </div>
+        </div>
+        <p class="muted" id="of-est"></p>
+        <p class="credit">Outfit Swap Consistency LoRA by ausboss: the face, pose and background stay as they were. The outfit can be a photo of someone wearing it, a flat lay or a product shot. Only use photos of real people with their permission.</p>
+        <div class="acts">
+          <button class="btn" value="cancel">Cancel</button>
+          <button class="btn primary" value="go" id="of-go">Try it on</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog class="sheet songedit" id="songedit">
       <form method="dialog">
         <h2>Edit song <span class="credit" id="se-name"></span></h2>
