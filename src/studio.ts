@@ -52,6 +52,7 @@ import { characterById, characters, faceBlob, onCharactersChange } from "./chara
 import { initInpaint, openInpaint, type SelectQuery } from "./inpaint";
 import { initLaser, openLaser } from "./laser";
 import { attachZoom, type Zoom } from "./zoom";
+import { checkOcr, ocrReady, readText } from "./ocr";
 import { INSTRUMENTAL_PARTS, STEMS, askSongEdit, editSecs, stemSecs, type EditTask, type SongEdit, type SongMusic, type SongSource } from "./songedit";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
@@ -94,7 +95,9 @@ type GenMode =
   | "cutout"
   | "vidcut"
   | "upimage"
-  | "upvideo";
+  | "upvideo"
+  | "angle"
+  | "outfit";
 
 // How a workflow takes the generation settings: an image model with a latent size and batch, an edit
 // (size follows the picture), LTX with a 2× upscale pass ("ltx") or without ("ltx1"), Wan's two samplers,
@@ -401,7 +404,71 @@ const MODES: Record<GenMode, Mode> = {
     imageNode: "1",
     imageKey: "file",
   },
+  // New camera angle: the edit graph with the Multiple-Angles LoRA v2 (reshootGraph), asked for a view by its labels.
+  angle: {
+    file: "qwen-image-21-edit.api.json",
+    label: "Qwen-Image-2.1 Angles",
+    family: "edit",
+    promptNode: "4",
+    promptKey: "prompt",
+    seed: ["6", "seed"],
+    steps: QWEN_STEPS,
+    secs: 135, // an 832×1216 portrait took 128–152 s on the RTX 3060, loading included
+    note: "new camera angle",
+    imageNode: "9",
+  },
+  // Try on outfit: the edit graph with the Outfit Swap LoRA, the person as image 1 and the outfit as image 2. Its
+  // author measured it at 25 steps, CFG 1, euler / simple.
+  outfit: {
+    file: "qwen-image-21-edit.api.json",
+    label: "Qwen-Image-2.1 Outfit",
+    family: "edit",
+    promptNode: "4",
+    promptKey: "prompt",
+    seed: ["6", "seed"],
+    steps: { draft: 16, standard: 25, high: 30, max: 40 },
+    secs: 180, // 178 s for an 832×1216 portrait on the RTX 3060 (two pictures encoded, 25 steps)
+    note: "try on outfit",
+    imageNode: "9",
+  },
 };
+
+/* The LoRAs for New camera angle and Try on outfit (the reshoot pack), in ComfyUI's loras folder. Multiple-Angles v2 is
+ * the step-1,500 checkpoint its card recommends, at 0.9 (its range is 0.8–1.0: lower holds the subject, higher turns
+ * the camera further); Outfit Swap is step 1,000 at 1.0 (at 0.5 half of the drift it removes comes back). */
+const RESHOOT_LORAS: Partial<Record<GenMode, { file: string; strength: number }>> = {
+  angle: { file: "qwen-image-2.1-multiple-angles-v2.safetensors", strength: 0.9 },
+  outfit: { file: "qwen-image-2.1-outfit-swap.safetensors", strength: 1 },
+};
+
+/** The Multiple-Angles LoRA's 12 azimuths (30° apart, clockwise from the front) and 4 elevations, by the labels it was
+ *  trained on, with what the menu shows. */
+export const ANGLES = [
+  ["front view", "Front"],
+  ["front-right view", "Front, a little right"],
+  ["front-right quarter view", "Three-quarter right"],
+  ["right side view", "Right side"],
+  ["back-right quarter view", "Back three-quarter right"],
+  ["back-right view", "Back, a little right"],
+  ["back view", "Back"],
+  ["back-left view", "Back, a little left"],
+  ["back-left quarter view", "Back three-quarter left"],
+  ["left side view", "Left side"],
+  ["front-left quarter view", "Three-quarter left"],
+  ["front-left view", "Front, a little left"],
+] as const;
+export const ELEVATIONS = [
+  ["eye-level shot", "Eye level"],
+  ["elevated shot", "A little above (30°)"],
+  ["high-angle shot", "High angle (60°)"],
+  ["top-down shot", "Straight down (90°)"],
+] as const;
+/** The Multiple-Angles prompt: "<mva> {azimuth}, {elevation}[ close-up]". */
+export const anglePrompt = (az: number, el: number, close: boolean) => `<mva> ${ANGLES[az][0]}, ${ELEVATIONS[el][0]}${close ? " close-up" : ""}`;
+
+/** The Outfit Swap prompt its author tested, with the sentence that takes the old outfit off (or keeps shoes on). */
+export const outfitPrompt = (what: string, keepShoes: boolean) =>
+  `Dress the person in image 1 in the ${what.trim().replace(/[.\s]+$/, "") || "outfit"} shown in image 2. Keep their face, hair, hands, pose and the background exactly the same. ${keepShoes ? "Keep their own shoes and legwear." : "Replace everything they wear."}`;
 
 /* ACE-Step 1.5 turbo on an RTX 3060 12 GB (ComfyUI's log and nvidia-smi): its 1.7B language model writes the audio codes
  * (~60 tokens/s), then 8 diffusion steps and a tiled VAE decode. Each song loads the models fresh (~5.2 GB peak at any
@@ -1019,6 +1086,7 @@ let holdersTimer: number | undefined;
 export async function showStudio(on: boolean) {
   clearInterval(holdersTimer);
   if (!on) return;
+  checkOcr();
   // While Studio is open, a program starting or closing on ComfyUI's card updates the warnings (takenGB redraws).
   holdersTimer = window.setInterval(() => {
     const main = comfyCards().main;
@@ -2183,6 +2251,115 @@ async function removeBackground(a: Asset) {
   }
 }
 
+/** New camera angle: asks where the camera goes (one of the LoRA's 12 azimuths and 4 heights, or a close-up), then
+ *  Qwen-Image-2.1 reshoots the picture from there. Every view picked is its own render. */
+async function newAngle(a: Asset) {
+  closeLightbox();
+  const dlg = $("#reshoot") as HTMLDialogElement;
+  const az = $("#rs-az") as HTMLSelectElement;
+  const el = $("#rs-el") as HTMLSelectElement;
+  const close = $("#rs-close") as HTMLInputElement;
+  const turn = $("#rs-turn") as HTMLInputElement;
+  ($("#rs-pic") as HTMLImageElement).src = convertFileSrc(a.path);
+  if (!az.options.length) {
+    az.innerHTML = ANGLES.map(([, label], i) => `<option value="${i}">${label} · ${i * 30}°</option>`).join("");
+    el.innerHTML = ELEVATIONS.map(([, label], i) => `<option value="${i}">${label}</option>`).join("");
+    // The right side: on portraits, side, back and high views turn the camera the furthest (a three-quarter view
+    // often stays close to the original).
+    az.value = "3";
+  }
+  const est = () => {
+    const n = turn.checked ? 4 : 1;
+    az.disabled = turn.checked;
+    $("#rs-est").textContent = `${n > 1 ? "4 renders (front, right, back, left)" : "1 render"}, ${aboutTime(plan("angle", a).secs * n)}.`;
+  };
+  turn.onchange = est;
+  est();
+  dlg.returnValue = "";
+  dlg.showModal();
+  await new Promise((r) => dlg.addEventListener("close", r, { once: true }));
+  if (dlg.returnValue !== "go") return;
+  const views = turn.checked ? [0, 3, 6, 9] : [Number(az.value)];
+  deps.toast(views.length > 1 ? "Reshooting from 4 sides. The first opens when it's done." : "Reshooting from the new angle. It opens when it's done.");
+  try {
+    const outs = views.map((v) =>
+      run("angle", anglePrompt(v, Number(el.value), close.checked), a, {}, undefined, { from: "New camera angle", title: `${a.name} · ${ANGLES[v][1].toLowerCase()}` }),
+    );
+    const [first] = await outs[0];
+    if (first) openRender(first.path);
+    await Promise.all(outs);
+  } catch (e) {
+    if (errMsg(e) !== "stopped") deps.toast(`Couldn't reshoot it: ${errMsg(e)}`, "warn");
+  }
+}
+
+/** Try on outfit: the person in this picture, dressed in the outfit from another picture (a photo of someone wearing
+ *  it, a flat lay or a product shot). Everything but the clothes stays where it was. */
+async function tryOnOutfit(a: Asset) {
+  closeLightbox();
+  const dlg = $("#outfit") as HTMLDialogElement;
+  const file = $("#of-file") as HTMLInputElement;
+  const pic = $("#of-outfit") as HTMLImageElement;
+  const what = $("#of-what") as HTMLInputElement;
+  const go = $("#of-go") as HTMLButtonElement;
+  ($("#of-pic") as HTMLImageElement).src = convertFileSrc(a.path);
+  let outfit: File | null = null;
+  let url = "";
+  const show = () => {
+    if (url) URL.revokeObjectURL(url);
+    url = outfit ? URL.createObjectURL(outfit) : "";
+    pic.hidden = !outfit;
+    pic.src = url;
+    $("#of-name").textContent = outfit ? outfit.name : "";
+    go.disabled = !outfit;
+  };
+  file.value = "";
+  file.onchange = () => {
+    outfit = file.files?.[0] ?? null;
+    show();
+  };
+  $("#of-pick").onclick = () => file.click();
+  // An outfit picture dropped on the dialog from Explorer or a browser works too.
+  dlg.ondragover = (e) => e.preventDefault();
+  dlg.ondrop = (e) => {
+    e.preventDefault();
+    const f = imageIn(e.dataTransfer);
+    if (f) {
+      outfit = f;
+      show();
+    }
+  };
+  what.value = "";
+  ($("#of-shoes") as HTMLInputElement).checked = false;
+  $("#of-est").textContent = `Takes ${aboutTime(plan("outfit", a).secs)}.`;
+  show();
+  dlg.returnValue = "";
+  dlg.showModal();
+  await new Promise((r) => dlg.addEventListener("close", r, { once: true }));
+  if (url) URL.revokeObjectURL(url);
+  // (Set by the handlers above, which TypeScript doesn't follow.)
+  const picked = outfit as File | null;
+  if (dlg.returnValue !== "go" || !picked) return;
+  deps.toast("Trying on the outfit. It opens when it's done.");
+  try {
+    const name = await uploadImage(picked, "outfit");
+    const prompt = outfitPrompt(what.value, ($("#of-shoes") as HTMLInputElement).checked);
+    const out = await run("outfit", prompt, a, { outfit: name }, undefined, { from: "Try on outfit", title: `${a.name} in ${what.value.trim() || picked.name}` });
+    if (out[0]) openRender(out[0].path);
+  } catch (e) {
+    if (errMsg(e) !== "stopped") deps.toast(`Couldn't try it on: ${errMsg(e)}`, "warn");
+  }
+}
+
+/** Puts a picture in ComfyUI's input folder (named from its content, so a retry reuses it). */
+async function uploadImage(img: Blob, prefix: string): Promise<string> {
+  const bytes = new Uint8Array(await img.arrayBuffer());
+  const hash = new Uint8Array(await crypto.subtle.digest("SHA-1", bytes));
+  const hex = Array.from(hash.slice(0, 6), (b) => b.toString(16).padStart(2, "0")).join("");
+  const ext = img.type.includes("jpeg") ? "jpg" : img.type.includes("webp") ? "webp" : "png";
+  return invoke<string>("comfy_upload_bytes", bytes, { headers: { "x-name": `prestige-${prefix}-${hex}.${ext}` } });
+}
+
 /** Cut out a subject from a video: SAM 3.1 tracks what's named through every frame, and the rest turns green (with
  *  the sound kept), ready to key out in a video editor. */
 async function videoCutout(a: Asset) {
@@ -2416,6 +2593,9 @@ function showMenu(e: MouseEvent, a: Asset) {
     ...(image && workflows.inpaint ? [{ label: "Paint to change…", run: () => paintToChange(a) }] : []),
     ...(image && workflows.select ? [{ label: "Select to change or cut out…", run: () => paintToChange(a, true), key: "SAM 3.1" }] : []),
     ...(image && workflows.cutout ? [{ label: "Remove background", run: () => removeBackground(a), key: "transparent PNG" }] : []),
+    ...(image && workflows.angle ? [{ label: "New camera angle…", run: () => newAngle(a), key: "reshoot" }] : []),
+    ...(image && workflows.outfit ? [{ label: "Try on outfit…", run: () => tryOnOutfit(a), key: "dress up" }] : []),
+    ...(image && ocrReady() ? [{ label: "Read the text", run: () => (closeLightbox(), readText(a.path, a.name)), key: "Unlimited-OCR" }] : []),
     ...(a.kind === "video" && workflows.vidcut ? [{ label: "Cut out a subject…", run: () => videoCutout(a), key: "green screen" }] : []),
     ...upscaleItems(a),
     ...songEditItems(a),
@@ -2574,6 +2754,7 @@ interface QueueOpts {
   upscale?: UpscaleSize; // an upscale's shorter side
   edit?: SongEdit; // the song editor's job
   audio?: Blob; // a song from the PC to edit (a gallery song goes as the source's path)
+  outfit?: string; // Try on outfit: the outfit picture in ComfyUI's input folder
 }
 
 /** ACE-Step's way of asking for no vocals. */
@@ -2607,6 +2788,31 @@ function inpaintGraph(g: any, mask: NonNullable<QueueOpts["mask"]>) {
   g["25"] = { class_type: "ImageCompositeMasked", inputs: { destination: ["9", 0], source: ["24", 0], x: 0, y: 0, resize_source: false, mask: ["20", 0] } };
   g["8"].inputs.images = ["25", 0];
   g["8"].inputs.filename_prefix = "qwen-image-inpaint";
+}
+
+/** New camera angle and Try on outfit: the edit graph with its LoRA between the model and the sampler. An outfit is
+ *  image 2, and the picture is encoded at its own size (resolution 0, as the Outfit Swap LoRA was measured), so the
+ *  result lines up with the original. */
+function reshootGraph(g: any, gm: "angle" | "outfit", outfit?: string) {
+  const lora = RESHOOT_LORAS[gm]!;
+  g["30"] = { class_type: "LoraLoaderModelOnly", inputs: { model: ["1", 0], lora_name: lora.file, strength_model: lora.strength } };
+  g["6"].inputs.model = ["30", 0];
+  if (gm === "outfit") {
+    if (!outfit) throw new Error("no outfit picture");
+    g["31"] = { class_type: "LoadImage", inputs: { image: outfit } };
+    g["4"].inputs["images.image_2"] = ["31", 0];
+    g["4"].inputs.resolution = 0;
+  }
+  g["8"].inputs.filename_prefix = gm === "angle" ? "qwen-image-angle" : "qwen-image-outfit";
+}
+
+/** A LoRA a render needs must be in ComfyUI's loras folder; say which pack brings it if it isn't. */
+async function checkLora(graph: any) {
+  const want = graph["30"]?.inputs?.lora_name as string | undefined;
+  if (!want) return;
+  const r = await http(`${COMFY}/object_info/LoraLoaderModelOnly`).catch(() => null);
+  const names: string[] = (await r?.json().catch(() => null))?.LoraLoaderModelOnly?.input?.required?.lora_name?.[0] ?? [];
+  if (names.length && !names.includes(want)) throw new Error(`${want} isn't installed: add the Reshoot pack in Packs`);
 }
 
 // ---------- the render queue ----------
@@ -2663,6 +2869,7 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
     if (!opts.mask) throw new Error("nothing is painted");
     inpaintGraph(graph, opts.mask);
   }
+  if (gm === "angle" || gm === "outfit") reshootGraph(graph, gm, opts.outfit);
   // An upscale's size: the shorter side becomes 1080 or 2160 (the longer one follows the shape).
   if (m.family === "upscale") {
     graph["3"].inputs["resize_type.shorter_size"] = opts.upscale ?? 2160;
@@ -2892,6 +3099,7 @@ async function submit(j: QJob) {
       graph[song ? m.imageNode! : TALK.audio].inputs.audio = await uploadAudio(j.audio);
     }
     if (m.family === "song" || m.family === "songedit") await checkAceModel(graph);
+    if (gm === "angle" || gm === "outfit") await checkLora(graph);
     if (j.cancelled) throw new Error("stopped");
     const r = await http(`${COMFY}/prompt`, {
       method: "POST",

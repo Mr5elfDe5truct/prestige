@@ -8,6 +8,7 @@ mod computer;
 mod humanize;
 mod knowledge;
 mod models;
+mod ocr;
 mod packs;
 mod phone;
 mod prep;
@@ -17,6 +18,7 @@ mod transcribe;
 mod director;
 mod engine;
 mod laser;
+mod search;
 mod services;
 mod setup;
 mod studio;
@@ -571,6 +573,7 @@ pub fn run() {
         .manage(models::Downloads::default())
         .manage(studio::ComfyListener::default())
         .manage(knowledge::Knowledge::default())
+        .manage(search::Search::default())
         .manage(phone::Phone::default())
         .manage(packs::Jobs::default())
         .invoke_handler(tauri::generate_handler![
@@ -593,6 +596,11 @@ pub fn run() {
             store_set,
             sys_memory,
             file_sizes,
+            search::search_index,
+            search::search_status,
+            search::search_everything,
+            ocr::ocr_status,
+            ocr::ocr_read,
             humanize::humanize_status,
             humanize::humanize,
             studio::gallery_list,

@@ -35,6 +35,9 @@
           <button class="model-btn persona-btn" id="persona-btn" aria-haspopup="menu"><span class="pf-slot"></span><span id="persona-name">Prestige</span><span class="chev">▼</span></button>
           <div class="model-menu persona-menu" id="persona-menu" hidden role="menu"></div>
         </div>
+        <button class="icon-btn ghost kb-btn" id="search-btn" aria-label="Search everything" title="Search everything by meaning: renders, songs, chats and files (Ctrl+Shift+F)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="6.5" /><path d="M20.5 20.5 16 16" /></svg>
+        </button>
         <button class="icon-btn ghost kb-btn" id="kb-btn" aria-label="Knowledge: chat with your files" title="Knowledge: chat with your files (PDFs, Word documents, notes, folders)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h13v15H6a2 2 0 0 0-2 2z" /><path d="M4 20a2 2 0 0 0 2 2h13v-4" /><path d="M9 8h6M9 11h4" /></svg><span class="count" id="kb-count-badge"></span>
         </button>
@@ -536,7 +539,25 @@
       <label class="check"><input id="kb-all" type="checkbox" /> Use my files in every chat (only passages that match the question go in)</label>
       <div class="kb-list-head"><span class="eyebrow">Your files</span><span class="credit" id="kb-count"></span></div>
       <div class="kb-list" id="kb-list"></div>
-      <p class="credit">Reads PDF (text, not scans), Word (.docx), text, Markdown, HTML, CSV, JSON and code. Files added from a folder or the picker are read where they are; dropped files are copied into Prestige's app data folder. Removing a file here never deletes your original.</p>
+      <p class="credit">Reads PDF, Word (.docx), text, Markdown, HTML, CSV, JSON and code. With the Read documents pack it also reads scanned PDFs and photos or scans of pages (pick them with Add files…). Files added from a folder or the picker are read where they are; dropped files are copied into Prestige's app data folder. Removing a file here never deletes your original.</p>
+    </dialog>
+
+    <!-- Search everything by meaning (search.ts) -->
+    <dialog class="sheet knowledge search" id="search">
+      <div class="kb-head">
+        <div>
+          <h2>Search everything</h2>
+          <p class="muted">Find a picture, a video, a song, a chat or a file by what's in it, in your own words. Pictures are searched by what they show, not only by their prompt. Everything stays on this PC.</p>
+        </div>
+        <button class="btn" id="search-close" type="button">Close</button>
+      </div>
+      <input id="search-q" class="search-q" type="search" autocomplete="off" spellcheck="false" placeholder="e.g. the dragon in the rain, a song about trains, what we said about the cabin" />
+      <div class="search-bar">
+        <span class="seg" id="search-kinds"><button type="button" class="on" data-kind="">All</button><button type="button" data-kind="image">Pictures</button><button type="button" data-kind="video">Videos</button><button type="button" data-kind="audio">Songs</button><button type="button" data-kind="chat">Chats</button><button type="button" data-kind="file">Files</button></span>
+        <span class="credit" id="search-status"></span>
+      </div>
+      <div class="search-results" id="search-results"></div>
+      <p class="credit">EmbeddingGemma 2 (Google, the Search pack) reads pictures, video frames, songs' styles and lyrics, chats and your Knowledge files into one index in Prestige's app data folder, and brings it up to date each time this opens.</p>
     </dialog>
 
     <!-- Missions: scheduled jobs while Prestige is open (missions.ts) -->
@@ -731,6 +752,52 @@
       </form>
     </dialog>
 
+    <dialog class="sheet talk" id="reshoot">
+      <form method="dialog">
+        <h2>New camera angle</h2>
+        <div class="talk-top">
+          <img id="rs-pic" alt="" />
+          <div class="talk-fields">
+            <label>Where the camera goes<select id="rs-az"></select></label>
+            <label>How high<select id="rs-el"></select></label>
+            <label class="check"><input type="checkbox" id="rs-close" /> Close-up</label>
+            <label class="check"><input type="checkbox" id="rs-turn" /> All four sides (front, right, back, left)</label>
+          </div>
+        </div>
+        <p class="muted" id="rs-est"></p>
+        <p class="credit">Multiple-Angles LoRA v2 for Qwen-Image-2.1 by akhaliq: the same subject, seen from where the camera moves to.</p>
+        <div class="acts">
+          <button class="btn" value="cancel">Cancel</button>
+          <button class="btn primary" value="go">Reshoot</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="sheet talk" id="outfit">
+      <form method="dialog">
+        <h2>Try on outfit</h2>
+        <div class="talk-top">
+          <img id="of-pic" alt="" />
+          <div class="talk-fields">
+            <p class="muted talk-file-row">
+              <button type="button" class="btn" id="of-pick">Choose the outfit picture…</button>
+              <span id="of-name"></span>
+            </p>
+            <input type="file" id="of-file" accept="image/*" hidden />
+            <img id="of-outfit" class="of-outfit" alt="The outfit" hidden />
+            <label>What is it?<input id="of-what" type="text" autocomplete="off" placeholder="Optional, e.g. red leather jacket and black jeans" /></label>
+            <label class="check"><input type="checkbox" id="of-shoes" /> Keep their own shoes and legwear</label>
+          </div>
+        </div>
+        <p class="muted" id="of-est"></p>
+        <p class="credit">Outfit Swap Consistency LoRA by ausboss: the face, pose and background stay as they were. The outfit can be a photo of someone wearing it, a flat lay or a product shot. Only use photos of real people with their permission.</p>
+        <div class="acts">
+          <button class="btn" value="cancel">Cancel</button>
+          <button class="btn primary" value="go" id="of-go">Try it on</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog class="sheet songedit" id="songedit">
       <form method="dialog">
         <h2>Edit song <span class="credit" id="se-name"></span></h2>
@@ -834,6 +901,20 @@
           <button type="button" class="btn" id="sb-draw-all">Draw missing frames</button>
           <button type="button" class="btn" id="sb-close" title="The board is kept: /storyboard opens it again">Close</button>
           <button type="button" class="btn primary" id="sb-render">Render the video</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- Read the text (ocr.ts) -->
+    <dialog class="sheet ocr" id="ocr">
+      <form method="dialog" onsubmit="return false">
+        <h2>Text from the picture <span class="credit" id="ocr-name"></span></h2>
+        <div class="ocr-md msg-body" id="ocr-body"></div>
+        <p class="muted" id="ocr-note"></p>
+        <div class="acts">
+          <button type="button" class="btn" id="ocr-kb" title="Add the picture to Knowledge, so chats can answer from what it says">Add to Knowledge</button>
+          <button type="button" class="btn" id="ocr-copy">Copy as Markdown</button>
+          <button type="button" class="btn primary" id="ocr-close">Close</button>
         </div>
       </form>
     </dialog>
