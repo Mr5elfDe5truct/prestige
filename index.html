@@ -426,6 +426,12 @@
         <div class="packs-list" id="packs-list"></div>
         <h2 class="sub">Engines</h2>
         <div class="engines-list" id="engines-list"></div>
+        <h2 class="sub">Gated models</h2>
+        <p class="muted">Some models (like Foley's) need their licence accepted on Hugging Face first, then a token to download. <span id="hf-token-state"></span></p>
+        <div class="hf-token-row">
+          <input id="hf-token" type="password" autocomplete="off" spellcheck="false" placeholder="hf_… (a read token from huggingface.co/settings/tokens)" />
+          <button class="btn" type="button" id="hf-token-save">Save token</button>
+        </div>
         <div class="acts">
           <button class="btn" type="button" id="packs-refresh">Refresh</button>
           <button class="btn primary" value="close">Done</button>

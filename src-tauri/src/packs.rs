@@ -191,6 +191,22 @@ pub fn catalog(ollama_gb: f64) -> Vec<Pack> {
             dest: format!(r"models\gguf\{}\{f}", crate::translate::DIR),
             alts: vec![],
         }).collect(), vram: 10.0, ram: 24.0, card: "llama" },
+        // Lightricks validated the Foley LoRA on LTX-2.3 dev (on the distilled model it made music-like sound), so the
+        // pack brings dev too, in folders of its own (they can be junctions to another drive). The LoRA is gated: its
+        // licence is accepted once on Hugging Face, and Packs downloads it with the token.
+        Pack { id: "foley", title: "Foley", text: "LTX-2.3 dev + Lightricks' Foley LoRA (ComfyUI): sound effects for silent videos (gated: needs a Hugging Face token)".into(), gb: 17.3, items: {
+            let dev = |path: &str, folder: &str| {
+                let name = path.rsplit('/').next().unwrap();
+                Item::File { url: hf("unsloth/LTX-2.3-GGUF", path), dest: format!(r"models\comfy\{folder}\LTX-2.3-dev\{name}"), alts: vec![] }
+            };
+            vec![
+                comfy("Lightricks/LTX-2.3-22b-LoRA-Foley-V2A", "ltx-2.3-22b-lora-foley-v2a-1.0.safetensors", "loras"),
+                dev("ltx-2.3-22b-dev-Q4_K_M.gguf", "unet"),
+                dev("text_encoders/ltx-2.3-22b-dev_embeddings_connectors.safetensors", "text_encoders"),
+                dev("vae/ltx-2.3-22b-dev_audio_vae.safetensors", "vae"),
+                dev("vae/ltx-2.3-22b-dev_video_vae.safetensors", "vae"),
+            ]
+        }, vram: 11.5, ram: 0.0, card: "comfyui" },
         Pack { id: "openwebui", title: "Open WebUI", text: "Chat in a browser at localhost:8080 (optional: Prestige has chat, voice and memory)".into(), gb: 2.5, items: vec![
             Item::Env { name: "open-webui".into(), probe: r"envs\open-webui\Scripts\open-webui.exe".into(), steps: vec![
                 uv(&["venv", r"envs\open-webui", "--python", "3.11", "-q"]),
@@ -225,12 +241,14 @@ fn candidates(root: &Path, dest: &str, alts: &[String]) -> Vec<PathBuf> {
     names.extend(alts.iter().cloned());
     let mut out = Vec::new();
     let parts: Vec<String> = dest.split('\\').map(String::from).collect();
-    if parts.len() == 4 && parts[0] == "models" && parts[1] == "comfy" {
+    if parts.len() >= 4 && parts[0] == "models" && parts[1] == "comfy" {
+        // models\comfy\<folder>\[subfolders\]<file>: the same place under every model root.
         let folder = parts[2].as_str();
+        let sub: PathBuf = parts[3..parts.len() - 1].iter().collect();
         for base in [root.join("models").join("comfy"), root.join("models").join("comfy-fast"), shared_models()] {
             for f in comfy_folders(folder) {
                 for n in &names {
-                    out.push(base.join(f).join(n));
+                    out.push(base.join(f).join(&sub).join(n));
                 }
             }
         }
@@ -358,14 +376,72 @@ pub(crate) fn emit(app: &AppHandle, id: &str, state: &str, step: usize, steps: u
     let _ = app.emit("pack", json!({ "id": id, "state": state, "step": step, "steps": steps, "label": label, "done": done, "total": total, "error": error }));
 }
 
+// ---------- gated Hugging Face files ----------
+// Some packs (Foley's LoRA) are gated: the licence is accepted once on the model's page while logged in, then the files
+// download with a token. Prestige uses the token pasted in Packs (data\hf-token), else HF_TOKEN, else the one
+// `hf auth login` saved, so a PC that's already logged in needs nothing more.
+
+fn hf_cli_token() -> Option<String> {
+    let home = std::env::var_os("HF_HOME").map(PathBuf::from).or_else(|| std::env::var_os("USERPROFILE").map(|u| PathBuf::from(u).join(".cache").join("huggingface")))?;
+    fs::read_to_string(home.join("token")).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty())
+}
+
+/// The token for gated files and where it came from ("prestige", "env" or "hf-cli").
+pub(crate) fn hf_token(root: &Path) -> Option<(String, &'static str)> {
+    if let Some(t) = fs::read_to_string(root.join("data").join("hf-token")).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()) {
+        return Some((t, "prestige"));
+    }
+    if let Some(t) = std::env::var("HF_TOKEN").ok().filter(|t| !t.trim().is_empty()) {
+        return Some((t.trim().to_string(), "env"));
+    }
+    hf_cli_token().map(|t| (t, "hf-cli"))
+}
+
+/// Where the token comes from, if there is one (never the token itself).
+#[tauri::command]
+pub fn hf_token_status(root: Option<String>) -> Option<&'static str> {
+    hf_token(&stack_root(root)).map(|(_, from)| from)
+}
+
+/// Saves the token pasted in Packs (an empty one forgets it).
+#[tauri::command]
+pub fn hf_token_set(root: Option<String>, token: String) -> Result<(), String> {
+    let file = stack_root(root).join("data").join("hf-token");
+    let t = token.trim();
+    if t.is_empty() {
+        let _ = fs::remove_file(&file);
+        return Ok(());
+    }
+    if !t.starts_with("hf_") || t.len() < 20 || t.contains(char::is_whitespace) {
+        return Err("that doesn't look like a Hugging Face token (they start with hf_)".into());
+    }
+    fs::create_dir_all(file.parent().unwrap()).map_err(|e| e.to_string())?;
+    fs::write(&file, t).map_err(|e| e.to_string())
+}
+
+/// The model page for a huggingface.co file URL, for "accept the licence there" messages.
+fn hf_page(url: &str) -> Option<String> {
+    let rest = url.strip_prefix("https://huggingface.co/")?;
+    let (repo, _) = rest.split_once("/resolve/")?;
+    Some(format!("https://huggingface.co/{repo}"))
+}
+
 /// Streams `url` into `dest`, carrying on from a .part file left by a pause or a dropped connection.
-pub(crate) fn fetch_resume(url: &str, dest: &Path, cancel: &AtomicBool, mut progress: impl FnMut(u64, u64)) -> Result<(), String> {
+pub(crate) fn fetch_resume(url: &str, dest: &Path, cancel: &AtomicBool, progress: impl FnMut(u64, u64)) -> Result<(), String> {
+    fetch_with(url, None, dest, cancel, progress)
+}
+
+/// fetch_resume with a bearer token (for gated Hugging Face files).
+fn fetch_with(url: &str, token: Option<&str>, dest: &Path, cancel: &AtomicBool, mut progress: impl FnMut(u64, u64)) -> Result<(), String> {
     if let Some(dir) = dest.parent() {
         fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
     let part = PathBuf::from(format!("{}.part", dest.display()));
     let have = fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
     let mut req = ureq::get(url).set("User-Agent", "Prestige");
+    if let Some(t) = token {
+        req = req.set("Authorization", &format!("Bearer {t}"));
+    }
     if have > 0 {
         req = req.set("Range", &format!("bytes={have}-"));
     }
@@ -375,6 +451,14 @@ pub(crate) fn fetch_resume(url: &str, dest: &Path, cancel: &AtomicBool, mut prog
         Err(ureq::Error::Status(416, _)) if have > 0 => {
             fs::rename(&part, dest).map_err(|e| e.to_string())?;
             return Ok(());
+        }
+        Err(ureq::Error::Status(401 | 403, _)) if hf_page(url).is_some() => {
+            let page = hf_page(url).unwrap();
+            return Err(if token.is_some() {
+                format!("this file is gated: accept its licence at {page} (logged in as the token's owner), then try again")
+            } else {
+                format!("this file is gated: accept its licence at {page}, then add a Hugging Face token in Packs (or run `hf auth login`)")
+            });
         }
         Err(e) => return Err(e.to_string()),
     };
@@ -483,7 +567,11 @@ fn get_item(app: &AppHandle, root: &Path, id: &str, n: usize, steps: usize, item
     let label = item_label(item);
     let progress = |d: u64, t: u64| emit(app, id, "running", n, steps, &label, d, t, None);
     match item {
-        Item::File { url, dest, .. } => fetch_resume(url, &root.join(dest), cancel, progress),
+        // Hugging Face files go with the token when there is one (gated ones need it; it's harmless on the rest).
+        Item::File { url, dest, .. } => {
+            let token = if url.starts_with("https://huggingface.co/") { hf_token(root).map(|(t, _)| t) } else { None };
+            fetch_with(url, token.as_deref(), &root.join(dest), cancel, progress)
+        }
         Item::Ollama(m) => {
             if !services::listening(11434) {
                 services::start(root, &["ollama".to_string()])?;
@@ -965,6 +1053,16 @@ mod tests {
         let small = catalog(6.0);
         assert!(matches!(&small[0].items[0], Item::Ollama(m) if m == "qwen3.5:4b"));
         assert!(matches!(&catalog(12.0)[1].items[0], Item::Ollama(m) if m == "gemma4:12b"));
+    }
+
+    #[test]
+    fn comfy_models_in_subfolders_and_gated_pages() {
+        let c = candidates(Path::new(r"C:\W"), r"models\comfy\unet\LTX-2.3-dev\m.gguf", &[]);
+        let s: Vec<String> = c.iter().map(|p| p.to_string_lossy().replace('/', "\\")).collect();
+        assert!(s.iter().any(|p| p.ends_with(r"models\comfy-fast\unet\LTX-2.3-dev\m.gguf")), "{s:?}");
+        assert!(s.iter().any(|p| p.ends_with(r"models\comfy\diffusion_models\LTX-2.3-dev\m.gguf")));
+        assert_eq!(hf_page("https://huggingface.co/Lightricks/LTX-2.3-22b-LoRA-Foley-V2A/resolve/main/x.safetensors").as_deref(), Some("https://huggingface.co/Lightricks/LTX-2.3-22b-LoRA-Foley-V2A"));
+        assert_eq!(hf_page("https://github.com/a/b"), None);
     }
 
     #[test]

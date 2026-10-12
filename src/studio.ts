@@ -99,15 +99,16 @@ type GenMode =
   | "upimage"
   | "upvideo"
   | "angle"
-  | "outfit";
+  | "outfit"
+  | "foley";
 
 // How a workflow takes the generation settings: an image model with a latent size and batch, an edit
 // (size follows the picture), LTX with a 2× upscale pass ("ltx") or without ("ltx1"), Wan's two samplers,
 // Wan 2.2 SVI's chained shots ("svi"), an ACE-Step song ("song"), Pixal3D turning a picture into a textured 3D model ("model3d"),
 // InfiniteTalk making a picture speak a voice recording ("talk"), SAM 3.1 selecting something in a picture ("select", not
 // queued), a picture cut out onto transparent ("cutout"), or SAM 3.1 tracking a subject through a video ("vidcut").
-// SeedVR2 sharpening a picture or a video to 1080p or 4K ("upscale").
-type Family = "image" | "edit" | "ltx" | "ltx1" | "wan" | "svi" | "song" | "songedit" | "model3d" | "talk" | "select" | "cutout" | "vidcut" | "upscale";
+// SeedVR2 sharpening a picture or a video to 1080p or 4K ("upscale"). LTX-2.3 making the sound for a silent video ("foley").
+type Family = "image" | "edit" | "ltx" | "ltx1" | "wan" | "svi" | "song" | "songedit" | "model3d" | "talk" | "select" | "cutout" | "vidcut" | "upscale" | "foley";
 
 interface Mode {
   file: string;
@@ -147,6 +148,16 @@ const VIDCUT_SECS = 15;
  * picked 1 frame per chunk at 1080p, so chunks are set to 21 frames, which keeps the frames consistent. */
 const UPSCALE_IMAGE_SECS = 20;
 const UPSCALE_VIDEO_SECS = 130;
+/* Add sound (Foley) on an RTX 3060 12 GB: LTX-2.3 dev Q4_K_M with the Foley LoRA, 30 steps at audio CFG 6 (Lightricks'
+ * settings), 832×480: one 89-frame window (3.7 s) took 1,112 s including ~2 min of loading, ~33 s a step with 4 GB of
+ * the model streamed from RAM. On the distilled model (8 steps) it was 4× quicker but made music-like sound, not
+ * effects, so the pack brings dev. */
+const FOLEY_WINDOW_SECS = 1000;
+const FOLEY_LOAD_SECS = 120;
+/** LTX-2.3's frames a window (1 + 8k) and the longest video Add sound takes (seconds at 24 fps). */
+const FOLEY_WINDOW = 89;
+const FOLEY_MAX_SECONDS = 15;
+
 /** What an upscale's shorter side becomes. */
 export type UpscaleSize = 1080 | 2160;
 
@@ -432,6 +443,19 @@ const MODES: Record<GenMode, Mode> = {
     secs: 180, // 178 s for an 832×1216 portrait on the RTX 3060 (two pictures encoded, 25 steps)
     note: "try on outfit",
     imageNode: "9",
+  },
+  // Add sound: LTX-2.3 dev with Lightricks' Foley LoRA hears the video (frozen, its own frames) and makes its sound
+  // effects, 89 frames (3.7 s) at a time (foleyGraph); Prestige then puts the sound on the original video (mux_foley).
+  // secs is one window.
+  foley: {
+    file: "ltx23-foley-v2a.api.json",
+    label: "LTX-2.3 Foley",
+    family: "foley",
+    promptNode: "5",
+    seed: ["w0n", "noise_seed"],
+    secs: FOLEY_WINDOW_SECS,
+    imageNode: "10",
+    imageKey: "video",
   },
 };
 
@@ -759,6 +783,7 @@ function plan(gm: GenMode, src: Source | null = srcAsset, o?: Override, song?: P
   // Picture to 3D: one model per picture; its time and VRAM were measured (see MODES.model3d).
   if (m.family === "model3d" || m.family === "select" || m.family === "cutout" || m.family === "upscale" || m.family === "songedit") return { w: 0, h: 0, count: 1, load: 0, secs: m.secs, warn: "" };
   if (m.family === "vidcut") return { w: 0, h: 0, count: 1, load: 0, secs: m.secs * 8, warn: "" }; // per second of video (videoCutout)
+  if (m.family === "foley") return { w: 0, h: 0, count: 1, load: 0, secs: m.secs * 2, warn: "" }; // per window (addSound)
   if (m.family === "song") {
     // Measured (see SONG_FIXED_SECS): the same ~5.3 GB at every length, so only a small card gets a warning.
     // A songwriter's pick that's missing (undefined) keeps the saved setting rather than blanking it.
@@ -2397,6 +2422,37 @@ async function videoCutout(a: Asset) {
   }
 }
 
+/** Add sound: LTX-2.3 with Lightricks' Foley LoRA watches the video and makes its sound effects (no speech, no
+ *  music), then the sound goes onto the original video, saved as a new file next to it. Any sound it had is replaced. */
+async function addSound(a: Asset) {
+  closeLightbox();
+  const secs = await videoSeconds(a.path);
+  const what = await ask(
+    "Add sound",
+    `Say what should be heard, tied to what happens in the video: the sources and how they sound. Any sound it has now is replaced.${secs > FOLEY_MAX_SECONDS ? ` Only the first ${FOLEY_MAX_SECONDS} s get sound.` : ""}`,
+    "e.g. footsteps on gravel, a dog barking twice, wind in the trees",
+  );
+  if (!what) return;
+  const frames = Math.max(9, Math.floor(Math.min(secs, FOLEY_MAX_SECONDS) * 24));
+  // LTX hears the frames at about 832×480 (what the LoRA was made at), the video's shape kept, in multiples of 32.
+  const ratio = a.width && a.height ? a.width / a.height : 16 / 9;
+  const area = 832 * 480;
+  const w = Math.max(256, Math.round(Math.sqrt(area * ratio) / 32) * 32);
+  const h = Math.max(256, Math.round(Math.sqrt(area / ratio) / 32) * 32);
+  const windows = Math.ceil(frames / FOLEY_WINDOW);
+  deps.toast(`Making the sound: about ${aboutTime(FOLEY_LOAD_SECS + windows * FOLEY_WINDOW_SECS)} on an RTX 3060. It opens when it's done.`);
+  try {
+    const out = await run("foley", what, a, { foley: { frames, w, h } }, undefined, { from: "Add sound", title: `Sound for ${a.name}: ${what}` });
+    const track = out.find((x) => x.kind === "audio");
+    if (!track) throw new Error("no sound came back");
+    const video = await invoke<string>("mux_foley", { root: deps.root(), video: a.path, audio: track.path });
+    await refresh();
+    openRender(video);
+  } catch (e) {
+    if (errMsg(e) !== "stopped") deps.toast(`Couldn't add sound: ${errMsg(e)}`, "warn");
+  }
+}
+
 /** A video's length in seconds, from its own metadata (8 when it can't be read). */
 function videoSeconds(path: string): Promise<number> {
   return new Promise((res) => {
@@ -2619,6 +2675,7 @@ function showMenu(e: MouseEvent, a: Asset) {
     ...(image && ocrReady() ? [{ label: "Read the text", run: () => (closeLightbox(), readText(a.path, a.name)), key: "Unlimited-OCR" }] : []),
     ...(image && translateReady() ? [{ label: "Translate the text…", run: () => (closeLightbox(), openTranslate("", a.path)), key: "Index-Translate" }] : []),
     ...(a.kind === "video" && workflows.vidcut ? [{ label: "Cut out a subject…", run: () => videoCutout(a), key: "green screen" }] : []),
+    ...(a.kind === "video" && workflows.foley ? [{ label: "Add sound…", run: () => addSound(a), key: "Foley" }] : []),
     ...upscaleItems(a),
     ...songEditItems(a),
     ...(image && (workflows.animate || workflows.long) ? [{ label: "Animate (image → video)…", run: () => startFrom(a, "video") }] : []),
@@ -2774,6 +2831,7 @@ interface QueueOpts {
   talk?: { audio: Blob; seconds: number }; // a talking video's voice recording and its length
   video?: Partial<VideoSettings>; // a video's length, size or quality over the saved settings (a Director shot)
   upscale?: UpscaleSize; // an upscale's shorter side
+  foley?: { frames: number; w: number; h: number }; // Add sound: the frames at 24 fps and the size LTX hears them at
   edit?: SongEdit; // the song editor's job
   audio?: Blob; // a song from the PC to edit (a gallery song goes as the source's path)
   outfit?: string; // Try on outfit: the outfit picture in ComfyUI's input folder
@@ -2837,6 +2895,42 @@ async function checkLora(graph: any) {
   if (names.length && !names.includes(want)) throw new Error(`${want} isn't installed: add the Reshoot pack in Packs`);
 }
 
+/** Add sound's graph: the video's frames at 24 fps, frozen (a noise mask of 0), and sound made for each 89-frame
+ *  window in turn, the windows joined end to end into one track. The positive prompt ends with Lightricks' "no speech,
+ *  no music" so effects aren't drowned out. */
+function foleyGraph(g: any, f: NonNullable<QueueOpts["foley"]>, seed: number) {
+  g["5"].inputs.text = `${String(g["5"].inputs.text).replace(/[.\s]+$/, "")}. No speech is present. No music is present.`;
+  Object.assign(g["10"].inputs, { custom_width: f.w, custom_height: f.h, frame_load_cap: f.frames });
+  Object.assign(g["11"].inputs, { width: f.w, height: f.h });
+  const tpl: Record<string, any> = {};
+  for (const id of Object.keys(g).filter((k) => k.startsWith("w0"))) {
+    tpl[id.slice(2)] = g[id];
+    delete g[id];
+  }
+  let audio: [string, number] | null = null;
+  for (let start = 0, k = 0; start < f.frames; k++) {
+    const n = Math.floor((Math.min(FOLEY_WINDOW, f.frames - start) - 1) / 8) * 8 + 1;
+    if (n < 9) break;
+    const id = (s: string) => `w${k}${s}`;
+    const link = (v: any) => (Array.isArray(v) && typeof v[0] === "string" && v[0].startsWith("w0") ? [id(v[0].slice(2)), v[1]] : v);
+    for (const [s, node] of Object.entries(tpl)) {
+      const inputs = Object.fromEntries(Object.entries(node.inputs).map(([key, v]) => [key, link(v)]));
+      g[id(s)] = { ...node, inputs };
+    }
+    g[id("f")].inputs.batch_index = start;
+    g[id("f")].inputs.length = n;
+    g[id("a")].inputs.frames_number = n;
+    g[id("n")].inputs.noise_seed = seed + k;
+    if (audio) {
+      g[id("j")] = { class_type: "AudioConcat", inputs: { audio1: audio, audio2: [id("d"), 0], direction: "after" } };
+      audio = [id("j"), 0];
+    } else audio = [id("d"), 0];
+    start += n;
+  }
+  if (!audio) throw new Error("the video is too short (it needs at least half a second)");
+  g["30"].inputs.audio = audio;
+}
+
 // ---------- the render queue ----------
 // Every render (Studio, chat, Paint to change) goes through here and they run one at a time. A render's settings,
 // seed and workflow are fixed when it's added, so changing the settings afterwards only affects new ones.
@@ -2868,7 +2962,7 @@ let current: QJob | null = null;
 let jobIds = 1;
 
 /** Renders whose workflow has no Studio settings (and so no seed setting of their own). */
-const NO_SETTINGS: Family[] = ["talk", "select", "cutout", "vidcut", "upscale", "songedit"];
+const NO_SETTINGS: Family[] = ["talk", "select", "cutout", "vidcut", "upscale", "songedit", "foley"];
 
 /** The modes that render with Qwen-Image-2.1, so a face or style taught with Fizgig can join them. */
 const QWEN_LORA_MODES: GenMode[] = ["image", "fast", "edit", "inpaint", "ref", "reffast"];
@@ -2905,6 +2999,10 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
     songEditGraph(graph, opts.edit);
   }
   apply(m, graph, p, seed);
+  if (gm === "foley") {
+    if (!opts.foley) throw new Error("no video to hear");
+    foleyGraph(graph, opts.foley, seed);
+  }
   if (gm === "inpaint") {
     if (!opts.mask) throw new Error("nothing is painted");
     inpaintGraph(graph, opts.mask);

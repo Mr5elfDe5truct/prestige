@@ -324,6 +324,43 @@ fn fxhash(s: &str) -> u64 {
     h
 }
 
+/// Add sound (Foley): the sound LTX-2.3 made for a video, put on the original video (its picture copied as it is, the
+/// sound padded with silence if the video runs longer), saved next to it as <name>-foley.mp4. The sound file ComfyUI
+/// saved is removed afterwards. Returns the new video's path.
+#[tauri::command]
+pub async fn mux_foley(root: Option<String>, video: String, audio: String) -> Result<String, String> {
+    let out_dir = output_dir(root);
+    tauri::async_runtime::spawn_blocking(move || {
+        let v = PathBuf::from(&video);
+        let a = PathBuf::from(&audio);
+        // Only files in ComfyUI's output folder are touched.
+        for p in [&v, &a] {
+            if !p.starts_with(&out_dir) || !p.is_file() {
+                return Err(format!("{} isn't a render", p.display()));
+            }
+        }
+        let stem = v.file_stem().and_then(|s| s.to_str()).unwrap_or("video");
+        let dir = v.parent().unwrap_or(&out_dir);
+        let out = (1..1000).map(|n| dir.join(format!("{stem}-foley{}.mp4", if n == 1 { String::new() } else { format!("-{n}") }))).find(|p| !p.exists()).ok_or("too many versions")?;
+        let status = hidden(&mut Command::new("ffmpeg"))
+            .args(["-v", "error", "-y", "-i"])
+            .arg(&v)
+            .arg("-i")
+            .arg(&a)
+            .args(["-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-af", "apad", "-shortest", "-movflags", "+faststart"])
+            .arg(&out)
+            .status()
+            .map_err(|e| format!("ffmpeg: {e}"))?;
+        if !status.success() || !out.exists() {
+            return Err("ffmpeg couldn't put the sound on the video".into());
+        }
+        let _ = fs::remove_file(&a);
+        Ok(out.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Shows a file selected in File Explorer, or its folder if the file is gone.
 #[tauri::command]
 pub fn reveal(path: String) -> Result<(), String> {
