@@ -74,6 +74,10 @@ import { CANVAS_CMD, CANVAS_HINT, canvasOnChat, canvasReplyStart, findCanvas, in
 import {
   addDropped, addFiles, citeLabel, docById, hasDocs, initKnowledge, knowledgeFor, openKnowledge, openSource, phoneKnowledge, readyDocs, type KbDoc, type Source,
 } from "./knowledge";
+import { initSearch, openSearch } from "./search";
+import { initOcr } from "./ocr";
+import { humanizeButton, initHumanize } from "./humanize";
+import { initTranslate } from "./translate";
 import { RESEARCH_CMD, deepResearch } from "./research";
 import { TRANSCRIBE_CMD, clock, isMedia, summaryPrompt, transcribeMedia, transcriptMd, type MediaSource } from "./transcribe";
 import { initMissions, phoneMissions } from "./missions";
@@ -81,6 +85,7 @@ import { DO_CMD, brains, describe as describeAct, doItForMe } from "./computer";
 import {
   activeCharacter, characterById, characterMemory, characterPrompt, characters, faceScene, initCharacters, remember, renderPicker, setCharacterVoice, voiceOf, wantsFace,
 } from "./characters";
+import { initSprites, makeSprites } from "./sprites";
 import type { RefKind } from "./reference";
 import { initPhone, onPhoneAsk, phoneOn, phonePush, phoneState, refreshPhone } from "./phone";
 import { initToolStore, openToolStore } from "./toolstore";
@@ -443,6 +448,7 @@ function addAiBubble(modelName: string, text?: () => string) {
   m.innerHTML = `<div class="msg-meta"><span class="msg-who"></span><span class="msg-stat"></span></div><div class="msg-body"></div>`;
   $(".msg-who", m).textContent = modelName;
   if (text) {
+    $(".msg-meta", m).appendChild(humanizeButton(m, text));
     const b = document.createElement("button");
     b.type = "button";
     b.className = "msg-speak";
@@ -3194,7 +3200,20 @@ async function main() {
     },
     onChange: () => renderChatFiles(),
   });
+  initOcr({ toast, root: () => settings.stackRoot ?? null });
+  initHumanize({ toast, root: () => settings.stackRoot ?? null, md });
+  initTranslate({ toast, root: () => settings.stackRoot ?? null });
   $("#kb-btn").addEventListener("click", () => openKnowledge());
+  initSearch({
+    toast,
+    root: () => settings.stackRoot ?? null,
+    openRender: (path) => openRender(path),
+    openChat: async (id) => {
+      if (await openSavedChat(id)) go("chat");
+    },
+    openFile: (id) => openSource({ doc: id, name: "", text: "" }),
+  });
+  $("#search-btn").addEventListener("click", () => openSearch());
   $("#ide-btn").addEventListener("click", async () => {
     try {
       const r = await invoke<string>("open_ide");
@@ -3365,7 +3384,9 @@ async function main() {
     defaultVoice: () => settings.voice ?? DEFAULT_VOICE,
     // "Make a talking video": their face in their voice.
     makeTalk: async (c) => talkFromPicture(`data:image/jpeg;base64,${c.face}`, await referenceFromBase64(c.face!), voiceOf(c)),
+    makeSprites,
   });
+  initSprites({ toast, root: () => settings.stackRoot ?? null, openRender });
   if (settings.character && !characterById(settings.character)) settings.character = undefined;
   // The saved voice, or the character's (initVoice ran before settings were loaded).
   setVoice(activeCharacter()?.voice || settings.voice || DEFAULT_VOICE);
