@@ -77,6 +77,7 @@ import {
 import { initSearch, openSearch } from "./search";
 import { initOcr } from "./ocr";
 import { humanizeButton, initHumanize } from "./humanize";
+import { initTranslate } from "./translate";
 import { RESEARCH_CMD, deepResearch } from "./research";
 import { TRANSCRIBE_CMD, clock, isMedia, summaryPrompt, transcribeMedia, transcriptMd, type MediaSource } from "./transcribe";
 import { initMissions, phoneMissions } from "./missions";
@@ -3200,6 +3201,7 @@ async function main() {
   });
   initOcr({ toast, root: () => settings.stackRoot ?? null });
   initHumanize({ toast, root: () => settings.stackRoot ?? null, md });
+  initTranslate({ toast, root: () => settings.stackRoot ?? null });
   $("#kb-btn").addEventListener("click", () => openKnowledge());
   initSearch({
     toast,

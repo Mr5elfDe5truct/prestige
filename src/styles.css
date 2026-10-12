@@ -879,6 +879,16 @@ dialog.characters[open] { display: flex; flex-direction: column; gap: 12px; }
 .talk-fields textarea:disabled, .talk-fields select:disabled { opacity: .45; }
 .talk-file-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .talk-top img.of-outfit { width: 96px; max-height: 128px; object-fit: contain; margin-bottom: 4px; }
+/* Translate (translate.ts): shown only with the Translate pack. */
+body:not(.translator) .translator-only { display: none; }
+.sheet.translate { width: min(720px, calc(100vw - 32px)); }
+.tr-src textarea { width: 100%; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; color: var(--fg); font: 14px var(--body); padding: 10px 12px; resize: vertical; }
+.tr-src img { max-width: 100%; max-height: 260px; display: block; border-radius: 10px; border: 1px solid var(--line); }
+.tr-row { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.tr-row label { margin: 0; }
+.tr-row select, .tr-row input { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font: 13px var(--body); padding: 8px 10px; }
+.tr-out { white-space: pre-wrap; margin-top: 12px; min-height: 60px; max-height: 40vh; overflow: auto; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--panel-2); font-size: 14px; line-height: 1.55; }
+.tr-out:empty { display: none; }
 @media (max-width: 560px) { .talk-top { flex-direction: column; } .talk-top img { width: 100%; max-height: 200px; } }
 /* Laser: the file at its real size on the left (fitted, or actual pixels), the settings on the right. */
 .sheet.laser { width: min(1040px, calc(100vw - 32px)); }

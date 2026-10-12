@@ -89,6 +89,7 @@ Everything below was generated on the workstation itself (RTX 3060 12 GB, 32 GB 
 | 🔎 | **Search everything** (Prestige) | EmbeddingGemma 2 (Q8_0 + its vision part) in its own llama-server, the `search` service on :8893 on Ollama's card: renders by what's in them, songs, chats and Knowledge files in one index |
 | 📄 | **Read any document** (Prestige) | Unlimited-OCR 3B (Baidu, MIT; 42ailab's Q4_K_M GGUF) in llama.cpp's router as `unlimited-ocr`, added to `bin\llama-models.ini` the first time it's used: photos, scans and scanned PDFs to Markdown and tables |
 | ✍️ | **Make it sound human** (Prestige) | humanizer 12B Q4_K_M (Gemma 4 fine-tune, Apache-2.0) in llama.cpp's router as `humanizer`, added to `bin\llama-models.ini` the first time it's used; its exact training prompt through the completion endpoint |
+| 🌐 | **Translate** (Prestige) | Index-Translate 35B-A3B Q4_K_M + its vision part (bilibili's IndexTeam, Apache-2.0) in llama.cpp's router as `index-translate`, 25 expert layers in system RAM; added to `bin\llama-models.ini` the first time it's used. Its files are in `models\gguf\Index-Translate` (a folder of their own, so it can be a junction to another drive) |
 
 ## 🎩 Prestige desktop app
 

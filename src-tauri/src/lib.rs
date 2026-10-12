@@ -22,6 +22,7 @@ mod search;
 mod services;
 mod setup;
 mod studio;
+mod translate;
 mod workstation;
 
 use serde::Serialize;
@@ -603,6 +604,9 @@ pub fn run() {
             ocr::ocr_read,
             humanize::humanize_status,
             humanize::humanize,
+            translate::translate_status,
+            translate::translate_text,
+            translate::translate_image,
             studio::gallery_list,
             studio::thumbnail,
             studio::reveal,
