@@ -85,6 +85,7 @@ import { DO_CMD, brains, describe as describeAct, doItForMe } from "./computer";
 import {
   activeCharacter, characterById, characterMemory, characterPrompt, characters, faceScene, initCharacters, remember, renderPicker, setCharacterVoice, voiceOf, wantsFace,
 } from "./characters";
+import { initSprites, makeSprites } from "./sprites";
 import type { RefKind } from "./reference";
 import { initPhone, onPhoneAsk, phoneOn, phonePush, phoneState, refreshPhone } from "./phone";
 import { initToolStore, openToolStore } from "./toolstore";
@@ -3383,7 +3384,9 @@ async function main() {
     defaultVoice: () => settings.voice ?? DEFAULT_VOICE,
     // "Make a talking video": their face in their voice.
     makeTalk: async (c) => talkFromPicture(`data:image/jpeg;base64,${c.face}`, await referenceFromBase64(c.face!), voiceOf(c)),
+    makeSprites,
   });
+  initSprites({ toast, root: () => settings.stackRoot ?? null, openRender });
   if (settings.character && !characterById(settings.character)) settings.character = undefined;
   // The saved voice, or the character's (initVoice ran before settings were loaded).
   setVoice(activeCharacter()?.voice || settings.voice || DEFAULT_VOICE);
