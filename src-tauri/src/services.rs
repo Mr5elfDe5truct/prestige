@@ -219,6 +219,7 @@ pub fn stop_named(root: &Path, name: &str) -> Result<(), String> {
         "kokoro" => 8880,
         "voice" => 8890,
         "phonon" => 8891,
+        "search" => crate::search::PORT,
         "mcpo" => 8200,
         "comfyui" => 8188,
         "comfyui-quick" => 8189,

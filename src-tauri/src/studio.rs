@@ -24,18 +24,18 @@ const THUMB_SIZE: u32 = 360;
 
 #[derive(Serialize, Clone, serde::Deserialize)]
 pub struct Asset {
-    path: String,
-    name: String,
-    kind: String, // image | video | audio
-    mtime: f64,   // ms since epoch
-    size: u64,
-    prompt: Option<String>, // a song's style
-    model: Option<String>,
-    width: Option<u32>,
-    height: Option<u32>,
-    seed: Option<u64>,
-    lyrics: Option<String>,  // a song's
-    duration: Option<f64>,   // a song's length in seconds
+    pub(crate) path: String,
+    pub(crate) name: String,
+    pub(crate) kind: String, // image | video | audio
+    pub(crate) mtime: f64,   // ms since epoch
+    pub(crate) size: u64,
+    pub(crate) prompt: Option<String>, // a song's style
+    pub(crate) model: Option<String>,
+    pub(crate) width: Option<u32>,
+    pub(crate) height: Option<u32>,
+    pub(crate) seed: Option<u64>,
+    pub(crate) lyrics: Option<String>,  // a song's
+    pub(crate) duration: Option<f64>,   // a song's length in seconds
     // A song's tempo, key, meter and language ({"bpm", "key", "meter", "language"}), so an edit keeps them.
     #[serde(default)]
     music: Option<serde_json::Value>,
@@ -251,8 +251,14 @@ pub fn gallery_list(app: AppHandle, cache: tauri::State<GalleryCache>, root: Opt
         let _ = scope.allow_directory(&t, false);
     }
 
+    let items = assets(&dir, &cache)?;
+    Ok(serde_json::json!({ "dir": dir.to_string_lossy(), "exists": true, "items": items }))
+}
+
+/// Every render in `dir`, newest first (also what Search everything indexes).
+pub(crate) fn assets(dir: &Path, cache: &GalleryCache) -> Result<Vec<Asset>, String> {
     let mut files = Vec::new();
-    walk(&dir, &mut files, 0);
+    walk(dir, &mut files, 0);
     let mut items = Vec::new();
     let mut c = cache.0.lock().map_err(|e| e.to_string())?;
     for p in files {
@@ -270,43 +276,42 @@ pub fn gallery_list(app: AppHandle, cache: tauri::State<GalleryCache>, root: Opt
         items.push(asset);
     }
     items.sort_by(|a, b| b.mtime.total_cmp(&a.mtime));
-    Ok(serde_json::json!({ "dir": dir.to_string_lossy(), "exists": true, "items": items }))
+    Ok(items)
 }
 
 /// A small cached JPEG for the grid, so full-size renders never load there.
 #[tauri::command]
 pub async fn thumbnail(app: AppHandle, path: String, mtime: f64) -> Result<String, String> {
-    let src = PathBuf::from(&path);
-    let dir = data_dir(&app, "thumbs")?;
+    let out = tauri::async_runtime::spawn_blocking(move || make_thumb(&app, &path, mtime)).await.map_err(|e| e.to_string())??;
+    Ok(out.to_string_lossy().into_owned())
+}
+
+/// The cached JPEG of a picture, or a video's frame at 0.5 s, made if it isn't there yet.
+pub(crate) fn make_thumb(app: &AppHandle, path: &str, mtime: f64) -> Result<PathBuf, String> {
+    let src = PathBuf::from(path);
+    let dir = data_dir(app, "thumbs")?;
     let key = format!("{:x}", fxhash(&format!("{path}|{mtime}")));
     let out = dir.join(format!("{key}.jpg"));
     if out.exists() {
-        return Ok(out.to_string_lossy().into_owned());
+        return Ok(out);
     }
-    let x = ext_of(&src);
-    let out2 = out.clone();
-    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-        if VIDEO_EXT.contains(&x.as_str()) {
-            let status = hidden(&mut Command::new("ffmpeg"))
-                .args(["-v", "error", "-y", "-ss", "0.5", "-i"])
-                .arg(&src)
-                .args(["-frames:v", "1", "-vf", &format!("scale={THUMB_SIZE}:-2"), "-q:v", "4"])
-                .arg(&out2)
-                .status()
-                .map_err(|e| format!("ffmpeg: {e}"))?;
-            if !status.success() || !out2.exists() {
-                return Err("ffmpeg couldn't read a frame".into());
-            }
-        } else {
-            let img = image::open(&src).map_err(|e| e.to_string())?;
-            let t = img.thumbnail(THUMB_SIZE * 2, THUMB_SIZE * 2).to_rgb8();
-            t.save_with_format(&out2, image::ImageFormat::Jpeg).map_err(|e| e.to_string())?;
+    if VIDEO_EXT.contains(&ext_of(&src).as_str()) {
+        let status = hidden(&mut Command::new("ffmpeg"))
+            .args(["-v", "error", "-y", "-ss", "0.5", "-i"])
+            .arg(&src)
+            .args(["-frames:v", "1", "-vf", &format!("scale={THUMB_SIZE}:-2"), "-q:v", "4"])
+            .arg(&out)
+            .status()
+            .map_err(|e| format!("ffmpeg: {e}"))?;
+        if !status.success() || !out.exists() {
+            return Err("ffmpeg couldn't read a frame".into());
         }
-        Ok(())
-    })
-    .await
-    .map_err(|e| e.to_string())??;
-    Ok(out.to_string_lossy().into_owned())
+    } else {
+        let img = image::open(&src).map_err(|e| e.to_string())?;
+        let t = img.thumbnail(THUMB_SIZE * 2, THUMB_SIZE * 2).to_rgb8();
+        t.save_with_format(&out, image::ImageFormat::Jpeg).map_err(|e| e.to_string())?;
+    }
+    Ok(out)
 }
 
 fn fxhash(s: &str) -> u64 {

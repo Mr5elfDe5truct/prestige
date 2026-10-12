@@ -171,6 +171,21 @@ pub fn catalog(ollama_gb: f64) -> Vec<Pack> {
             comfy_same("Comfy-Org/SeedVR2", "diffusion_models/seedvr2_3b_int8_convrot.safetensors"),
             comfy_same("Comfy-Org/SeedVR2", "vae/seedvr2_ema_vae_fp16.safetensors"),
         ], vram: 10.0, ram: 0.0, card: "comfyui" },
+        Pack { id: "reshoot", title: "Reshoot", text: "Multiple-Angles + Outfit Swap LoRAs for Qwen-Image-2.1 (ComfyUI): a new camera angle, try on an outfit (needs Images)".into(), gb: 0.5, items: vec![
+            Item::File { url: hf("akhaliq/Qwen-Image-2.1-Multiple-Angles-LoRA", "checkpoints_v2/angles_v2_full_qwen21_multiple_angles_v2_qwen21_multiple_angles_v2_000001500.safetensors"), dest: r"models\comfy\loras\qwen-image-2.1-multiple-angles-v2.safetensors".into(), alts: vec![] },
+            comfy("ausboss/Qwen-Image-2.1-Outfit-Swap-Consistency-LoRA", "qwen-image-2.1-outfit-swap.safetensors", "loras"),
+        ], vram: 10.0, ram: 0.0, card: "comfyui" },
+        Pack { id: "search", title: "Search", text: "EmbeddingGemma 2 (llama.cpp): search renders, songs, chats and files by meaning (needs llama.cpp b11452 or newer)".into(), gb: 0.9, items: vec![
+            gguf("ggml-org/embeddinggemma-2-GGUF", crate::search::MODEL, crate::search::MODEL),
+            gguf("ggml-org/embeddinggemma-2-GGUF", crate::search::MMPROJ, crate::search::MMPROJ),
+        ], vram: 1.3, ram: 0.0, card: "ollama" },
+        Pack { id: "ocr", title: "Read documents", text: "Unlimited-OCR 3B (llama.cpp): photos, scans and scanned PDFs to text and tables, for Studio and Knowledge".into(), gb: 2.8, items: vec![
+            gguf("42ailab/Unlimited-OCR-GGUF", crate::ocr::MODEL, crate::ocr::MODEL),
+            gguf("42ailab/Unlimited-OCR-GGUF", crate::ocr::MMPROJ, crate::ocr::MMPROJ),
+        ], vram: 5.0, ram: 0.0, card: "llama" },
+        Pack { id: "humanize", title: "Humanizer", text: "humanizer 12B (llama.cpp, Gemma 4): Make it sound human rewrites AI-written text, facts kept".into(), gb: 7.6, items: vec![
+            gguf("jialinyyzz/humanizer", crate::humanize::MODEL, crate::humanize::MODEL),
+        ], vram: 10.0, ram: 0.0, card: "llama" },
         Pack { id: "translate", title: "Translate", text: "Index-Translate 35B-A3B (llama.cpp, experts in RAM): text and pictures between 150 languages".into(), gb: 22.3, items: [crate::translate::MODEL, crate::translate::MMPROJ].iter().map(|f| Item::File {
             url: hf("IndexTeam/Index-Translate-35B-A3B-preview-GGUF", f),
             dest: format!(r"models\gguf\{}\{f}", crate::translate::DIR),

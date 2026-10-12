@@ -592,6 +592,7 @@ const SVC_NAMES: Record<string, string> = {
   kokoro: "Kokoro voice",
   voice: "Voice server · Whisper, VoxCPM2",
   phonon: "Phonon server · Transcribe",
+  search: "Search · EmbeddingGemma 2",
   mcpo: "Tool server",
   comfyui: "ComfyUI",
   "comfyui-quick": "ComfyUI quick · click to select",
