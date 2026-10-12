@@ -18,6 +18,7 @@ mod engine;
 mod laser;
 mod services;
 mod setup;
+mod sprites;
 mod studio;
 mod workstation;
 
@@ -572,6 +573,7 @@ pub fn run() {
         .manage(knowledge::Knowledge::default())
         .manage(phone::Phone::default())
         .manage(packs::Jobs::default())
+        .manage(sprites::Sprites::default())
         .invoke_handler(tauri::generate_handler![
             gpu_stats,
             gpu_plan,
@@ -662,12 +664,21 @@ pub fn run() {
             packs::engines,
             packs::engine_action,
             setup::setup_probe,
-            setup::setup_run
+            setup::setup_run,
+            sprites::sprites_status,
+            sprites::sprites_start,
+            sprites::sprites_stop,
+            sprites::sprites_character,
+            sprites::sprites_window,
+            sprites::sprite_sheet,
+            sprites::sprites_progress,
+            sprites::sprites_setup
         ])
         .build(tauri::generate_context!())
         .expect("error while building Prestige")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
+                sprites::sprites_stop(app.clone());
                 stop_on_close(app);
             }
         });

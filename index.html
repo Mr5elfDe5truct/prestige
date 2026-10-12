@@ -604,6 +604,7 @@
           <div class="acts">
             <button class="btn danger" id="ch-delete" type="button">Delete</button>
             <button class="btn" id="ch-video" type="button">Make a talking video…</button>
+            <button class="btn" id="ch-sprites" type="button">Make sprites…</button>
             <button class="btn" id="ch-save" type="button">Save</button>
             <button class="btn primary" id="ch-talk" type="button">Talk to them</button>
           </div>
@@ -845,6 +846,24 @@
         <div class="acts">
           <button class="btn" value="cancel">Cancel</button>
           <button class="btn primary" value="ok">OK</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="sheet" id="sprites">
+      <form method="dialog">
+        <h2 id="sprites-title">Make sprites</h2>
+        <p class="muted">VNCCS draws them from their face in many poses, full-body on a transparent background, and Prestige puts them on one sheet. It opens in a window of its own while it works; leave that window open.</p>
+        <label class="field">They are
+          <select id="sprites-sex"><option value="female">a woman or girl</option><option value="male">a man or boy</option></select>
+        </label>
+        <label class="field">Poses
+          <select id="sprites-poses"><option value="4">4 poses (about 12 minutes)</option><option value="0">All of VNCCS's poses (longer)</option></select>
+        </label>
+        <p class="muted">ComfyUI pauses while VNCCS runs (they both need the graphics card) and starts again after.</p>
+        <div class="acts">
+          <button class="btn" value="cancel">Cancel</button>
+          <button class="btn primary" value="ok">Make sprites</button>
         </div>
       </form>
     </dialog>

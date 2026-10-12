@@ -31,6 +31,7 @@ interface Deps {
   defaultVoice: () => string;
   /** "Make a talking video": their face says a line in their voice (InfiniteTalk). */
   makeTalk: (c: Character) => void;
+  makeSprites: (c: Character) => void;
 }
 
 let deps: Deps;
@@ -252,6 +253,9 @@ function renderEditor() {
   const vid = $("#ch-video") as HTMLButtonElement;
   vid.disabled = !editing.face;
   vid.title = editing.face ? "Their face says a line in their voice, as a lip-synced video (InfiniteTalk)" : "Add a face first";
+  const spr = $("#ch-sprites") as HTMLButtonElement;
+  spr.disabled = !editing.face;
+  spr.title = editing.face ? "Full-body sprites of them in many poses, on one transparent sheet (VNCCS)" : "Add a face first";
   renderMemory();
   renderVoices(editing.voice);
 }
@@ -380,6 +384,13 @@ export async function initCharacters(d: Deps) {
     await save();
     ($("#characters") as HTMLDialogElement).close();
     deps.makeTalk(editing);
+  });
+  $("#ch-sprites").addEventListener("click", async () => {
+    if (!editing?.face) return;
+    readForm();
+    await save();
+    ($("#characters") as HTMLDialogElement).close();
+    deps.makeSprites(editing);
   });
   $("#ch-delete").addEventListener("click", async () => {
     if (!editing || !confirm(`Delete ${editing.name || "this character"}, with its memory? (Chats with it stay in Past chats.)`)) return;
