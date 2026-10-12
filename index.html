@@ -128,6 +128,7 @@
               <button type="button" class="icon-btn" id="composer-cam" aria-label="Attach a webcam frame" title="Attach a webcam frame"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7h4l2-3h6l2 3h4v12H3z" /><circle cx="12" cy="13" r="4" /></svg></button>
               <button type="button" class="icon-btn" id="composer-image" aria-label="Make an image" title="Make an image. Or type /image (or /video) followed by what to make"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="M21 16l-5-5-9 9" /></svg></button>
               <button type="button" class="icon-btn" id="composer-storyboard" aria-label="Storyboard a music video" title="Storyboard a music video: Prestige plans the song and the shots, draws a frame for each, and you change them before it's rendered. Or type /storyboard and what it's about (alone, it opens the last storyboard)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="4" width="8" height="7" rx="1" /><rect x="14" y="4" width="8" height="7" rx="1" /><rect x="2" y="14" width="8" height="7" rx="1" /><rect x="14" y="14" width="8" height="7" rx="1" /></svg></button>
+              <button type="button" class="icon-btn translator-only" id="composer-translate" aria-label="Translate" title="Translate what's in the box (or anything you paste) into another language, on this PC"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z" /></svg></button>
               <button type="button" class="icon-btn" id="composer-research" aria-label="Deep research" title="Deep research: Prestige plans searches, reads the pages it finds and writes a report that cites them (a few minutes). Or type /research and a question"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="M15.5 15.5L21 21M10.5 7.5v6M7.5 10.5h6" /></svg></button>
               <button type="button" class="icon-btn" id="composer-do" aria-label="Do it for me" title="Do it for me: a model that can see uses your mouse and keyboard to do the task, step by step, with you approving each step. Or type /do and the task"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 3l6 16 2.5-6.5L20 10z" /><path d="M14 14l5 5" /></svg></button>
               <button type="button" class="icon-btn" id="composer-gen" aria-label="Image and video settings" title="Image and video settings: size, quality, seed, length…"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0" /><circle cx="16" cy="6" r="2" /><circle cx="10" cy="12" r="2" /><circle cx="18" cy="18" r="2" /></svg></button>
@@ -833,6 +834,31 @@
           <button type="button" class="btn" id="sb-draw-all">Draw missing frames</button>
           <button type="button" class="btn" id="sb-close" title="The board is kept: /storyboard opens it again">Close</button>
           <button type="button" class="btn primary" id="sb-render">Render the video</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- Translate (translate.ts) -->
+    <dialog class="sheet translate" id="translate">
+      <form method="dialog" onsubmit="return false">
+        <h2>Translate</h2>
+        <div class="tr-src">
+          <textarea id="tr-text" rows="6" placeholder="Type or paste what to translate"></textarea>
+          <img id="tr-pic" alt="The picture whose text is translated" hidden />
+          <button type="button" class="linkish" id="tr-pic-clear" hidden>translate text instead</button>
+        </div>
+        <div class="tr-row">
+          <label>Into<select id="tr-to"></select></label>
+          <input id="tr-other" type="text" autocomplete="off" placeholder="e.g. Welsh, Swahili, Catalan" hidden />
+          <button type="button" class="btn primary" id="tr-go">Translate</button>
+        </div>
+        <div class="tr-out" id="tr-out"></div>
+        <p class="muted" id="tr-note"></p>
+        <p class="credit">Index-Translate 35B-A3B (bilibili, Apache-2.0): 150 languages, and the text in pictures (signs, menus, screenshots) without a separate OCR step.</p>
+        <div class="acts">
+          <button type="button" class="btn" id="tr-copy">Copy</button>
+          <button type="button" class="btn" id="tr-use">Put in the chat box</button>
+          <button type="button" class="btn" id="tr-close">Close</button>
         </div>
       </form>
     </dialog>

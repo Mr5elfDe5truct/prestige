@@ -171,6 +171,11 @@ pub fn catalog(ollama_gb: f64) -> Vec<Pack> {
             comfy_same("Comfy-Org/SeedVR2", "diffusion_models/seedvr2_3b_int8_convrot.safetensors"),
             comfy_same("Comfy-Org/SeedVR2", "vae/seedvr2_ema_vae_fp16.safetensors"),
         ], vram: 10.0, ram: 0.0, card: "comfyui" },
+        Pack { id: "translate", title: "Translate", text: "Index-Translate 35B-A3B (llama.cpp, experts in RAM): text and pictures between 150 languages".into(), gb: 22.3, items: [crate::translate::MODEL, crate::translate::MMPROJ].iter().map(|f| Item::File {
+            url: hf("IndexTeam/Index-Translate-35B-A3B-preview-GGUF", f),
+            dest: format!(r"models\gguf\{}\{f}", crate::translate::DIR),
+            alts: vec![],
+        }).collect(), vram: 10.0, ram: 24.0, card: "llama" },
         Pack { id: "openwebui", title: "Open WebUI", text: "Chat in a browser at localhost:8080 (optional: Prestige has chat, voice and memory)".into(), gb: 2.5, items: vec![
             Item::Env { name: "open-webui".into(), probe: r"envs\open-webui\Scripts\open-webui.exe".into(), steps: vec![
                 uv(&["venv", r"envs\open-webui", "--python", "3.11", "-q"]),
