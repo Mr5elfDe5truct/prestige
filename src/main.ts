@@ -74,6 +74,7 @@ import { CANVAS_CMD, CANVAS_HINT, canvasOnChat, canvasReplyStart, findCanvas, in
 import {
   addDropped, addFiles, citeLabel, docById, hasDocs, initKnowledge, knowledgeFor, openKnowledge, openSource, phoneKnowledge, readyDocs, type KbDoc, type Source,
 } from "./knowledge";
+import { initSearch, openSearch } from "./search";
 import { initOcr } from "./ocr";
 import { RESEARCH_CMD, deepResearch } from "./research";
 import { TRANSCRIBE_CMD, clock, isMedia, summaryPrompt, transcribeMedia, transcriptMd, type MediaSource } from "./transcribe";
@@ -3197,6 +3198,16 @@ async function main() {
   });
   initOcr({ toast, root: () => settings.stackRoot ?? null });
   $("#kb-btn").addEventListener("click", () => openKnowledge());
+  initSearch({
+    toast,
+    root: () => settings.stackRoot ?? null,
+    openRender: (path) => openRender(path),
+    openChat: async (id) => {
+      if (await openSavedChat(id)) go("chat");
+    },
+    openFile: (id) => openSource({ doc: id, name: "", text: "" }),
+  });
+  $("#search-btn").addEventListener("click", () => openSearch());
   $("#ide-btn").addEventListener("click", async () => {
     try {
       const r = await invoke<string>("open_ide");
