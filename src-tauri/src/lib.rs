@@ -5,6 +5,7 @@
 mod background;
 mod canvas;
 mod computer;
+mod humanize;
 mod knowledge;
 mod models;
 mod ocr;
@@ -600,6 +601,8 @@ pub fn run() {
             search::search_everything,
             ocr::ocr_status,
             ocr::ocr_read,
+            humanize::humanize_status,
+            humanize::humanize,
             studio::gallery_list,
             studio::thumbnail,
             studio::reveal,
