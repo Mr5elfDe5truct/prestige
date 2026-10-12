@@ -5,6 +5,7 @@
 mod background;
 mod canvas;
 mod computer;
+mod humanize;
 mod knowledge;
 mod models;
 mod packs;
@@ -592,6 +593,8 @@ pub fn run() {
             store_set,
             sys_memory,
             file_sizes,
+            humanize::humanize_status,
+            humanize::humanize,
             studio::gallery_list,
             studio::thumbnail,
             studio::reveal,

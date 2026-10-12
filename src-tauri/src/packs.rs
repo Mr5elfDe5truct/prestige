@@ -171,6 +171,9 @@ pub fn catalog(ollama_gb: f64) -> Vec<Pack> {
             comfy_same("Comfy-Org/SeedVR2", "diffusion_models/seedvr2_3b_int8_convrot.safetensors"),
             comfy_same("Comfy-Org/SeedVR2", "vae/seedvr2_ema_vae_fp16.safetensors"),
         ], vram: 10.0, ram: 0.0, card: "comfyui" },
+        Pack { id: "humanize", title: "Humanizer", text: "humanizer 12B (llama.cpp, Gemma 4): Make it sound human rewrites AI-written text, facts kept".into(), gb: 7.6, items: vec![
+            gguf("jialinyyzz/humanizer", crate::humanize::MODEL, crate::humanize::MODEL),
+        ], vram: 10.0, ram: 0.0, card: "llama" },
         Pack { id: "openwebui", title: "Open WebUI", text: "Chat in a browser at localhost:8080 (optional: Prestige has chat, voice and memory)".into(), gb: 2.5, items: vec![
             Item::Env { name: "open-webui".into(), probe: r"envs\open-webui\Scripts\open-webui.exe".into(), steps: vec![
                 uv(&["venv", r"envs\open-webui", "--python", "3.11", "-q"]),

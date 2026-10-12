@@ -74,6 +74,7 @@ import { CANVAS_CMD, CANVAS_HINT, canvasOnChat, canvasReplyStart, findCanvas, in
 import {
   addDropped, addFiles, citeLabel, docById, hasDocs, initKnowledge, knowledgeFor, openKnowledge, openSource, phoneKnowledge, readyDocs, type KbDoc, type Source,
 } from "./knowledge";
+import { humanizeButton, initHumanize } from "./humanize";
 import { RESEARCH_CMD, deepResearch } from "./research";
 import { TRANSCRIBE_CMD, clock, isMedia, summaryPrompt, transcribeMedia, transcriptMd, type MediaSource } from "./transcribe";
 import { initMissions, phoneMissions } from "./missions";
@@ -443,6 +444,7 @@ function addAiBubble(modelName: string, text?: () => string) {
   m.innerHTML = `<div class="msg-meta"><span class="msg-who"></span><span class="msg-stat"></span></div><div class="msg-body"></div>`;
   $(".msg-who", m).textContent = modelName;
   if (text) {
+    $(".msg-meta", m).appendChild(humanizeButton(m, text));
     const b = document.createElement("button");
     b.type = "button";
     b.className = "msg-speak";
@@ -3194,6 +3196,7 @@ async function main() {
     },
     onChange: () => renderChatFiles(),
   });
+  initHumanize({ toast, root: () => settings.stackRoot ?? null, md });
   $("#kb-btn").addEventListener("click", () => openKnowledge());
   $("#ide-btn").addEventListener("click", async () => {
     try {
