@@ -259,6 +259,14 @@ export function openPacks() {
   if (!dlg.open) dlg.showModal();
   refresh();
   refreshEngines();
+  showToken();
+}
+
+/** Where the Hugging Face token for gated packs comes from (never the token itself). */
+async function showToken() {
+  const from = await invoke<"prestige" | "env" | "hf-cli" | null>("hf_token_status", { root: deps.root() }).catch(() => null);
+  const said = { prestige: "A token is saved here.", env: "Using the token in HF_TOKEN.", "hf-cli": "Using the token from `hf auth login` on this PC." };
+  $("#hf-token-state").textContent = from ? said[from] : "No token yet.";
 }
 
 export function initPacks(d: Deps) {
@@ -267,4 +275,15 @@ export function initPacks(d: Deps) {
   $("#open-packs")?.addEventListener("click", () => openPacks());
   $("#sys-packs")?.addEventListener("click", () => openPacks());
   $("#packs-refresh").addEventListener("click", () => refresh());
+  $("#hf-token-save").addEventListener("click", async () => {
+    const input = $<HTMLInputElement>("#hf-token");
+    try {
+      await invoke("hf_token_set", { root: deps.root(), token: input.value });
+      input.value = "";
+      deps.toast("Saved the Hugging Face token. Gated packs download with it.");
+      showToken();
+    } catch (e) {
+      deps.toast(errMsg(e), "warn");
+    }
+  });
 }
