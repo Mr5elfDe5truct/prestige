@@ -538,7 +538,7 @@
       <label class="check"><input id="kb-all" type="checkbox" /> Use my files in every chat (only passages that match the question go in)</label>
       <div class="kb-list-head"><span class="eyebrow">Your files</span><span class="credit" id="kb-count"></span></div>
       <div class="kb-list" id="kb-list"></div>
-      <p class="credit">Reads PDF (text, not scans), Word (.docx), text, Markdown, HTML, CSV, JSON and code. Files added from a folder or the picker are read where they are; dropped files are copied into Prestige's app data folder. Removing a file here never deletes your original.</p>
+      <p class="credit">Reads PDF, Word (.docx), text, Markdown, HTML, CSV, JSON and code. With the Read documents pack it also reads scanned PDFs and photos or scans of pages (pick them with Add files…). Files added from a folder or the picker are read where they are; dropped files are copied into Prestige's app data folder. Removing a file here never deletes your original.</p>
     </dialog>
 
     <!-- Search everything by meaning (search.ts) -->
@@ -900,6 +900,20 @@
           <button type="button" class="btn" id="sb-draw-all">Draw missing frames</button>
           <button type="button" class="btn" id="sb-close" title="The board is kept: /storyboard opens it again">Close</button>
           <button type="button" class="btn primary" id="sb-render">Render the video</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- Read the text (ocr.ts) -->
+    <dialog class="sheet ocr" id="ocr">
+      <form method="dialog" onsubmit="return false">
+        <h2>Text from the picture <span class="credit" id="ocr-name"></span></h2>
+        <div class="ocr-md msg-body" id="ocr-body"></div>
+        <p class="muted" id="ocr-note"></p>
+        <div class="acts">
+          <button type="button" class="btn" id="ocr-kb" title="Add the picture to Knowledge, so chats can answer from what it says">Add to Knowledge</button>
+          <button type="button" class="btn" id="ocr-copy">Copy as Markdown</button>
+          <button type="button" class="btn primary" id="ocr-close">Close</button>
         </div>
       </form>
     </dialog>

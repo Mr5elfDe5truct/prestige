@@ -133,6 +133,14 @@ body.busy .hud .eye-glow, .splash .eye-glow { animation: eye 1s ease-in-out infi
 .msg-body table { border-collapse: collapse; }
 .msg-body th, .msg-body td { border: 1px solid var(--line); padding: 4px 8px; }
 .msg-body blockquote { margin: 0; padding-left: 12px; border-left: 2px solid var(--red-deep); color: var(--muted); }
+/* Read the text (ocr.ts): the page's Markdown, rendered. */
+.sheet.ocr { width: min(820px, calc(100vw - 32px)); }
+.ocr-md { max-height: 58vh; overflow: auto; border: 1px solid var(--line); border-radius: 10px; padding: 4px 16px; background: var(--panel-2); font-size: 14px; line-height: 1.55; min-height: 120px; display: block; }
+.ocr-md table { border-collapse: collapse; margin: 10px 0; }
+.ocr-md th, .ocr-md td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; }
+.ocr-md h1 { font-size: 20px; } .ocr-md h2 { font-size: 16px; }
+.ocr-md .spinner { margin: 40px auto; width: 28px; height: 28px; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--gold); animation: ocr-spin 0.9s linear infinite; }
+@keyframes ocr-spin { to { transform: rotate(360deg); } }
 .msg.error .msg-body { color: #ff8a8a; }
 .caret { display: inline-block; width: 7px; height: 1em; background: var(--red); vertical-align: -2px; margin-left: 2px; animation: blink .8s steps(2) infinite; }
 @keyframes blink { 50% { opacity: 0; } }

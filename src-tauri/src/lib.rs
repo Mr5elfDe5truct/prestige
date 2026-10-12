@@ -7,6 +7,7 @@ mod canvas;
 mod computer;
 mod knowledge;
 mod models;
+mod ocr;
 mod packs;
 mod phone;
 mod prep;
@@ -597,6 +598,8 @@ pub fn run() {
             search::search_index,
             search::search_status,
             search::search_everything,
+            ocr::ocr_status,
+            ocr::ocr_read,
             studio::gallery_list,
             studio::thumbnail,
             studio::reveal,

@@ -179,6 +179,10 @@ pub fn catalog(ollama_gb: f64) -> Vec<Pack> {
             gguf("ggml-org/embeddinggemma-2-GGUF", crate::search::MODEL, crate::search::MODEL),
             gguf("ggml-org/embeddinggemma-2-GGUF", crate::search::MMPROJ, crate::search::MMPROJ),
         ], vram: 1.3, ram: 0.0, card: "ollama" },
+        Pack { id: "ocr", title: "Read documents", text: "Unlimited-OCR 3B (llama.cpp): photos, scans and scanned PDFs to text and tables, for Studio and Knowledge".into(), gb: 2.8, items: vec![
+            gguf("42ailab/Unlimited-OCR-GGUF", crate::ocr::MODEL, crate::ocr::MODEL),
+            gguf("42ailab/Unlimited-OCR-GGUF", crate::ocr::MMPROJ, crate::ocr::MMPROJ),
+        ], vram: 5.0, ram: 0.0, card: "llama" },
         Pack { id: "openwebui", title: "Open WebUI", text: "Chat in a browser at localhost:8080 (optional: Prestige has chat, voice and memory)".into(), gb: 2.5, items: vec![
             Item::Env { name: "open-webui".into(), probe: r"envs\open-webui\Scripts\open-webui.exe".into(), steps: vec![
                 uv(&["venv", r"envs\open-webui", "--python", "3.11", "-q"]),
