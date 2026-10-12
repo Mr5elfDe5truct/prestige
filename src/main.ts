@@ -171,6 +171,7 @@ interface Settings {
   phonePort?: number; // its port, 8765 unless set
   liveStt?: "phonon"; // Live calls listen with Phonon-2 (CPU, :8891) instead of Whisper
   computerModel?: string; // the model that drives the PC for /do (its key); undefined = the best one there
+  autoUpdate?: boolean; // look for a new version on GitHub without being asked (undefined = on)
 }
 
 let settings: Settings = {};
@@ -2986,7 +2987,14 @@ function wire() {
     b.addEventListener("drop", () => clearTimeout(springTimer));
   });
 
-  $("#brand").addEventListener("click", () => ($("#about") as HTMLDialogElement).showModal());
+  $("#brand").addEventListener("click", () => {
+    ($("#auto-update") as HTMLInputElement).checked = settings.autoUpdate !== false;
+    ($("#about") as HTMLDialogElement).showModal();
+  });
+  $("#auto-update").addEventListener("change", () => {
+    settings.autoUpdate = ($("#auto-update") as HTMLInputElement).checked ? undefined : false;
+    saveSettings();
+  });
   $("#replay-splash").addEventListener("click", () => {
     ($("#about") as HTMLDialogElement).close();
     runSplash(false);
@@ -3437,10 +3445,12 @@ async function main() {
   // makes one (setup.ts) and the welcome waits until it's done.
   const info = inTauri ? await invoke<{ startScript: boolean }>("stack_info", { root: settings.stackRoot ?? null }).catch(() => ({ startScript: true })) : { startScript: true };
   await runSplash(info.startScript);
-  // Check for a new version shortly after start, then every 6 hours while Prestige stays open.
+  // Check for a new version shortly after start, then every 6 hours while Prestige stays open, unless that's
+  // switched off in About (then only Check for updates goes online).
+  const autoCheck = () => settings.autoUpdate !== false && checkForUpdates(true);
   initUpdates(toast).then(() => {
-    setTimeout(() => checkForUpdates(true), 4000);
-    setInterval(() => checkForUpdates(true), 6 * 60 * 60 * 1000);
+    setTimeout(autoCheck, 4000);
+    setInterval(autoCheck, 6 * 60 * 60 * 1000);
   });
   greet($("#offline").hidden);
   if (!info.startScript) setTimeout(openSetup, 2400);
