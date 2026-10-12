@@ -350,6 +350,18 @@ fn load_vectors(app: &AppHandle, id: &str) -> Option<Arc<Vectors>> {
     Some(v)
 }
 
+/// Every file that's been read and its passages (page, line, text), for Search everything (search.rs).
+pub(crate) fn passages(app: &AppHandle) -> Vec<(Doc, Vec<(Option<u32>, Option<u32>, String)>)> {
+    let docs: Vec<Doc> = read_docs(app, |d| d.iter().filter(|d| d.state == "ready").cloned().collect()).unwrap_or_default();
+    let Ok(d) = dir(app) else { return Vec::new() };
+    docs.into_iter()
+        .filter_map(|doc| {
+            let chunks: Vec<Chunk> = serde_json::from_str(&fs::read_to_string(d.join(format!("{}.chunks.json", doc.id))).ok()?).ok()?;
+            Some((doc, chunks.into_iter().map(|c| (c.page, c.line, c.text)).collect()))
+        })
+        .collect()
+}
+
 fn remove_files(app: &AppHandle, doc: &Doc) {
     if let Ok(d) = dir(app) {
         let _ = fs::remove_file(d.join(format!("{}.chunks.json", doc.id)));

@@ -86,6 +86,7 @@ Everything below was generated on the workstation itself (RTX 3060 12 GB, 32 GB 
 | 🔍 | **Upscale and enhance** (Prestige) | SeedVR2 through ComfyUI's own nodes: pictures to 1080p or 4K, videos to 1080p, with restored detail; tiled to fit 12 GB |
 | 🗂️ | **Shared long-term memory** | every model reads and writes the same memory; chats are saved |
 | 📚 | **Chat with your files** (Prestige) | Drop PDFs, Word documents, notes or a folder into a chat; Qwen3-Embedding 0.6B (Ollama) indexes them on this PC and answers cite the file and page |
+| 🔎 | **Search everything** (Prestige) | EmbeddingGemma 2 (Q8_0 + its vision part) in its own llama-server, the `search` service on :8893 on Ollama's card: renders by what's in them, songs, chats and Knowledge files in one index |
 
 ## 🎩 Prestige desktop app
 

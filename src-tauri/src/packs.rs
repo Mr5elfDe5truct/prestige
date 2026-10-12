@@ -175,6 +175,10 @@ pub fn catalog(ollama_gb: f64) -> Vec<Pack> {
             Item::File { url: hf("akhaliq/Qwen-Image-2.1-Multiple-Angles-LoRA", "checkpoints_v2/angles_v2_full_qwen21_multiple_angles_v2_qwen21_multiple_angles_v2_000001500.safetensors"), dest: r"models\comfy\loras\qwen-image-2.1-multiple-angles-v2.safetensors".into(), alts: vec![] },
             comfy("ausboss/Qwen-Image-2.1-Outfit-Swap-Consistency-LoRA", "qwen-image-2.1-outfit-swap.safetensors", "loras"),
         ], vram: 10.0, ram: 0.0, card: "comfyui" },
+        Pack { id: "search", title: "Search", text: "EmbeddingGemma 2 (llama.cpp): search renders, songs, chats and files by meaning (needs llama.cpp b11452 or newer)".into(), gb: 0.9, items: vec![
+            gguf("ggml-org/embeddinggemma-2-GGUF", crate::search::MODEL, crate::search::MODEL),
+            gguf("ggml-org/embeddinggemma-2-GGUF", crate::search::MMPROJ, crate::search::MMPROJ),
+        ], vram: 1.3, ram: 0.0, card: "ollama" },
         Pack { id: "openwebui", title: "Open WebUI", text: "Chat in a browser at localhost:8080 (optional: Prestige has chat, voice and memory)".into(), gb: 2.5, items: vec![
             Item::Env { name: "open-webui".into(), probe: r"envs\open-webui\Scripts\open-webui.exe".into(), steps: vec![
                 uv(&["venv", r"envs\open-webui", "--python", "3.11", "-q"]),
