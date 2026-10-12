@@ -35,6 +35,9 @@
           <button class="model-btn persona-btn" id="persona-btn" aria-haspopup="menu"><span class="pf-slot"></span><span id="persona-name">Prestige</span><span class="chev">▼</span></button>
           <div class="model-menu persona-menu" id="persona-menu" hidden role="menu"></div>
         </div>
+        <button class="icon-btn ghost kb-btn" id="search-btn" aria-label="Search everything" title="Search everything by meaning: renders, songs, chats and files (Ctrl+Shift+F)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="6.5" /><path d="M20.5 20.5 16 16" /></svg>
+        </button>
         <button class="icon-btn ghost kb-btn" id="kb-btn" aria-label="Knowledge: chat with your files" title="Knowledge: chat with your files (PDFs, Word documents, notes, folders)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h13v15H6a2 2 0 0 0-2 2z" /><path d="M4 20a2 2 0 0 0 2 2h13v-4" /><path d="M9 8h6M9 11h4" /></svg><span class="count" id="kb-count-badge"></span>
         </button>
@@ -128,6 +131,8 @@
               <button type="button" class="icon-btn" id="composer-cam" aria-label="Attach a webcam frame" title="Attach a webcam frame"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7h4l2-3h6l2 3h4v12H3z" /><circle cx="12" cy="13" r="4" /></svg></button>
               <button type="button" class="icon-btn" id="composer-image" aria-label="Make an image" title="Make an image. Or type /image (or /video) followed by what to make"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="M21 16l-5-5-9 9" /></svg></button>
               <button type="button" class="icon-btn" id="composer-storyboard" aria-label="Storyboard a music video" title="Storyboard a music video: Prestige plans the song and the shots, draws a frame for each, and you change them before it's rendered. Or type /storyboard and what it's about (alone, it opens the last storyboard)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="4" width="8" height="7" rx="1" /><rect x="14" y="4" width="8" height="7" rx="1" /><rect x="2" y="14" width="8" height="7" rx="1" /><rect x="14" y="14" width="8" height="7" rx="1" /></svg></button>
+              <button type="button" class="icon-btn humanize-only" id="composer-humanize" aria-label="Make it sound human" title="Make it sound human: rewrites what's in the box so it reads like a person wrote it, keeping every fact, number and name (Ctrl+Z puts yours back)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 20c2-1 3.5-3 4.5-5.5L15 6l3 3-8.5 6.5C7 16.5 5 18 4 20z" /><path d="M14 7l3 3M4 20h16" /></svg></button>
+              <button type="button" class="icon-btn translator-only" id="composer-translate" aria-label="Translate" title="Translate what's in the box (or anything you paste) into another language, on this PC"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z" /></svg></button>
               <button type="button" class="icon-btn" id="composer-research" aria-label="Deep research" title="Deep research: Prestige plans searches, reads the pages it finds and writes a report that cites them (a few minutes). Or type /research and a question"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="M15.5 15.5L21 21M10.5 7.5v6M7.5 10.5h6" /></svg></button>
               <button type="button" class="icon-btn" id="composer-do" aria-label="Do it for me" title="Do it for me: a model that can see uses your mouse and keyboard to do the task, step by step, with you approving each step. Or type /do and the task"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 3l6 16 2.5-6.5L20 10z" /><path d="M14 14l5 5" /></svg></button>
               <button type="button" class="icon-btn" id="composer-gen" aria-label="Image and video settings" title="Image and video settings: size, quality, seed, length…"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0" /><circle cx="16" cy="6" r="2" /><circle cx="10" cy="12" r="2" /><circle cx="18" cy="18" r="2" /></svg></button>
@@ -535,7 +540,25 @@
       <label class="check"><input id="kb-all" type="checkbox" /> Use my files in every chat (only passages that match the question go in)</label>
       <div class="kb-list-head"><span class="eyebrow">Your files</span><span class="credit" id="kb-count"></span></div>
       <div class="kb-list" id="kb-list"></div>
-      <p class="credit">Reads PDF (text, not scans), Word (.docx), text, Markdown, HTML, CSV, JSON and code. Files added from a folder or the picker are read where they are; dropped files are copied into Prestige's app data folder. Removing a file here never deletes your original.</p>
+      <p class="credit">Reads PDF, Word (.docx), text, Markdown, HTML, CSV, JSON and code. With the Read documents pack it also reads scanned PDFs and photos or scans of pages (pick them with Add files…). Files added from a folder or the picker are read where they are; dropped files are copied into Prestige's app data folder. Removing a file here never deletes your original.</p>
+    </dialog>
+
+    <!-- Search everything by meaning (search.ts) -->
+    <dialog class="sheet knowledge search" id="search">
+      <div class="kb-head">
+        <div>
+          <h2>Search everything</h2>
+          <p class="muted">Find a picture, a video, a song, a chat or a file by what's in it, in your own words. Pictures are searched by what they show, not only by their prompt. Everything stays on this PC.</p>
+        </div>
+        <button class="btn" id="search-close" type="button">Close</button>
+      </div>
+      <input id="search-q" class="search-q" type="search" autocomplete="off" spellcheck="false" placeholder="e.g. the dragon in the rain, a song about trains, what we said about the cabin" />
+      <div class="search-bar">
+        <span class="seg" id="search-kinds"><button type="button" class="on" data-kind="">All</button><button type="button" data-kind="image">Pictures</button><button type="button" data-kind="video">Videos</button><button type="button" data-kind="audio">Songs</button><button type="button" data-kind="chat">Chats</button><button type="button" data-kind="file">Files</button></span>
+        <span class="credit" id="search-status"></span>
+      </div>
+      <div class="search-results" id="search-results"></div>
+      <p class="credit">EmbeddingGemma 2 (Google, the Search pack) reads pictures, video frames, songs' styles and lyrics, chats and your Knowledge files into one index in Prestige's app data folder, and brings it up to date each time this opens.</p>
     </dialog>
 
     <!-- Missions: scheduled jobs while Prestige is open (missions.ts) -->
@@ -731,6 +754,52 @@
       </form>
     </dialog>
 
+    <dialog class="sheet talk" id="reshoot">
+      <form method="dialog">
+        <h2>New camera angle</h2>
+        <div class="talk-top">
+          <img id="rs-pic" alt="" />
+          <div class="talk-fields">
+            <label>Where the camera goes<select id="rs-az"></select></label>
+            <label>How high<select id="rs-el"></select></label>
+            <label class="check"><input type="checkbox" id="rs-close" /> Close-up</label>
+            <label class="check"><input type="checkbox" id="rs-turn" /> All four sides (front, right, back, left)</label>
+          </div>
+        </div>
+        <p class="muted" id="rs-est"></p>
+        <p class="credit">Multiple-Angles LoRA v2 for Qwen-Image-2.1 by akhaliq: the same subject, seen from where the camera moves to.</p>
+        <div class="acts">
+          <button class="btn" value="cancel">Cancel</button>
+          <button class="btn primary" value="go">Reshoot</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="sheet talk" id="outfit">
+      <form method="dialog">
+        <h2>Try on outfit</h2>
+        <div class="talk-top">
+          <img id="of-pic" alt="" />
+          <div class="talk-fields">
+            <p class="muted talk-file-row">
+              <button type="button" class="btn" id="of-pick">Choose the outfit picture…</button>
+              <span id="of-name"></span>
+            </p>
+            <input type="file" id="of-file" accept="image/*" hidden />
+            <img id="of-outfit" class="of-outfit" alt="The outfit" hidden />
+            <label>What is it?<input id="of-what" type="text" autocomplete="off" placeholder="Optional, e.g. red leather jacket and black jeans" /></label>
+            <label class="check"><input type="checkbox" id="of-shoes" /> Keep their own shoes and legwear</label>
+          </div>
+        </div>
+        <p class="muted" id="of-est"></p>
+        <p class="credit">Outfit Swap Consistency LoRA by ausboss: the face, pose and background stay as they were. The outfit can be a photo of someone wearing it, a flat lay or a product shot. Only use photos of real people with their permission.</p>
+        <div class="acts">
+          <button class="btn" value="cancel">Cancel</button>
+          <button class="btn primary" value="go" id="of-go">Try it on</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog class="sheet songedit" id="songedit">
       <form method="dialog">
         <h2>Edit song <span class="credit" id="se-name"></span></h2>
@@ -836,6 +905,79 @@
           <button type="button" class="btn primary" id="sb-render">Render the video</button>
         </div>
       </form>
+    </dialog>
+
+    <!-- Read the text (ocr.ts) -->
+    <dialog class="sheet ocr" id="ocr">
+      <form method="dialog" onsubmit="return false">
+        <h2>Text from the picture <span class="credit" id="ocr-name"></span></h2>
+        <div class="ocr-md msg-body" id="ocr-body"></div>
+        <p class="muted" id="ocr-note"></p>
+        <div class="acts">
+          <button type="button" class="btn" id="ocr-kb" title="Add the picture to Knowledge, so chats can answer from what it says">Add to Knowledge</button>
+          <button type="button" class="btn" id="ocr-copy">Copy as Markdown</button>
+          <button type="button" class="btn primary" id="ocr-close">Close</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- Translate (translate.ts) -->
+    <dialog class="sheet translate" id="translate">
+      <form method="dialog" onsubmit="return false">
+        <h2>Translate</h2>
+        <div class="tr-src">
+          <textarea id="tr-text" rows="6" placeholder="Type or paste what to translate"></textarea>
+          <img id="tr-pic" alt="The picture whose text is translated" hidden />
+          <button type="button" class="linkish" id="tr-pic-clear" hidden>translate text instead</button>
+        </div>
+        <div class="tr-row">
+          <label>Into<select id="tr-to"></select></label>
+          <input id="tr-other" type="text" autocomplete="off" placeholder="e.g. Welsh, Swahili, Catalan" hidden />
+          <button type="button" class="btn primary" id="tr-go">Translate</button>
+        </div>
+        <div class="tr-out" id="tr-out"></div>
+        <p class="muted" id="tr-note"></p>
+        <p class="credit">Index-Translate 35B-A3B (bilibili, Apache-2.0): 150 languages, and the text in pictures (signs, menus, screenshots) without a separate OCR step.</p>
+        <div class="acts">
+          <button type="button" class="btn" id="tr-copy">Copy</button>
+          <button type="button" class="btn" id="tr-use">Put in the chat box</button>
+          <button type="button" class="btn" id="tr-close">Close</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- Teach it a face or style (train.ts) -->
+    <dialog class="sheet knowledge train" id="train">
+      <div class="kb-head">
+        <div>
+          <h2>Teach a face or style</h2>
+          <p class="muted">Give Prestige 10 to 30 photos of someone (or a character, a pet, a thing), or of a look, and it learns them: then Qwen-Image can put that face or style in any picture. It trains on this PC with Fizgig.</p>
+        </div>
+        <button class="btn" id="tn-close" type="button">Close</button>
+      </div>
+      <div class="kb-model" id="tn-setup" hidden>
+        <span>Training needs Fizgig and the full Qwen-Image-2.1 model it trains on: about 57 GB to download, once.</span>
+        <button class="btn primary" id="tn-setup-go" type="button">Set up training</button>
+      </div>
+      <div id="tn-form" hidden>
+        <div class="tr-row">
+          <label>Name<input id="tn-name" type="text" autocomplete="off" placeholder="e.g. Mira, or Neon noir" /></label>
+          <label>It's<select id="tn-kind"><option value="face">A face or character</option><option value="style">A style or look</option></select></label>
+          <label>Rounds<select id="tn-epochs"><option value="20">20 · quicker</option><option value="30" selected>30 · Fizgig's default</option><option value="40">40 · stronger</option></select></label>
+        </div>
+        <div class="tn-photos" id="tn-photos"></div>
+        <p class="muted talk-file-row"><button type="button" class="btn" id="tn-pick">Add photos…</button><button type="button" class="linkish" id="tn-clear">clear</button><span id="tn-count"></span></p>
+        <p class="muted" id="tn-est"></p>
+        <p class="credit">Mix close-ups with wider shots, and different light and clothes; for a style, pictures of different things in that style. Only use photos of real people with their permission.</p>
+        <div class="acts"><button type="button" class="btn primary" id="tn-go">Start training</button></div>
+      </div>
+      <div class="tn-job" id="tn-job" hidden>
+        <b id="tn-stage"></b>
+        <small id="tn-line"></small>
+        <button type="button" class="linkish" id="tn-stop" hidden>stop</button>
+      </div>
+      <div class="kb-list-head"><span class="eyebrow">Learned so far</span></div>
+      <div class="kb-list" id="tn-list"></div>
     </dialog>
 
     <dialog class="sheet" id="ask">

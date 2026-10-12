@@ -14,6 +14,7 @@ export interface ImageSettings {
   quality: Quality;
   count: number;
   seed: number | null; // null = a new random seed each time
+  lora?: string | null; // a face or style taught with Fizgig (train.ts): its file in ComfyUI's loras folder
 }
 export interface VideoSettings {
   res: string; // "768x512", or "auto" (Wan: match the picture's shape)
@@ -50,7 +51,7 @@ export interface GenSettings {
 export type SettingsKey = keyof GenSettings;
 
 export const DEFAULTS: GenSettings = {
-  image: { aspect: "1:1", size: "standard", quality: "standard", count: 1, seed: null },
+  image: { aspect: "1:1", size: "standard", quality: "standard", count: 1, seed: null, lora: null },
   video: { res: "768x512", seconds: 4, fps: 24, quality: "standard", seed: null },
   animate: { res: "auto", seconds: 5, fps: 16, quality: "standard", seed: null },
   long: { size: 640, frames: 49, shots: 4, quality: "standard", seed: null, high: null, low: null },

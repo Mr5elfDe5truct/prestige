@@ -204,6 +204,15 @@ if (Test-Path "$Root\envs\transcribe\Scripts\fermion.exe") {
     Start-Bg "phonon" 8891 "$Root\envs\transcribe\Scripts\fermion.exe" "serve phonon-2 --port 8891" $Root
 }
 
+# 3d. Search (search pack): EmbeddingGemma 2 with its vision part in its own llama-server on :8893, on Ollama's card
+#     (~1.2 GB). Prestige's Search everything indexes renders, songs, chats and files with it. Needs llama.cpp b11452+.
+$EmbedModel = "$Root\models\gguf\embeddinggemma-2-Q8_0.gguf"
+if (Test-Path $EmbedModel) {
+    $embedArgs = "-m `"$EmbedModel`" --embedding -c 8192 -b 8192 -ub 8192 -ngl 99 --host 127.0.0.1 --port 8893"
+    if (Test-Path "$Root\models\gguf\mmproj-embeddinggemma-2-Q8_0.gguf") { $embedArgs += " --mmproj `"$Root\models\gguf\mmproj-embeddinggemma-2-Q8_0.gguf`"" }
+    Start-Bg "search" 8893 "$Root\bin\llama.cpp\llama-server.exe" $embedArgs $Root "ollama"
+}
+
 # 4. Tool server: research scout, webcam, video jobs, web fetch, files, shell (Desktop Commander), browser (Playwright),
 #    plus tools added from Prestige's tool store. --hot-reload picks up added and removed tools while it runs.
 Start-Bg "mcpo" 8200 "$Root\envs\tools\Scripts\mcpo.exe" (Get-McpoArgs $Runtime)
@@ -217,8 +226,9 @@ if ($Svc.comfyui -ne "on") {
 if (-not $NoComfy -and $ComfyDir) {
     # The Workstation's own nodes, copied on every start so they follow this folder's version: workstation_gpus puts
     # text encoders, VAEs and the LTX upscaler on a second card for ComfyUI (it does nothing otherwise), and
-    # workstation_music edits ACE-Step songs for Prestige (redo a part, extend, cover).
-    foreach ($n in "workstation_gpus", "workstation_music") {
+    # workstation_music edits ACE-Step songs for Prestige (redo a part, extend, cover), and workstation_lora lets
+    # Qwen-Image-2.1 LoRAs made on the fused weights load onto the GGUF model.
+    foreach ($n in "workstation_gpus", "workstation_music", "workstation_lora") {
         Copy-Item "$Root\tools\comfy_nodes\$n" "$ComfyDir\custom_nodes" -Recurse -Force
     }
     Start-Bg "comfyui" 8188 $ComfyPython @(
