@@ -22,6 +22,9 @@ export interface VideoSettings {
   fps: number;
   quality: Quality;
   seed: number | null;
+  high?: string | null; // Animate: the high- and low-noise models (null = auto, uncensored if installed; "stock")
+  low?: string | null;
+  fromPicture?: "wan" | "ltx"; // Video: a video from a picture runs on Wan 2.2 (default) or LTX-2.5
 }
 export interface LongSettings {
   size: number; // the longest side while rendering; the saved video is upscaled 2×
@@ -29,7 +32,7 @@ export interface LongSettings {
   shots: number; // 1–4, chained by SVI so each continues the last
   quality: Quality;
   seed: number | null;
-  high: string | null; // the high- and low-noise models (null = the workflow's own), from ComfyUI's model folders
+  high: string | null; // the high- and low-noise models (null = auto, uncensored if installed; "stock" = the workflow's own)
   low: string | null;
 }
 export interface MusicSettings {

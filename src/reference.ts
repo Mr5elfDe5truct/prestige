@@ -12,6 +12,7 @@ export interface Reference {
   name: string; // file name in ComfyUI's input folder, from the content's hash
   width: number;
   height: number;
+  made?: boolean; // a picture Prestige rendered (not a photo brought in), so the uncensored models may take it
 }
 
 export const CONSENT = "Only use photos of real people with their permission.";
@@ -19,7 +20,7 @@ export const CONSENT = "Only use photos of real people with their permission.";
 const MAX_SIDE = 2048;
 
 /** Reads an image file (or any image blob) into a Reference. Throws if it isn't a picture the webview can read. */
-export async function loadReference(src: Blob): Promise<Reference> {
+export async function loadReference(src: Blob, made = false): Promise<Reference> {
   let bmp: ImageBitmap;
   try {
     bmp = await createImageBitmap(src);
@@ -41,15 +42,15 @@ export async function loadReference(src: Blob): Promise<Reference> {
   const blob = await new Promise<Blob>((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error("Couldn't read the image"))), "image/jpeg", 0.95));
   const hash = new Uint8Array(await crypto.subtle.digest("SHA-1", await blob.arrayBuffer()));
   const hex = Array.from(hash.slice(0, 6), (b) => b.toString(16).padStart(2, "0")).join("");
-  return { blob, url: URL.createObjectURL(blob), name: `prestige-ref-${hex}.jpg`, width, height };
+  return { blob, url: URL.createObjectURL(blob), name: `prestige-ref-${hex}.jpg`, width, height, made };
 }
 
 /** A Reference from a base64 JPEG (chat attachments and webcam frames). */
-export function referenceFromBase64(b64: string) {
+export function referenceFromBase64(b64: string, made = false) {
   const bin = atob(b64);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return loadReference(new Blob([bytes], { type: "image/jpeg" }));
+  return loadReference(new Blob([bytes], { type: "image/jpeg" }), made);
 }
 
 /** The base64 JPEG of an image file, scaled down like a reference (for chat attachments). */
