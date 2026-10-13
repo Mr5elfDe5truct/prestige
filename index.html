@@ -237,10 +237,11 @@
               <p class="credit" id="cam-note"></p>
             </div>
           </div>
-          <div class="job" id="job" hidden><div class="progress"><i></i></div><span class="progress-label" id="job-label"></span></div>
         </div>
         <!-- The render queue: everything waiting, rendering and finished this session (studio.ts) -->
         <div class="ws-stack" data-panel="queue" data-title="Render queue">
+          <!-- What is rendering now: the step it is on and how far along -->
+          <div class="job" id="job" hidden><b class="job-what" id="job-what"></b><div class="progress"><i></i></div><span class="progress-label" id="job-label"></span></div>
           <div class="rq" id="rq" hidden>
             <div class="rq-head"><b>Render queue</b><span class="credit" id="rq-sum"></span><span class="grow"></span><button type="button" class="linkish" id="rq-clear">clear finished</button></div>
             <div class="rq-list" id="rq-list"></div>

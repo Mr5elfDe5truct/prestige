@@ -3222,6 +3222,7 @@ async function submit(j: QJob) {
   starting = true;
   renderCreate();
   setJob(0, "Freeing the GPU (unloading chat models)…");
+  $("#job-what").textContent = j.prompt;
   $("#job").hidden = false;
   try {
     // ComfyUI needs the 12 GB card to itself.
