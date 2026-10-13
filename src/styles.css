@@ -1254,8 +1254,10 @@ body:is(.ws-resizing-v, .ws-resizing-h, .ws-dragging) :is(iframe, video) { point
 .ws-body > :is(.create, .rq), .ws-body > .ws-stack > .rq { background: none !important; border: 0 !important; box-shadow: none !important; padding: 0 !important; border-radius: 0 !important; clip-path: none !important; animation: none !important; }
 .ws-body > .create.drop { outline-offset: 6px; }
 .ws-body .rq-head b { display: none; }
+.job-what { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.job-what:empty { display: none; }
 .ws-body .rq-list { max-height: none; }
-.rq:not([hidden]) + .rq-empty { display: none; }
+.ws-stack:has(> :is(.job, .rq):not([hidden])) > .rq-empty { display: none; }
 .ws-body .gal-head { margin-top: 0; }
 /* System */
 .ws-body > .gpu-cards { gap: 16px; }
