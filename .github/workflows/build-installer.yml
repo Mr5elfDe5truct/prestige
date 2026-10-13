@@ -1,0 +1,96 @@
+# Builds the Windows installer on GitHub's servers and, once SignPath is set up, has SignPath sign it.
+# SignPath only signs builds it can trace to this repository, which is why the build runs here and not on a PC.
+#
+#   Run it: Actions > Build installer > Run workflow (or `gh workflow run build-installer.yml --repo Mr5elfDe5truct/prestige`).
+#   Publish: .\scripts\release.ps1 -NotesFile release-notes\X.Y.Z.md -SignedRun <run id>
+#
+# SignPath settings (repository Settings > Secrets and variables > Actions):
+#   secret   SIGNPATH_API_TOKEN          a CI user's API token from SignPath
+#   variable SIGNPATH_ORGANIZATION_ID    the organization id from SignPath
+#   variable SIGNPATH_PROJECT_SLUG       e.g. prestige
+#   variable SIGNPATH_POLICY_SLUG        release-signing (or test-signing while waiting for approval)
+# Until the variables exist the workflow still builds and uploads the unsigned installer.
+#
+# The updater key never leaves Ryan's PC: release.ps1 makes the auto-update signature from the signed installer.
+name: Build installer
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/build-installer.yml
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: build-installer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      # Updater artifacts are made later by release.ps1, after SignPath has signed the installer.
+      - name: Build
+        shell: pwsh
+        run: |
+          '{"bundle":{"createUpdaterArtifacts":false}}' | Set-Content ci-no-updater.json
+          npx tauri build --config ci-no-updater.json
+
+      - name: Find the installer
+        id: exe
+        shell: pwsh
+        run: |
+          $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $exe = "src-tauri/target/release/bundle/nsis/Prestige_${version}_x64-setup.exe"
+          if (-not (Test-Path $exe)) { throw "No installer at $exe" }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "path=$exe" >> $env:GITHUB_OUTPUT
+
+      - name: Upload unsigned installer
+        id: unsigned
+        uses: actions/upload-artifact@v4
+        with:
+          name: prestige-${{ steps.exe.outputs.version }}-unsigned
+          path: ${{ steps.exe.outputs.path }}
+          if-no-files-found: error
+
+      - name: Sign with SignPath
+        if: github.event_name == 'workflow_dispatch' && vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          # Release signing waits for Ryan to approve the request in SignPath.
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed
+
+      - name: Upload signed installer
+        if: github.event_name == 'workflow_dispatch' && vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: prestige-installer-signed
+          path: signed/*.exe
+          if-no-files-found: error

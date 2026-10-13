@@ -3,6 +3,8 @@
 #   .\scripts\release.ps1 -Notes "..." -Title "Prestige 0.8.0 · Updates itself"
 #   .\scripts\release.ps1 -Notes "..." -NoPublish           build and write latest.json only
 #   .\scripts\release.ps1 -NotesFile release-notes\0.50.0.md  notes from a file (quotes and line breaks are fine)
+#   .\scripts\release.ps1 -NotesFile ... -SignedRun 1234567  publish the SignPath-signed installer from that run of
+#                                                         the Build installer workflow instead of building here
 #
 # Needs the updater signing key (made once with `npx tauri signer generate`), kept outside the repo:
 #   %USERPROFILE%\RG Studios\keys\prestige-updater.key      private key (never commit or share it)
@@ -12,6 +14,7 @@ param(
     [string]$Notes,
     [string]$NotesFile,
     [string]$Title,
+    [string]$SignedRun,
     [switch]$NoPublish
 )
 $ErrorActionPreference = "Stop"
@@ -26,20 +29,33 @@ $version = $conf.version
 if (-not $Title) { $Title = "Prestige $version" }
 Write-Host "Releasing Prestige $version"
 
-# Sign the installer while building (Tauri reads these and writes a .sig next to the installer).
+# Sign the installer for auto-update (Tauri reads these and writes a .sig next to the installer).
 $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content (Join-Path $Keys "prestige-updater.key") -Raw
 $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = (Get-Content (Join-Path $Keys "prestige-updater.password") -Raw).Trim()
 Push-Location $Root
 try {
-    npm run tauri build
-    if ($LASTEXITCODE) { throw "build failed" }
+    if ($SignedRun) {
+        # The installer GitHub built and SignPath signed. The update signature has to be made after SignPath's
+        # signature, because that changes the file.
+        $nsis = Join-Path $env:TEMP "prestige-signed-$version"
+        Remove-Item $nsis -Recurse -Force -ErrorAction SilentlyContinue
+        gh run download $SignedRun --repo $Repo --name prestige-installer-signed --dir $nsis
+        if ($LASTEXITCODE) { throw "Couldn't download the signed installer from run $SignedRun" }
+        $exe = Join-Path $nsis "Prestige_${version}_x64-setup.exe"
+        if (-not (Test-Path $exe)) { throw "Run $SignedRun has no Prestige_${version}_x64-setup.exe (built from another version?)" }
+        npm run tauri -- signer sign $exe
+        if ($LASTEXITCODE) { throw "update signing failed" }
+    } else {
+        npm run tauri build
+        if ($LASTEXITCODE) { throw "build failed" }
+        $nsis = Join-Path $Root "src-tauri\target\release\bundle\nsis"
+        $exe = Join-Path $nsis "Prestige_${version}_x64-setup.exe"
+    }
 } finally {
     Pop-Location
     Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY, Env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD -ErrorAction SilentlyContinue
 }
 
-$nsis = Join-Path $Root "src-tauri\target\release\bundle\nsis"
-$exe = Join-Path $nsis "Prestige_${version}_x64-setup.exe"
 $sig = "$exe.sig"
 if (-not (Test-Path $sig)) { throw "No signature at $sig (is createUpdaterArtifacts on and the key set?)" }
 
