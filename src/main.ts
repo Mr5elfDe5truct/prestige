@@ -57,6 +57,7 @@ import { addStache } from "./talk";
 import { applyCachedLook, applyLook, closeAppearance, initAppearance, openAppearance, type Look } from "./theme";
 import { initMesa } from "./mesa";
 import { initScrollLock } from "./scrolllock";
+import { setupChatWidth, setupPanels } from "./panels";
 import { initWorkstation, openWebUIOn } from "./workstation";
 // the living styles: their shared hooks, then each one (theme.ts lists them; skins/backgrounds.ts draws behind them)
 import "./skins/living.css";
@@ -3141,6 +3142,16 @@ function showWelcome() {
 
 async function main() {
   initScrollLock();
+  // Studio and System fill the window with panels you can move and resize; the Chat column can be widened (panels.ts).
+  setupPanels("studio", [
+    { w: 2, panels: [{ id: "create", h: 3 }, { id: "queue", h: 1 }] },
+    { w: 3, panels: [{ id: "renders", h: 1 }] },
+  ]);
+  setupPanels("system", [
+    { w: 3, panels: [{ id: "gpus", h: 2 }, { id: "models", h: 3 }] },
+    { w: 2, panels: [{ id: "vram", h: 3 }, { id: "services", h: 2 }] },
+  ]);
+  setupChatWidth();
   greet(true);
   wire();
   initSystem({ toast, nameFor, openCatalog: () => openCatalog(), root: () => settings.stackRoot ?? null });

@@ -1216,3 +1216,65 @@ body[data-style="molded"] .sb-shot { border-radius: 16px; }
 .sheet.setup .setup-steps li.failed > i { border-color: var(--warn); background: var(--warn); }
 .sheet.setup #setup-result.ok { color: var(--ok); }
 @keyframes setup-pulse { 50% { opacity: .35; } }
+
+/* ---------- panels you can move and resize (panels.ts) ---------- */
+/* Studio and System fill the window: the app is exactly as tall as the window, the screen takes what the HUD leaves
+   (keeping room for the dock), and each panel scrolls on its own. */
+.app:has(> .screen.ws-screen:not([hidden])) { height: 100vh; min-height: 0; }
+.screen.ws-screen { max-width: none; min-height: 0; padding-top: 4px; }
+.ws { position: relative; flex: 1; min-height: 0; display: flex; gap: 0; }
+.ws-col { display: flex; flex-direction: column; min-width: 280px; min-height: 0; }
+.ws-panel.card { padding: 0; gap: 0; min-height: 120px; overflow: hidden; }
+.ws-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 10px; cursor: grab; user-select: none; touch-action: none; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
+.ws-head b { font-family: var(--display); font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-head .grow { flex: 1; }
+.ws-grip { display: inline-flex; color: var(--muted); opacity: .55; }
+.ws-grip svg { width: 14px; height: 14px; }
+.ws-head:hover .ws-grip { opacity: 1; color: var(--gold); }
+.ws-head .ws-reset { width: 26px; height: 26px; opacity: 0; transition: opacity .15s; }
+.ws-head .ws-reset svg { width: 14px; height: 14px; }
+.ws-head:hover .ws-reset, .ws-head .ws-reset:focus-visible { opacity: 1; }
+.ws-body { flex: 1; min-height: 0; overflow: auto; padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+.ws-body > * { flex: none; }
+.ws-stack { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.ws-split { flex: none; position: relative; z-index: 2; }
+.ws-split.v { width: 14px; cursor: col-resize; }
+.ws-split.h { height: 14px; cursor: row-resize; }
+.ws-split::after { content: ""; position: absolute; border-radius: 2px; background: var(--gold); opacity: 0; transition: opacity .15s; }
+.ws-split.v::after { left: 6px; width: 2px; top: 20%; bottom: 20%; }
+.ws-split.h::after { top: 6px; height: 2px; left: 20%; right: 20%; }
+.ws-split:hover::after, .ws-split.on::after { opacity: .7; }
+body.ws-resizing-v, body.ws-resizing-v * { cursor: col-resize !important; user-select: none; }
+body.ws-resizing-h, body.ws-resizing-h * { cursor: row-resize !important; user-select: none; }
+body.ws-dragging, body.ws-dragging * { cursor: grabbing !important; user-select: none; }
+body:is(.ws-resizing-v, .ws-resizing-h, .ws-dragging) :is(iframe, video) { pointer-events: none; }
+.ws-panel.ws-moving { opacity: .45; outline: 2px dashed var(--gold); outline-offset: -2px; }
+.ws-drop { position: absolute; z-index: 10; pointer-events: none; border: 2px solid var(--gold); border-radius: 12px; background: color-mix(in srgb, var(--gold) 14%, transparent); box-shadow: 0 0 calc(18px * var(--glow)) color-mix(in srgb, var(--gold) 40%, transparent); transition: left .08s, top .08s, width .08s, height .08s; }
+/* What sat on its own surface before now sits flat in its panel (every style draws the panel itself). */
+.ws-body > :is(.create, .rq), .ws-body > .ws-stack > .rq { background: none !important; border: 0 !important; box-shadow: none !important; padding: 0 !important; border-radius: 0 !important; clip-path: none !important; animation: none !important; }
+.ws-body > .create.drop { outline-offset: 6px; }
+.ws-body .rq-head b { display: none; }
+.ws-body .rq-list { max-height: none; }
+.rq:not([hidden]) + .rq-empty { display: none; }
+.ws-body .gal-head { margin-top: 0; }
+/* System */
+.ws-body > .gpu-cards { gap: 16px; }
+
+/* The Chat column: drag either side to make it wider */
+.screen[data-screen="chat"] { position: relative; max-width: var(--chat-w, 820px); }
+.chat-edge { position: absolute; top: 0; bottom: 0; width: 12px; cursor: col-resize; z-index: 3; }
+.chat-edge.left { left: -18px; }
+.chat-edge.right { right: -18px; }
+.chat-edge::after { content: ""; position: absolute; left: 5px; width: 2px; top: 0; bottom: 0; border-radius: 2px; background: linear-gradient(180deg, transparent, var(--gold) 15%, var(--gold) 85%, transparent); opacity: 0; transition: opacity .15s; }
+.chat-edge:hover::after, .chat-edge.on::after { opacity: .5; }
+
+/* Narrow windows and the phone: panels simply stack and the page scrolls. */
+@media (max-width: 900px) {
+  .app:has(> .screen.ws-screen:not([hidden])) { height: auto; min-height: 100%; }
+  .ws { flex-direction: column; gap: 16px; }
+  .ws-col { flex: none !important; min-width: 0; gap: 16px; }
+  .ws-panel.card { flex: none !important; overflow: visible; }
+  .ws-body { overflow: visible; }
+  .ws-split, .chat-edge, .ws-grip, .ws-head .ws-reset { display: none; }
+  .ws-head { cursor: default; }
+}

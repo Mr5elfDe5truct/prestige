@@ -165,27 +165,25 @@
 
       <section class="screen wide" data-screen="system" hidden>
         <!-- load, VRAM, temperature and power cards for every GPU (system.ts) -->
-        <div class="gpu-cards" id="gpu-cards"></div>
-        <div class="two">
-          <div class="card">
-            <div class="card-head"><h3>Models</h3><span class="credit" id="models-note"></span><button class="btn" id="sys-workstation" title="GPUs, Ollama, llama.cpp models and which services start">Workstation settings</button><button class="btn" id="sys-packs" title="Model packs, and updates for llama.cpp, ComfyUI and Ollama">Packs</button><button class="btn" id="sys-catalog">＋ Get more models</button></div>
+        <div class="gpu-cards" id="gpu-cards" data-panel="gpus" data-title="GPUs"></div>
+          <div class="ws-stack" data-panel="models" data-title="Models">
+            <div class="card-head"><span class="credit" id="models-note"></span><button class="btn" id="sys-workstation" title="GPUs, Ollama, llama.cpp models and which services start">Workstation settings</button><button class="btn" id="sys-packs" title="Model packs, and updates for llama.cpp, ComfyUI and Ollama">Packs</button><button class="btn" id="sys-catalog">＋ Get more models</button></div>
             <div class="list" id="model-rows"></div>
           </div>
-          <div class="card">
-            <h3>What's in VRAM</h3>
+          <div class="ws-stack" data-panel="vram" data-title="What's in VRAM">
             <div class="vram-cards" id="vram-cards"></div>
             <div class="ram">
               <div class="legend spread"><span>System RAM</span><span class="mono" id="ram-val">–</span></div>
               <div class="bar wide" id="ram-bar"><i></i></div>
             </div>
-            <h3 class="mt">Services</h3>
+          </div>
+          <div class="ws-stack" data-panel="services" data-title="Services">
             <div class="svc" id="svc-list"></div>
           </div>
-        </div>
       </section>
 
       <section class="screen wide" data-screen="studio" hidden>
-        <div class="create" id="create">
+        <div class="create" id="create" data-panel="create" data-title="Create">
           <div class="drop-choices" id="drop-choices" hidden>
             <div data-drop="ref"><b>Reference image</b><small>put what's in it into a new scene</small></div>
             <div data-drop="edit"><b>Edit</b><small>change it with Qwen-Image</small></div>
@@ -240,14 +238,17 @@
             </div>
           </div>
           <div class="job" id="job" hidden><div class="progress"><i></i></div><span class="progress-label" id="job-label"></span></div>
-          <!-- The render queue: everything waiting, rendering and finished this session (studio.ts) -->
+        </div>
+        <!-- The render queue: everything waiting, rendering and finished this session (studio.ts) -->
+        <div class="ws-stack" data-panel="queue" data-title="Render queue">
           <div class="rq" id="rq" hidden>
             <div class="rq-head"><b>Render queue</b><span class="credit" id="rq-sum"></span><span class="grow"></span><button type="button" class="linkish" id="rq-clear">clear finished</button></div>
             <div class="rq-list" id="rq-list"></div>
           </div>
+          <p class="note rq-empty">Nothing waiting. Renders you add line up here while another one is going.</p>
         </div>
+        <div class="ws-stack renders" data-panel="renders" data-title="Renders">
         <div class="gal-head">
-          <h2>Renders</h2>
           <input class="gal-search" id="gal-search" type="search" placeholder="Search prompts…" autocomplete="off" aria-label="Search renders by prompt, file name or model" />
           <div class="filters"><button class="on" data-f="all">All</button><button data-f="image">Images</button><button data-f="video">Videos</button><button data-f="audio">Songs</button><button data-f="starred" title="Renders you starred">★ Starred</button></div>
         </div>
@@ -262,6 +263,7 @@
         </div>
         <div class="gallery" id="gallery"></div>
         <p class="note" id="gallery-note"></p>
+        </div>
       </section>
 
       <section class="screen wide" data-screen="voice" hidden>
