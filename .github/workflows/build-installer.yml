@@ -1,17 +1,8 @@
-# Builds the Windows installer on GitHub's servers and, once SignPath is set up, has SignPath sign it.
-# SignPath only signs builds it can trace to this repository, which is why the build runs here and not on a PC.
+# Builds the unsigned Windows installer on GitHub's servers, as a check that a clean checkout still builds.
+# Releases are still made on Ryan's PC with scripts\release.ps1. Prestige isn't code signed: SignPath Foundation
+# declined it on 2026-10-13. The SignPath signing steps are in this file's history (PR #79) for a later reapply.
 #
 #   Run it: Actions > Build installer > Run workflow (or `gh workflow run build-installer.yml --repo Mr5elfDe5truct/prestige`).
-#   Publish: .\scripts\release.ps1 -NotesFile release-notes\X.Y.Z.md -SignedRun <run id>
-#
-# SignPath settings (repository Settings > Secrets and variables > Actions):
-#   secret   SIGNPATH_API_TOKEN          a CI user's API token from SignPath
-#   variable SIGNPATH_ORGANIZATION_ID    the organization id from SignPath
-#   variable SIGNPATH_PROJECT_SLUG       e.g. prestige
-#   variable SIGNPATH_POLICY_SLUG        release-signing (or test-signing while waiting for approval)
-# Until the variables exist the workflow still builds and uploads the unsigned installer.
-#
-# The updater key never leaves Ryan's PC: release.ps1 makes the auto-update signature from the signed installer.
 name: Build installer
 
 on:
@@ -48,7 +39,7 @@ jobs:
 
       - run: npm ci
 
-      # Updater artifacts are made later by release.ps1, after SignPath has signed the installer.
+      # Updater artifacts need the update key, which stays on Ryan's PC.
       - name: Build
         shell: pwsh
         run: |
@@ -71,26 +62,4 @@ jobs:
         with:
           name: prestige-${{ steps.exe.outputs.version }}-unsigned
           path: ${{ steps.exe.outputs.path }}
-          if-no-files-found: error
-
-      - name: Sign with SignPath
-        if: github.event_name == 'workflow_dispatch' && vars.SIGNPATH_ORGANIZATION_ID != ''
-        uses: signpath/github-action-submit-signing-request@v1
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
-          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
-          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
-          wait-for-completion: true
-          # Release signing waits for Ryan to approve the request in SignPath.
-          wait-for-completion-timeout-in-seconds: 3600
-          output-artifact-directory: signed
-
-      - name: Upload signed installer
-        if: github.event_name == 'workflow_dispatch' && vars.SIGNPATH_ORGANIZATION_ID != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: prestige-installer-signed
-          path: signed/*.exe
           if-no-files-found: error
