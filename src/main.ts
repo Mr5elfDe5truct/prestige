@@ -28,7 +28,7 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { initSystem, onGpus, phoneSystem, showSystem, unloadAll } from "./system";
 import { ollamaCtx, onPlanChange, readGpus, refreshPlan, shortName, type Gpu } from "./gpus";
 import {
-  allowRenders, cancelRender, chatSettings, editLabel, editMedia, initStudio, modelLabel, openRender, renderMedia, renderMenu, renderModel, renderSong, renderTalk,
+  allowRenders, cancelRender, isRender, chatSettings, editLabel, editMedia, initStudio, modelLabel, openRender, renderMedia, renderMenu, renderModel, renderSong, renderTalk,
   faceThumb, frameLabel, onQueueChange, phoneQueue, phoneStudio, renderFrame, renderShot, showStudio, songSeconds, talkSecs, videoQuality, type MediaKind,
 } from "./studio";
 import { LASER_CMD, laserPrompt, openLaser } from "./laser";
@@ -44,7 +44,7 @@ import { initLive, startLive, LIVE_CTX, LIVE_MODELS } from "./live";
 import {
   isVox, onSpeakingChange, onSpeechError, releaseSpeechGpu, setVoice, speak, speakDelta, speakEnd, stopSpeaking, DEFAULT_VOICE,
 } from "./speech";
-import { bestFor, capsFor, chipsHtml, supportsTools } from "./caps";
+import { bestFor, capsFor, chipsHtml, nameHints, supportsTools } from "./caps";
 import { initCatalog, openCatalog, phoneCatalog } from "./catalog";
 import { checkForUpdates, initUpdates } from "./updates";
 import { GROUPS, LAST_ROUND, TOOL_ROUNDS, describeCall, fitToolResults, withoutToolCalls, loadTools, runTool, toolContext, tokensIn, toolSpecs, type ToolDef, type ToolStep } from "./tools";
@@ -848,7 +848,7 @@ async function toolRender(
   // edit_image changes a picture; make_video with image_path starts from one.
   const src = op === "edit_image" || args.image_path ? await toolSource(String(args.image_path ?? ""), r.images) : undefined;
   if (op === "edit_image" && !src) throw new Error("there's no picture to edit. Ask the user to attach one.");
-  const ref = src ? await referenceFromBase64(src) : undefined;
+  const ref = src ? await referenceFromBase64(src.b64, src.made) : undefined;
   let last = 0;
   const progress = (pct: number, label: string) => {
     if (!r.reply.content) r.body.innerHTML = `<span class="status-line">${escapeHtml(label)} (${Math.round(pct)}%)</span>`;
@@ -881,11 +881,11 @@ async function toolRender(
 }
 
 /** The picture a render tool starts from: the path the model gave (a render), else the user's attached picture, else
- *  the last picture made in this chat. */
-async function toolSource(path: string, images?: string[]): Promise<string | undefined> {
+ *  the last picture made in this chat. `made`: it's a render, not a photo the user brought (see uncensored.ts). */
+async function toolSource(path: string, images?: string[]): Promise<{ b64: string; made: boolean } | undefined> {
   const load = async (p: string) => {
     await allowRenders();
-    return imageToBase64(await (await fetch(convertFileSrc(p))).blob());
+    return { b64: await imageToBase64(await (await fetch(convertFileSrc(p))).blob()), made: isRender(p) };
   };
   if (path && /\.(png|jpe?g|webp)$/i.test(path)) {
     try {
@@ -894,7 +894,7 @@ async function toolSource(path: string, images?: string[]): Promise<string | und
       /* not a render Prestige can open: fall back below */
     }
   }
-  if (images?.length) return images[0];
+  if (images?.length) return { b64: images[0], made: false };
   const lastPic = [...chat.messages].reverse().find((m) => m.render && (m.render.kind ?? "image") === "image");
   if (lastPic?.render) return load(lastPic.render.path).catch(() => undefined);
   return undefined;
@@ -1066,6 +1066,17 @@ async function attachImage(f: Blob) {
 }
 
 const VISION = /gemma|qwen3\.6|llava|vision|-vl/i;
+/** Whether a model can look at pictures: llama.cpp reports it (a vision projector), otherwise its name says so.
+ *  Qwen3.8 27B sees through its mmproj but its name doesn't say so, and a picture used to hand the chat to Gemma. */
+const canSee = (m: ModelInfo) => !!m.inputModalities?.includes("image") || (m.args ?? []).includes("--mmproj") || VISION.test(m.id);
+/** The model to look at a picture with: the one asked for, else the current one if it can see, else a seeing model
+ *  that doesn't refuse, else Gemma 4. */
+const seeingModel = (asked?: string) =>
+  models.find((m) => m.id === asked) ??
+  (current && canSee(current) ? current : undefined) ??
+  models.find((m) => canSee(m) && nameHints(m.id).uncensored) ??
+  models.find((m) => m.id === "gemma4:12b") ??
+  models.find(canSee);
 
 export interface ReplyHooks {
   onDelta?: (t: string) => void;
@@ -1380,10 +1391,10 @@ async function makeSong(text: string, request: string, hooks?: ReplyHooks, image
     toast("Songs are made in the desktop app.");
     return hooks?.onDone?.(false);
   }
-  // A song about a picture needs a model that can see: Gemma 4, or another vision model, writes it.
+  // A song about a picture needs a model that can see: the current one if it can, else an uncensored or other vision model.
   let model = current;
-  if (images?.length && (!model || !VISION.test(model.id))) {
-    const want = models.find((m) => m.id === "gemma4:12b") ?? models.find((m) => VISION.test(m.id));
+  if (images?.length && (!model || !canSee(model))) {
+    const want = seeingModel();
     if (want) {
       selectModel(want);
       toast(`Switched to ${want.name} to look at the picture.`);
@@ -1424,7 +1435,7 @@ async function makeSong(text: string, request: string, hooks?: ReplyHooks, image
   try {
     const context = before.length ? `Conversation so far:\n${before.map((m) => `${m.role}: ${m.content.slice(0, 800)}`).join("\n")}\n\nWrite this song: ` : "";
     progress(1, `${model.name} is writing the song…`);
-    const seeing = images?.length && VISION.test(model.id) ? images : undefined;
+    const seeing = images?.length && canSee(model) ? images : undefined;
     // ComfyUI can still hold its last render's model on the card; the writer reads the picture far faster without it
     // (a song about a picture sat writing for minutes beside a stems job's model). Each song loads its models anyway.
     if (seeing) await http("http://127.0.0.1:8188/free", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ unload_models: true, free_memory: true }) }).catch(() => {});
@@ -1891,7 +1902,6 @@ async function runComputer(text: string, task: string, hooks?: ReplyHooks) {
     toast("Computer use runs in the desktop app.");
     return hooks?.onDone?.(false);
   }
-  const canSee = (m: ModelInfo) => !!m.inputModalities?.includes("image") || VISION.test(m.id);
   const list = brains(models, canSee);
   if (!list.length) {
     toast("No model that can see the screen is available. Start the services, or get Qwen3.8 27B or Nex-N2.5-mini from the catalog.", "warn");
@@ -2162,9 +2172,9 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     attachments = [];
     renderAttachments();
   }
-  // Pictures need a model that can see; switch to Gemma 4 (or the one asked for) if needed. (Live has its own model.)
-  if (!live && images?.length && (!current || !VISION.test(current.id) || (opts.vision && current.id !== opts.vision))) {
-    const want = models.find((m) => m.id === opts.vision) ?? models.find((m) => m.id === "gemma4:12b") ?? models.find((m) => VISION.test(m.id));
+  // Pictures need a model that can see; switch to one (the one asked for, else an uncensored one) if needed. (Live has its own model.)
+  if (!live && images?.length && (!current || !canSee(current) || (opts.vision && current.id !== opts.vision))) {
+    const want = seeingModel(opts.vision);
     if (want && want.key !== current?.key) {
       selectModel(want);
       toast(`Switched to ${want.name} to look at the picture.`);

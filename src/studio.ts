@@ -55,6 +55,7 @@ import { attachZoom, type Zoom } from "./zoom";
 import { checkOcr, ocrReady, readText } from "./ocr";
 import { checkTranslate, openTranslate, translateReady } from "./translate";
 import { initTrain, openTrain, trainedLoras, type TrainedLora } from "./train";
+import { STOCK, applyWanModels, diffusionModels } from "./uncensored";
 import { INSTRUMENTAL_PARTS, STEMS, askSongEdit, editSecs, stemSecs, type EditTask, type SongEdit, type SongMusic, type SongSource } from "./songedit";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
@@ -89,6 +90,7 @@ type GenMode =
   | "ref"
   | "reffast"
   | "refvideo"
+  | "shotvideo"
   | "song"
   | "songedit"
   | "model3d"
@@ -269,6 +271,25 @@ const MODES: Record<GenMode, Mode> = {
   },
   // LTX image-to-video: the picture is the first frame of a clip with sound.
   refvideo: {
+    file: "ltx25-i2v-distilled.api.json",
+    label: "LTX-2.5",
+    family: "ltx",
+    promptNode: "5",
+    seed: ["16", "noise_seed"],
+    secs: 360,
+    imageNode: "50",
+    fallback: {
+      file: "ltx23-i2v-distilled.api.json",
+      label: "LTX-2.3",
+      family: "ltx1",
+      promptNode: "5",
+      seed: ["16", "noise_seed"],
+      secs: 360,
+      imageNode: "50",
+    },
+  },
+  // Director's storyboard shot from its drawn frame: always LTX, for the sound and the shot's own length.
+  shotvideo: {
     file: "ltx25-i2v-distilled.api.json",
     label: "LTX-2.5",
     family: "ltx",
@@ -697,8 +718,20 @@ interface Plan {
 }
 
 const settingsKey = (gm: GenMode): SettingsKey =>
-  gm === "video" || gm === "refvideo" ? "video" : gm === "animate" ? "animate" : gm === "long" ? "long" : gm === "song" ? "music" : "image";
-const isVideo = (gm: GenMode) => gm === "video" || gm === "animate" || gm === "long" || gm === "refvideo";
+  gm === "refvideo"
+    ? wanFromPicture()
+      ? "animate"
+      : "video"
+    : gm === "video" || gm === "shotvideo"
+      ? "video"
+      : gm === "animate"
+        ? "animate"
+        : gm === "long"
+          ? "long"
+          : gm === "song"
+            ? "music"
+            : "image";
+const isVideo = (gm: GenMode) => gm === "video" || gm === "animate" || gm === "long" || gm === "refvideo" || gm === "shotvideo";
 
 /** A picture a render starts from: a render in the gallery (edit, animate) or a reference image. */
 type Source = Asset | Reference;
@@ -936,16 +969,7 @@ function apply(m: Mode, g: any, p: Plan, seed: number) {
       SVI.shots.forEach((shot, i) => set(g, shot.noise, { noise_seed: seed + i }));
       // Fewer shots: the finishing nodes take the frames joined so far, and ComfyUI skips the rest.
       set(g, SVI.finish, { anything: SVI.shots[p.shots! - 1].merged });
-      // The models picked in Settings (kept on this PC only), with the loader each file type needs. fp16
-      // accumulation speeds up safetensors models but breaks GGUF ones, so it's on only for safetensors.
-      for (const [id, patch, name] of [[SVI.high, SVI.fp16[0], s.high], [SVI.low, SVI.fp16[1], s.low]] as const) {
-        if (!name || !g[id]) continue;
-        const gguf = /\.gguf$/i.test(name);
-        g[id] = gguf
-          ? { class_type: "UnetLoaderGGUF", inputs: { unet_name: name } }
-          : { class_type: "UNETLoader", inputs: { unet_name: name, weight_dtype: "default" } };
-        set(g, patch, { enable_fp16_accumulation: !gguf });
-      }
+      // The models picked in Settings go in when the render is sent (submit → applyWanModels).
       break;
     }
     case "song": {
@@ -1180,7 +1204,12 @@ function frameSize(): Override {
   return { w: r16(w), h: r16(h), count: 1 };
 }
 
-const modeOf = (gm: GenMode) => active[gm] ?? MODES[gm];
+const modeOf = (gm: GenMode) => (gm === "refvideo" && wanFromPicture() ? (active.animate ?? MODES.animate) : (active[gm] ?? MODES[gm]));
+
+/** A video from a picture runs on Wan 2.2 (uncensored models, no sound) unless Video's settings pick LTX-2.5 (sound). */
+const wanFromPicture = () => settings().video.fromPicture !== "ltx" && !!workflows.animate;
+/** The workflow a mode runs (a video from a picture may run Animate's). */
+const workflowOf = (gm: GenMode) => (gm === "refvideo" && wanFromPicture() ? workflows.animate : workflows[gm]);
 
 function renderCreate() {
   const webcam = mode === "webcam";
@@ -1221,8 +1250,8 @@ function renderCreate() {
   const chain = chained(gm);
   const first = refImageMode();
   // A chained video also needs the reference-image workflow for its first frame.
-  const missing = !workflows[gm] ? modeOf(gm).file : chain && !workflows[first] ? modeOf(first).file : "";
-  const wf = workflows[gm] && !missing;
+  const missing = !workflowOf(gm) ? modeOf(gm).file : chain && !workflows[first] ? modeOf(first).file : "";
+  const wf = workflowOf(gm) && !missing;
   const m = modeOf(gm);
   $("#create").classList.toggle("disabled", !wf);
   ($("#gen-btn") as HTMLButtonElement).disabled = !wf;
@@ -1300,8 +1329,12 @@ function promptHint(gm: GenMode) {
                 ? "One prompt per shot, split with | … e.g. slow push-in | pans right along the porch | tilts up to the peaks"
                 : "Describe the motion… e.g. slow push-in, snow falling, warm light flickering"
             : gm === "refvideo" && !chain
-              ? "Describe the motion and sound… e.g. turns to the camera and waves, birds singing"
-              : `Describe a ${settings().video.seconds}-second scene${gm === "refvideo" ? " with your reference in it" : ""}, including any sound…`;
+              ? wanFromPicture()
+                ? "Describe the motion… e.g. turns to the camera and waves"
+                : "Describe the motion and sound… e.g. turns to the camera and waves, birds singing"
+              : gm === "refvideo" && wanFromPicture()
+                ? "Describe the scene with your reference in it, and how it moves…"
+                : `Describe a ${settings().video.seconds}-second scene${gm === "refvideo" ? " with your reference in it" : ""}, including any sound…`;
 }
 
 // ---------- song lyrics ----------
@@ -1411,10 +1444,10 @@ function initRefSlot() {
   });
 }
 
-/** Sets (or with null clears) the reference image. */
-async function setRef(src: Blob | null) {
+/** Sets (or with null clears) the reference image. `made`: it's a render (see uncensored.ts). */
+async function setRef(src: Blob | null, made = false) {
   try {
-    const r = src ? await loadReference(src) : null;
+    const r = src ? await loadReference(src, made) : null;
     if (ref) URL.revokeObjectURL(ref.url);
     ref = r;
     if (r) srcAsset = null; // a reference replaces a picked edit or animate source
@@ -1430,7 +1463,7 @@ async function useAsReference(a: Asset) {
   deps.show();
   closeLightbox();
   try {
-    await setRef(await (await fetch(convertFileSrc(a.path))).blob());
+    await setRef(await (await fetch(convertFileSrc(a.path))).blob(), isRender(a.path));
   } catch (e) {
     deps.toast(`Couldn't read ${a.name}: ${errMsg(e)}`, "warn");
   }
@@ -1453,7 +1486,7 @@ async function refFromRender(path: string) {
   }
   try {
     await allowRenders();
-    await setRef(await (await fetch(convertFileSrc(path))).blob());
+    await setRef(await (await fetch(convertFileSrc(path))).blob(), isRender(path));
   } catch (e) {
     deps.toast(`Couldn't read ${path.split(/[\\/]/).pop()}: ${errMsg(e)}`, "warn");
   }
@@ -1519,20 +1552,12 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
 const optionList = (pairs: [string | number, string][], cur: string | number) =>
   pairs.map(([v, l]) => `<option value="${v}"${String(v) === String(cur) ? " selected" : ""}>${esc(l)}</option>`).join("");
 
-// The diffusion models ComfyUI can load (safetensors and GGUF), for the long video's model picks.
+// The diffusion models ComfyUI can load (safetensors and GGUF), for Wan 2.2's model picks (Animate and long video).
 let sviModels: string[] | null = null;
 let sviModelsLoading: Promise<void> | null = null;
 function loadSviModels() {
   return (sviModelsLoading ??= (async () => {
-    const names = new Set<string>();
-    for (const [node, input] of [["UNETLoader", "unet_name"], ["UnetLoaderGGUF", "unet_name"]]) {
-      try {
-        const r = await http(`${COMFY}/object_info/${node}`);
-        const list = (await r.json())?.[node]?.input?.required?.[input]?.[0];
-        if (Array.isArray(list)) list.forEach((n: string) => names.add(n));
-      } catch {}
-    }
-    sviModels = [...names].sort((a, b) => a.localeCompare(b));
+    sviModels = await diffusionModels();
     // Let a later open try again if ComfyUI wasn't running.
     if (!sviModels.length) {
       sviModels = null;
@@ -1548,6 +1573,26 @@ interface Field {
   options: [string | number, string][];
   value: string | number;
   hint?: string;
+}
+
+/** Wan 2.2's high- and low-noise model picks. Auto runs an uncensored pair when one is installed (uncensored.ts). */
+function wanPicks(field: (label: string, k: string, options: Field["options"], value: string | number, hint?: string) => void, v: { high?: string | null; low?: string | null }) {
+  const models = sviModels ?? [];
+  const pick = (label: string, k: "high" | "low", which: string) =>
+    field(
+      label,
+      k,
+      [
+        ["", "Auto · uncensored if installed"],
+        [STOCK, `Stock Wan 2.2 4-step (${which})`],
+        ...models.map((n): [string, string] => [n, n]),
+        ...(v[k] && v[k] !== STOCK && !models.includes(v[k]!) ? [[v[k]!, `${v[k]} (not found)`] as [string, string]] : []),
+      ],
+      v[k] ?? "",
+      k === "high" ? "From ComfyUI's model folders; kept on this PC only. Photos brought in from outside run the stock models on Auto" : "",
+    );
+  pick("High-noise model", "high", "high noise");
+  pick("Low-noise model", "low", "low noise");
 }
 
 /** The settings a mode has, as data. `src` is the picture it starts from (Wan's "Match the picture" and SVI's sizes). */
@@ -1567,33 +1612,30 @@ function settingsFields(gm: GenMode, src: Source | null = srcAsset): Field[] {
     field("Length", "seconds", LTX_SECONDS.map((n) => [n, `${n} seconds`]), v.seconds);
     field("Frame rate", "fps", LTX_FPS.map((n) => [n, `${n} fps`]), v.fps, `${ltxFrames(v.seconds, v.fps)} frames`);
   }
+  if (gm === "refvideo" && workflows.animate)
+    field(
+      "Model",
+      "fromPicture",
+      [
+        ["wan", "Wan 2.2 · uncensored, no sound"],
+        ["ltx", "LTX-2.5 · with sound"],
+      ],
+      settings().video.fromPicture ?? "wan",
+      "For a video made from a picture",
+    );
   if (m.family === "wan") {
     const v = settings().animate;
     const auto = wanAuto(src?.width, src?.height).join(" × ");
     field("Resolution", "res", WAN_RES.map(([r, l]) => [r, r === "auto" ? `${l} (${auto})` : l]), v.res);
     field("Length", "seconds", WAN_SECONDS.map((n) => [n, `${n} seconds`]), v.seconds, `${wanFrames(v.seconds)} frames at 16 fps, Wan's own rate`);
   }
+  if (m.family === "wan" || m.family === "svi") wanPicks(field, settings()[m.family === "svi" ? "long" : "animate"]);
   if (m.family === "svi") {
     const v = settings().long;
     const dims = (n: number) => sviDims(n, src?.width, src?.height).join(" × ");
     field("Size", "size", SVI_SIZES.map((n) => [n, `${dims(n)} · saved at 2×`]), v.size);
     field("Shots", "shots", SVI_SHOTS.map((n) => [n, n === 1 ? "1 shot" : `${n} shots`]), v.shots, "Each continues the last; split the prompt with | to give each its own");
     field("Shot length", "frames", SVI_FRAMES.map((n) => [n, `${n} frames · ${sviSeconds(n, 1)} s`]), v.frames, `${sviSeconds(v.frames, v.shots)} s in all, at ${SVI_FPS * 2} fps after FILM`);
-    const models = sviModels ?? [];
-    const pick = (label: string, k: "high" | "low", which: string) =>
-      field(
-        label,
-        k,
-        [
-          ["", `Stock Wan 2.2 4-step (${which})`],
-          ...models.map((n): [string, string] => [n, n]),
-          ...(v[k] && !models.includes(v[k]!) ? [[v[k]!, `${v[k]} (not found)`] as [string, string]] : []),
-        ],
-        v[k] ?? "",
-        k === "high" ? "From ComfyUI's model folders; kept on this PC only" : "",
-      );
-    pick("High-noise model", "high", "high noise");
-    pick("Low-noise model", "low", "low noise");
   }
   if (m.family === "song") {
     const v = settings().music;
@@ -1642,7 +1684,7 @@ function settingsForm(el: HTMLElement, gm: GenMode, withWarn: boolean) {
   const f = settingsFields(gm).map(
     (x) => `<label class="field">${x.label}<select data-k="${x.k}">${optionList(x.options, x.value)}</select>${x.hint ? `<small>${x.hint}</small>` : ""}</label>`,
   );
-  if (m.family === "svi" && !sviModels && !sviModelsLoading) loadSviModels().then(() => sviModels && el.isConnected && settingsForm(el, gm, withWarn));
+  if ((m.family === "svi" || m.family === "wan") && !sviModels && !sviModelsLoading) loadSviModels().then(() => sviModels && el.isConnected && settingsForm(el, gm, withWarn));
   const last = lastSeed(key);
   f.push(
     `<label class="field seed">Seed<span class="seed-row"><input type="number" min="0" step="1" data-k="seed" placeholder="random" value="${s.seed ?? ""}" />` +
@@ -1658,7 +1700,7 @@ function settingsForm(el: HTMLElement, gm: GenMode, withWarn: boolean) {
   $$<HTMLSelectElement>("select", el).forEach((sel) =>
     sel.addEventListener("change", () => {
       const k = sel.dataset.k!;
-      update(key, { [k]: fieldValue(k, sel.value) } as any);
+      update(k === "fromPicture" ? "video" : key, { [k]: fieldValue(k, sel.value) } as any);
     }),
   );
   const seedIn = $<HTMLInputElement>("input[data-k=seed]", el);
@@ -1831,6 +1873,31 @@ function card(a: Asset) {
   if (a.kind === "image") dragRender(fig, a.path);
   if (!song && !model) io.observe(fig);
   return fig;
+}
+
+// ---------- where a picture came from ----------
+// Uncensored models only take what Prestige made (uncensored.ts). A render made from a photo brought in from outside
+// stays "from outside", so an edit of it can't launder a real photo into the uncensored path.
+const outside = (() => {
+  try {
+    const v = JSON.parse(localStorage.getItem("studio.fromOutside") ?? "[]");
+    return new Set<string>(Array.isArray(v) ? v.filter((x) => typeof x === "string") : []);
+  } catch {
+    return new Set<string>();
+  }
+})();
+function markOutside(added: Asset[]) {
+  added.forEach((a) => outside.add(a.path));
+  try {
+    localStorage.setItem("studio.fromOutside", JSON.stringify([...outside]));
+  } catch {}
+}
+/** Whether a render's source is Prestige's own: nothing (text to image), a render not made from an outside photo, or
+ *  a reference taken from such a render. */
+function madeHere(src: Source | null): boolean {
+  if (!src) return true;
+  if ("path" in src) return !outside.has(src.path) && (!src.path || items.some((x) => x.path === src.path));
+  return !!src.made;
 }
 
 // ---------- stars ----------
@@ -2772,7 +2839,7 @@ async function generate() {
     return deps.storyboard(prompt);
   }
   const gm = currentMode();
-  if (!prompt || !workflows[gm]) return;
+  if (!prompt || !workflowOf(gm)) return;
   // Something already rendering: this one waits its turn in the queue.
   const busy = rq.some((j) => j.state === "waiting" || j.state === "running");
   if (busy) deps.toast("Added to the render queue. It starts when the ones ahead of it finish.");
@@ -2976,7 +3043,7 @@ function activeLora(gm: GenMode): TrainedLora | null {
 
 /** Builds a render's workflow now, with the current settings and a fresh seed (it may run much later). */
 function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpts) {
-  const wf = workflows[gm];
+  const wf = workflowOf(gm);
   if (!wf) throw new Error(`workflows\\${MODES[gm].file} wasn't found`);
   const m = modeOf(gm);
   const graph = structuredClone(wf);
@@ -3238,6 +3305,9 @@ async function submit(j: QJob) {
       graph[song ? m.imageNode! : TALK.audio].inputs.audio = await uploadAudio(j.audio);
     }
     if (m.family === "song" || m.family === "songedit") await checkAceModel(graph);
+    // Uncensored models for what Prestige makes; a photo brought in from outside keeps the standard ones.
+    const made = madeHere(src);
+    if (m.family === "wan" || m.family === "svi") await applyWanModels(graph, [SVI.high, SVI.low], settings()[m.family === "svi" ? "long" : "animate"], m.family === "svi" ? SVI.fp16 : undefined, made);
     if (gm === "angle" || gm === "outfit") await checkLora(graph);
     if (j.cancelled) throw new Error("stopped");
     const r = await http(`${COMFY}/prompt`, {
@@ -3333,6 +3403,7 @@ async function finish(ok: boolean, why = "") {
   current = null;
   stepNote = "";
   if (ok && added.length) {
+    if (q && !madeHere(q.src)) markOutside(added);
     fresh = new Set(added.map((a) => a.name));
     render();
     if (q) Object.assign(q, { state: "done", result: added, took });
@@ -3380,7 +3451,7 @@ export async function renderMedia(
   const refKind = kindOverride ?? refPrefs().kind;
   const gm = kind === "video" ? "refvideo" : refImageMode();
   for (const need of chained(gm) ? (["refvideo", refImageMode()] as GenMode[]) : [gm])
-    if (!workflows[need]) throw new Error(`workflows\\${modeOf(need).file} wasn't found`);
+    if (!workflowOf(need)) throw new Error(`workflows\\${modeOf(need).file} wasn't found`);
   if (chained(gm)) return refVideo(prompt, r, refKind, progress, "chat");
   return run(gm, prompt, r, gm === "refvideo" ? {} : { kind: refKind }, progress, { from: "chat" });
 }
@@ -3442,9 +3513,9 @@ export async function renderShot(
   const video: Partial<VideoSettings> = { seconds, res: "768x512", fps: 24, ...(how.quality ? { quality: how.quality } : {}) };
   // A storyboard shot with its frame drawn: LTX-2.5 image-to-video, starting on that frame.
   if (how.frame) {
-    if (!workflows.refvideo) throw new Error(`workflows\\${MODES.refvideo.file} wasn't found (update the Workstation and add the video pack)`);
+    if (!workflows.shotvideo) throw new Error(`workflows\\${MODES.shotvideo.file} wasn't found (update the Workstation and add the video pack)`);
     const src: Source = items.find((x) => x.path === how.frame) ?? { path: how.frame, name: how.frame.split(/[\\/]/).pop() ?? "frame", kind: "image", mtime: 0, size: 0 };
-    return run("refvideo", prompt, src, { video }, progress, { from: "Director", title: how.title, note: how.note });
+    return run("shotvideo", prompt, src, { video }, progress, { from: "Director", title: how.title, note: how.note });
   }
   if (!workflows.video) throw new Error(`workflows\\${MODES.video.file} wasn't found (update the Workstation and add the video pack)`);
   return run("video", prompt, null, { video }, progress, { from: "Director", title: how.title, note: how.note });
@@ -3455,7 +3526,7 @@ export async function renderShot(
 export async function renderFrame(prompt: string, progress: (pct: number, label: string) => void, title?: string): Promise<Asset[]> {
   await ensureWorkflows();
   const gm = chatMode("image");
-  if (!workflows[gm]) throw new Error(`workflows\\${modeOf(gm).file} wasn't found`);
+  if (!workflowOf(gm)) throw new Error(`workflows\\${modeOf(gm).file} wasn't found`);
   return run(gm, prompt, null, { override: { w: 1152, h: 768, count: 1 } }, progress, { from: "Storyboard", title });
 }
 
@@ -3487,7 +3558,7 @@ export const songSeconds = () => settings().music.seconds;
 export async function chatSettings(el: HTMLElement, kind: MediaKind) {
   await ensureWorkflows();
   const gm = chatMode(kind);
-  if (!workflows[gm]) {
+  if (!workflowOf(gm)) {
     el.innerHTML = `<p class="credit">workflows\\${esc(modeOf(gm).file)} wasn't found, so chat can't make ${kind === "video" ? "videos" : kind === "audio" ? "songs" : "images"} yet.</p>`;
     return;
   }
@@ -3506,6 +3577,9 @@ let allowed: Promise<void> | null = null;
 export function allowRenders() {
   return (allowed ??= refresh());
 }
+
+/** Whether a file is one of Prestige's own renders, not one made from a photo brought in (after allowRenders). */
+export const isRender = (path: string) => !outside.has(path) && items.some((x) => x.path === path);
 
 /** Opens a render in the lightbox (Animate, Reuse prompt and Open in folder work from there). */
 export async function openRender(path: string) {
@@ -3628,12 +3702,12 @@ async function phoneInfo(c: PhoneCreate) {
   const src = c.src ? await findItem(c.src) : null;
   const gm = phoneGm(c, src);
   const m = modeOf(gm);
-  if (m.family === "svi" && !sviModels) await loadSviModels().catch(() => {});
+  if ((m.family === "svi" || m.family === "wan") && !sviModels) await loadSviModels().catch(() => {});
   // The picture it starts from, for sizes that follow it (only its size matters here).
   const from: Source | null = src ?? (c.ref ? ({ path: "", name: "", kind: "image", mtime: 0, size: 0, width: c.ref.w, height: c.ref.h } as Asset) : null);
   const chain = chained(gm);
   const first = refImageMode();
-  const missing = !workflows[gm] ? m.file : chain && !workflows[first] ? modeOf(first).file : "";
+  const missing = !workflowOf(gm) ? m.file : chain && !workflows[first] ? modeOf(first).file : "";
   const p = plan(gm, from);
   const shown = chain ? { ...p, secs: p.secs + plan(first, from, frameSize()).secs } : p;
   const key = settingsKey(gm);
@@ -3685,7 +3759,7 @@ async function phoneGenerate(a: any) {
     }
   }
   const gm = phoneGm({ mode: a.mode, ref: r ? { w: r.width, h: r.height } : null }, src);
-  for (const need of chained(gm) ? [gm, refImageMode()] : [gm]) if (!workflows[need]) throw new Error(`workflows\\${modeOf(need).file} wasn't found on the PC`);
+  for (const need of chained(gm) ? [gm, refImageMode()] : [gm]) if (!workflowOf(need)) throw new Error(`workflows\\${modeOf(need).file} wasn't found on the PC`);
   const ahead = rq.filter((j) => j.state === "waiting" || j.state === "running").length;
   if (chained(gm)) refVideo(prompt, r!, kind, undefined, "phone").catch(() => {}); // the queue shows how it went
   else {
@@ -3751,8 +3825,8 @@ export async function phoneStudio(action: string, a: any = {}): Promise<unknown>
         update(key, { seed: a.value === "last" ? (lastSeed(key) ?? null) : a.value == null || a.value === "" || !Number.isFinite(n) || n < 0 ? null : n });
       } else {
         const k = String(a.k);
-        if (!["aspect", "size", "quality", "count", "res", "seconds", "fps", "shots", "frames", "high", "low", "bpm", "key", "meter", "language", "lora"].includes(k)) throw new Error(`unknown setting ${k}`);
-        update(key, { [k]: fieldValue(k, String(a.value ?? "")) } as any);
+        if (!["aspect", "size", "quality", "count", "res", "seconds", "fps", "shots", "frames", "high", "low", "bpm", "key", "meter", "language", "lora", "fromPicture"].includes(k)) throw new Error(`unknown setting ${k}`);
+        update(k === "fromPicture" ? "video" : key, { [k]: fieldValue(k, String(a.value ?? "")) } as any);
       }
       return phoneInfo(a.create ?? { mode: "image" });
     }
