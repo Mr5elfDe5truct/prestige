@@ -96,14 +96,10 @@ pub fn catalog(ollama_gb: f64) -> Vec<Pack> {
             v.push(Item::Ollama("qwen3.5:4b".into()));
             v
         }, vram: 7.5, ram: 0.0, card: "voice" },
-        Pack { id: "images", title: "Images", text: "Qwen-Image-2.1 (+ 4-step turbo, uncensored text encoder) and Z-Image-Turbo (ComfyUI): text to image and editing".into(), gb: 42.7, items: vec![
+        Pack { id: "images", title: "Images", text: "Qwen-Image-2.1 (+ 4-step turbo) and Z-Image-Turbo (ComfyUI): text to image and editing".into(), gb: 36.5, items: vec![
             comfy("abenzerps/Qwen-Image-2.1-Uncensored-GGUF", "qwen-image-2.1-UC-Q4_K_M.gguf", "unet"),
             comfy("Abiray/Qwen-Image-2.1-viggle-4-steps-turbo-GGUF", "qwen_image_2.1_turbo_Q4_K_M.gguf", "unet"),
             comfy("unsloth/Qwen3-VL-8B-Instruct-GGUF", "Qwen3-VL-8B-Instruct-UD-Q4_K_XL.gguf", "text_encoders"),
-            // The Heretic (abliterated) build of the same encoder, which Prestige uses for its own pictures so prompts
-            // aren't steered toward modesty (uncensored.ts). Its mmproj keeps its name: ComfyUI-GGUF matches it by name.
-            comfy("pottokao/Qwen-Image-2.1-Text-Encoder-Heretic-GGUF", "qwen3vl_8b_heretic-Q4_K_M.gguf", "text_encoders"),
-            comfy("pottokao/Qwen-Image-2.1-Text-Encoder-Heretic-GGUF", "mmproj-qwen3vl_8b_heretic-f16.gguf", "text_encoders"),
             Item::File { url: hf("unsloth/Qwen3-VL-8B-Instruct-GGUF", "mmproj-F16.gguf"), dest: r"models\comfy\text_encoders\Qwen3-VL-8B-Instruct-mmproj-F16.gguf".into(), alts: vec![] },
             comfy("Comfy-Org/Qwen-Image-2.1", "vae/qwen_image_2.1_vae_bf16.safetensors", "vae"),
             comfy("Comfy-Org/z_image_turbo", "split_files/diffusion_models/z_image_turbo_bf16.safetensors", "diffusion_models"),

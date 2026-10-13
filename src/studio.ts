@@ -55,7 +55,7 @@ import { attachZoom, type Zoom } from "./zoom";
 import { checkOcr, ocrReady, readText } from "./ocr";
 import { checkTranslate, openTranslate, translateReady } from "./translate";
 import { initTrain, openTrain, trainedLoras, type TrainedLora } from "./train";
-import { STOCK, applyWanModels, diffusionModels, uncensorTextEncoder } from "./uncensored";
+import { STOCK, applyWanModels, diffusionModels } from "./uncensored";
 import { INSTRUMENTAL_PARTS, STEMS, askSongEdit, editSecs, stemSecs, type EditTask, type SongEdit, type SongMusic, type SongSource } from "./songedit";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
@@ -3307,7 +3307,6 @@ async function submit(j: QJob) {
     if (m.family === "song" || m.family === "songedit") await checkAceModel(graph);
     // Uncensored models for what Prestige makes; a photo brought in from outside keeps the standard ones.
     const made = madeHere(src);
-    if (made && (m.family === "image" || m.family === "edit")) await uncensorTextEncoder(graph);
     if (m.family === "wan" || m.family === "svi") await applyWanModels(graph, [SVI.high, SVI.low], settings()[m.family === "svi" ? "long" : "animate"], m.family === "svi" ? SVI.fp16 : undefined, made);
     if (gm === "angle" || gm === "outfit") await checkLora(graph);
     if (j.cancelled) throw new Error("stopped");

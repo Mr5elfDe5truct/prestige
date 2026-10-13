@@ -1,9 +1,9 @@
 // Uncensored models for Prestige's own renders, picked when a render is sent to ComfyUI. They apply to text-to-image
 // and text-to-video and to pictures Prestige made (renders, and references taken from them); a photo brought in
 // from outside (picked, pasted, dropped, attached, webcam, phone) keeps the standard models.
-// - Qwen-Image-2.1 (edits, Paint to change, new angles, outfits, reference images, text to image): the stock
-//   Qwen3-VL-8B-Instruct text encoder steers prompts toward modesty, so "nude" edits came back clothed. The Heretic
-//   build of the same encoder has that refusal direction removed (abliterated) and drops in unchanged.
+// - Qwen-Image-2.1 needs nothing here: its diffusion model (qwen-image-2.1-UC) has no filter, and on the RTX 3060 the
+//   stock text encoder gave the same nude results as an abliterated (Heretic) one in text to image and in edits. A
+//   one-word edit like "Nude" changes nothing; an instruction like "Remove her clothes, fully nude" does.
 // - Wan 2.2 (Animate, long video, video from a picture): a model pick of null means "uncensored if one is installed"
 //   (the Dasiwa SynthSeduction pair Ryan has, or any high/low pair named uncensored or NSFW), "stock" the workflow's own
 //   4-step models, and anything else that file from ComfyUI's model folders.
@@ -11,14 +11,8 @@ import { http } from "./backends";
 
 const COMFY = "http://127.0.0.1:8188";
 
-/** The Heretic Qwen3-VL-8B text encoder (pottokao/Qwen-Image-2.1-Text-Encoder-Heretic-GGUF). ComfyUI-GGUF finds its
- *  vision part by name, so mmproj-qwen3vl_8b_heretic-f16.gguf must sit beside it in text_encoders. */
-export const HERETIC_TE = "qwen3vl_8b_heretic-Q4_K_M.gguf";
-export const HERETIC_MMPROJ = "mmproj-qwen3vl_8b_heretic-f16.gguf";
-const STOCK_TE = /^Qwen3-VL-8B-Instruct/i;
-
 /** Model files whose names say they're uncensored. */
-export const UNCENSORED = /dasiwa|synthseduction|nsfw|uncensor|heretic|abliterat/i;
+export const UNCENSORED = /dasiwa|synthseduction|nsfw|uncensor|abliterat/i;
 
 /** "stock": the workflow's own model, not an uncensored one. */
 export const STOCK = "stock";
@@ -82,15 +76,4 @@ export async function applyWanModels(
       : { class_type: "UNETLoader", inputs: { unet_name: name, weight_dtype: "default" } };
     if (fp16 && g[fp16[i]]) g[fp16[i]].inputs.enable_fp16_accumulation = !gguf;
   });
-}
-
-/** Swaps the stock Qwen3-VL text encoder for the Heretic one in a Qwen-Image workflow, when it and its vision part
- *  are installed. Resolves with whether it did. */
-export async function uncensorTextEncoder(g: any): Promise<boolean> {
-  const loaders = Object.values<any>(g).filter((n) => n?.class_type === "CLIPLoaderGGUF" && STOCK_TE.test(String(n.inputs?.clip_name ?? "")));
-  if (!loaders.length) return false;
-  const names = await comfyList("CLIPLoaderGGUF", "clip_name");
-  if (!names.includes(HERETIC_TE) || !names.includes(HERETIC_MMPROJ)) return false;
-  loaders.forEach((n) => (n.inputs.clip_name = HERETIC_TE));
-  return true;
 }
