@@ -1463,7 +1463,7 @@ async function useAsReference(a: Asset) {
   deps.show();
   closeLightbox();
   try {
-    await setRef(await (await fetch(convertFileSrc(a.path))).blob(), true);
+    await setRef(await (await fetch(convertFileSrc(a.path))).blob(), isRender(a.path));
   } catch (e) {
     deps.toast(`Couldn't read ${a.name}: ${errMsg(e)}`, "warn");
   }
@@ -1486,7 +1486,7 @@ async function refFromRender(path: string) {
   }
   try {
     await allowRenders();
-    await setRef(await (await fetch(convertFileSrc(path))).blob(), true);
+    await setRef(await (await fetch(convertFileSrc(path))).blob(), isRender(path));
   } catch (e) {
     deps.toast(`Couldn't read ${path.split(/[\\/]/).pop()}: ${errMsg(e)}`, "warn");
   }
@@ -1873,6 +1873,31 @@ function card(a: Asset) {
   if (a.kind === "image") dragRender(fig, a.path);
   if (!song && !model) io.observe(fig);
   return fig;
+}
+
+// ---------- where a picture came from ----------
+// Uncensored models only take what Prestige made (uncensored.ts). A render made from a photo brought in from outside
+// stays "from outside", so an edit of it can't launder a real photo into the uncensored path.
+const outside = (() => {
+  try {
+    const v = JSON.parse(localStorage.getItem("studio.fromOutside") ?? "[]");
+    return new Set<string>(Array.isArray(v) ? v.filter((x) => typeof x === "string") : []);
+  } catch {
+    return new Set<string>();
+  }
+})();
+function markOutside(added: Asset[]) {
+  added.forEach((a) => outside.add(a.path));
+  try {
+    localStorage.setItem("studio.fromOutside", JSON.stringify([...outside]));
+  } catch {}
+}
+/** Whether a render's source is Prestige's own: nothing (text to image), a render not made from an outside photo, or
+ *  a reference taken from such a render. */
+function madeHere(src: Source | null): boolean {
+  if (!src) return true;
+  if ("path" in src) return !outside.has(src.path) && (!src.path || items.some((x) => x.path === src.path));
+  return !!src.made;
 }
 
 // ---------- stars ----------
@@ -3281,7 +3306,7 @@ async function submit(j: QJob) {
     }
     if (m.family === "song" || m.family === "songedit") await checkAceModel(graph);
     // Uncensored models for what Prestige makes; a photo brought in from outside keeps the standard ones.
-    const made = !src || "path" in src || !!src.made;
+    const made = madeHere(src);
     if (made && (m.family === "image" || m.family === "edit")) await uncensorTextEncoder(graph);
     if (m.family === "wan" || m.family === "svi") await applyWanModels(graph, [SVI.high, SVI.low], settings()[m.family === "svi" ? "long" : "animate"], m.family === "svi" ? SVI.fp16 : undefined, made);
     if (gm === "angle" || gm === "outfit") await checkLora(graph);
@@ -3379,6 +3404,7 @@ async function finish(ok: boolean, why = "") {
   current = null;
   stepNote = "";
   if (ok && added.length) {
+    if (q && !madeHere(q.src)) markOutside(added);
     fresh = new Set(added.map((a) => a.name));
     render();
     if (q) Object.assign(q, { state: "done", result: added, took });
@@ -3553,8 +3579,8 @@ export function allowRenders() {
   return (allowed ??= refresh());
 }
 
-/** Whether a file is one of Prestige's renders (after allowRenders has read the folder). */
-export const isRender = (path: string) => items.some((x) => x.path === path);
+/** Whether a file is one of Prestige's own renders, not one made from a photo brought in (after allowRenders). */
+export const isRender = (path: string) => !outside.has(path) && items.some((x) => x.path === path);
 
 /** Opens a render in the lightbox (Animate, Reuse prompt and Open in folder work from there). */
 export async function openRender(path: string) {
