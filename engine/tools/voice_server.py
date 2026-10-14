@@ -8,7 +8,8 @@ OpenAI-compatible, so Open WebUI and Prestige use it like any speech API:
   POST /v1/audio/speech           {"input", "voice", "response_format"} -> audio (wav, or mp3 with ffmpeg)
                                   {"stream": true} -> raw 16-bit mono PCM as it is made (rate in X-Sample-Rate)
   GET  /v1/audio/voices           VoxCPM2 voices: the built-in designed voices plus any clips in data\\voices
-  POST /v1/audio/voices           multipart name + file (+ transcript): add a voice to clone
+  POST /v1/audio/voices           multipart name + file (+ transcript, description): add a voice to clone
+  POST /v1/audio/design           {"description", "text", "takes"}: 1-3 takes of a voice made from words (base64 WAVs)
   POST /v1/audio/unload           frees the GPU (both models); Prestige calls it before a chat reply
   POST /v1/audio/load             {"models": ["stt", "tts"], "voice"}: loads them now and keeps them warm (Live mode)
 
@@ -413,8 +414,33 @@ def voices():
     return {"voices": _voice_list(), "designed": DESIGNED}
 
 
+def _design(description: str, text: str, takes: int) -> tuple[list[np.ndarray], int]:
+    # No reference clip: VoxCPM2 makes the voice up from the description, differently every time.
+    with gpu_lock:
+        model = _voxcpm()
+        out = [model.generate(text=f"({description}){text}", cfg_value=2.0, inference_timesteps=10) for _ in range(takes)]
+        state["tts_used"] = time.time()
+        return out, model.tts_model.sample_rate
+
+
+@app.post("/v1/audio/design")
+async def design(body: dict):
+    """{"description", "text"?, "takes"?: 1-3} -> {"text", "takes": [base64 WAV]}: voices made from words, to pick one
+    and keep it with POST /v1/audio/voices (the take is the clip, `text` its transcript)."""
+    import base64
+
+    description = re.sub(r"\s+", " ", str(body.get("description", ""))).strip().replace("(", "").replace(")", "")[:300]
+    if not description:
+        raise HTTPException(400, "describe the voice, e.g. a gravelly old pirate, slow and amused")
+    text = re.sub(r"\s+", " ", str(body.get("text") or SAMPLE)).strip()[:400] or SAMPLE
+    takes = max(1, min(int(body.get("takes") or 3), 3))
+    clips, sr = await asyncio.to_thread(_design, description, text, takes)
+    return {"text": text, "takes": [base64.b64encode(_encode(c, sr, "wav")[0]).decode() for c in clips]}
+
+
 @app.post("/v1/audio/voices")
-async def add_voice(name: str = Form(...), file: UploadFile = File(...), transcript: str = Form("")):
+async def add_voice(name: str = Form(...), file: UploadFile = File(...), transcript: str = Form(""),
+                    description: str = Form("")):
     name = re.sub(r"[^a-z0-9_-]+", "-", name.strip().lower()).strip("-")
     if not name:
         raise HTTPException(400, "give the voice a name")
@@ -449,6 +475,12 @@ async def add_voice(name: str = Form(...), file: UploadFile = File(...), transcr
         txt.write_text(transcript.strip(), encoding="utf-8")
     elif txt.exists():
         txt.unlink()
+    # A designed voice keeps the words it was made from, so it can be made again.
+    note = VOICES / f"{name}.design.txt"
+    if description.strip():
+        note.write_text(description.strip(), encoding="utf-8")
+    elif note.exists():
+        note.unlink()
     return {"voice": name, "seconds": round(len(audio) / sr, 1)}
 
 
