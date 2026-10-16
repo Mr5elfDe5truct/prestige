@@ -512,6 +512,66 @@ pub fn comfy_yaml(root: &Path, fast: bool, shared: Option<&Path>) -> String {
     y
 }
 
+/// The Python packages a requirements.txt names that aren't installed in `site_packages` (looked up by their
+/// .dist-info folder, so nothing is imported). Comments, options and environment markers are skipped.
+pub fn missing_packages(requirements: &str, site_packages: &Path) -> Vec<String> {
+    let installed: Vec<String> = fs::read_dir(site_packages)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_lowercase();
+            let dist = name.strip_suffix(".dist-info").or_else(|| name.strip_suffix(".egg-info"))?.to_string();
+            Some(dist.split('-').next().unwrap_or("").replace('.', "_"))
+        })
+        .collect();
+    requirements
+        .lines()
+        .map(|l| l.split('#').next().unwrap_or("").trim())
+        .filter(|l| !l.is_empty() && !l.starts_with('-') && !l.contains("://"))
+        .filter_map(|l| {
+            let name: String = l.chars().take_while(|c| c.is_ascii_alphanumeric() || "-_.".contains(*c)).collect();
+            let key = name.to_lowercase().replace(['-', '.'], "_");
+            (!key.is_empty() && !installed.contains(&key)).then_some(name)
+        })
+        .collect()
+}
+
+/// The workflows' custom nodes (GGUF loaders, KJNodes) need Python packages in ComfyUI's environment. Comfy Desktop
+/// rebuilds its .venv when it updates, which drops them and ComfyUI then fails every render with "Node 'UnetLoaderGGUF'
+/// not found": put them back before ComfyUI starts.
+fn ensure_node_packages(dir: &Path, python: &Path, notes: &mut Vec<String>) {
+    let Some(venv) = python.parent().and_then(Path::parent) else { return };
+    let site = venv.join("Lib").join("site-packages");
+    let nodes: Vec<PathBuf> = fs::read_dir(dir.join("custom_nodes"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.file_name().is_some_and(|n| ["comfyui-gguf", "comfyui-kjnodes"].contains(&n.to_string_lossy().to_lowercase().as_str())))
+        .collect();
+    for node in nodes {
+        let req = node.join("requirements.txt");
+        let missing = missing_packages(&fs::read_to_string(&req).unwrap_or_default(), &site);
+        if missing.is_empty() {
+            continue;
+        }
+        let name = node.file_name().unwrap_or_default().to_string_lossy().into_owned();
+        let out = hidden(&mut Command::new(crate::packs::uv_exe()))
+            .args(["pip", "install", "-q", "-p"])
+            .arg(venv)
+            .arg("-r")
+            .arg(&req)
+            .stdin(Stdio::null())
+            .output();
+        match out {
+            Ok(o) if o.status.success() => notes.push(format!("ComfyUI: put back {name}'s Python packages ({})", missing.join(", "))),
+            Ok(o) => notes.push(format!("ComfyUI: {name} is missing {} and installing them failed: {}", missing.join(", "), String::from_utf8_lossy(&o.stderr).trim())),
+            Err(e) => notes.push(format!("ComfyUI: {name} is missing {} and uv couldn't run: {e}", missing.join(", "))),
+        }
+    }
+}
+
 fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
     fs::create_dir_all(to)?;
     for e in fs::read_dir(from)?.flatten() {
@@ -692,6 +752,7 @@ pub fn prepare(root: &Path) -> Result<Prepared, String> {
                 }
             }
         }
+        ensure_node_packages(&dir, &python, &mut notes);
         let output = root.join("data").join("comfy-output");
         let args = |port: u16| format!("main.py --listen 127.0.0.1 --port {port} --disable-smart-memory --extra-model-paths-config {} --output-directory {}", quote(&yaml), quote(&output));
         b.add("comfyui", 8188, &python, args(8188), &dir, Some("comfyui"), common.clone());
@@ -776,6 +837,26 @@ pub fn prepare(root: &Path) -> Result<Prepared, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_packages_reads_dist_info() {
+        let site = std::env::temp_dir().join(format!("prep-site-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&site);
+        for d in ["Pillow-11.3.0.dist-info", "opencv_python_headless-4.12.0.dist-info", "sentencepiece-0.2.1.dist-info"] {
+            fs::create_dir_all(site.join(d)).unwrap();
+        }
+        let req = "# main
+gguf>=0.13.0
+# optional - tokenizer
+sentencepiece
+pillow>=10.3.0
+opencv-python-headless
+color-matcher ; python_version >= '3.9'
+-e git+https://x/y
+";
+        assert_eq!(missing_packages(req, &site), vec!["gguf", "color-matcher"]);
+        let _ = fs::remove_dir_all(&site);
+    }
 
     fn cards() -> Vec<Gpu> {
         parse_gpus("0, GPU-aaa, NVIDIA GeForce RTX 3060, 12288\n1, GPU-bbb, NVIDIA GeForce RTX 2060, 6144\n")
