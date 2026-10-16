@@ -303,11 +303,38 @@ export async function listVoices(): Promise<{ kokoro: string[]; vox: string[] }>
   return { kokoro, vox };
 }
 
-/** Adds a VoxCPM2 voice cloned from a recording (5-30 s of one person speaking). */
-export async function cloneVoice(name: string, file: File): Promise<string> {
+/** VoxCPM2 makes a voice up from words ("a gravelly old pirate"): `takes` versions of it saying `text`, each different.
+ *  Keep one with cloneVoice(name, take, text, description). */
+export async function designVoice(description: string, text: string, takes: number): Promise<{ text: string; takes: Blob[] }> {
+  let r: Response;
+  try {
+    r = await http(`${VOICE_SERVER}/v1/audio/design`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ description, text, takes }),
+    });
+  } catch (e) {
+    throw new Error(errMsg(e) === "not reachable" ? "the voice server isn't running (start the services)" : errMsg(e));
+  }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.detail ? String(j.detail) : `the voice server answered ${r.status}`);
+  const blob = (b64: string) => {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new Blob([bytes], { type: "audio/wav" });
+  };
+  return { text: String(j.text ?? text), takes: (j.takes ?? []).map(blob) };
+}
+
+/** Adds a VoxCPM2 voice cloned from a recording (5-30 s of one person speaking), or a designed voice's take (with
+ *  what it says, and the words it was made from). */
+export async function cloneVoice(name: string, file: File | Blob, transcript = "", description = ""): Promise<string> {
   const fd = new FormData();
   fd.append("name", name);
-  fd.append("file", file, file.name);
+  fd.append("file", file, file instanceof File ? file.name : "designed.wav");
+  if (transcript) fd.append("transcript", transcript);
+  if (description) fd.append("description", description);
   let r: Response;
   try {
     r = await http(`${VOICE_SERVER}/v1/audio/voices`, { method: "POST", body: fd });

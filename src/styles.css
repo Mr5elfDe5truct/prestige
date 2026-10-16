@@ -932,6 +932,12 @@ body:not(.translator) .translator-only { display: none; }
 .ch-fact button:hover { color: var(--red); }
 .ch-fact-row { display: flex; gap: 8px; margin-top: 8px; }
 .ch-fact-row input { flex: 1; }
+.design-voice { width: min(560px, 94vw); }
+.dv-row { display: flex; gap: 8px; align-items: flex-end; }
+.dv-row label:nth-child(2) { flex: 1; }
+.dv-takes { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.dv-take { display: flex; gap: 10px; align-items: center; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+.dv-take audio { flex: 1; min-width: 0; height: 32px; }
 @media (max-width: 700px) { .ch-body { grid-template-columns: 1fr; } .ch-list { flex-direction: row; flex-wrap: wrap; } }
 .live-face { position: absolute; left: 50%; top: 50%; width: min(30%, 210px); aspect-ratio: 1; object-fit: cover; border-radius: 50%; transform: translate(-50%, -50%); border: 2px solid color-mix(in srgb, var(--gold) 60%, transparent); box-shadow: 0 0 calc(30px * var(--glow)) color-mix(in srgb, var(--red) calc(45% * var(--glow)), transparent); }
 .live-face:not([hidden]) ~ .live-self { z-index: 1; }

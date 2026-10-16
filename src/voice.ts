@@ -6,6 +6,7 @@ import {
   setVoice, speakDelta, speakEnd, stopSpeaking, transcribe, DEFAULT_VOICE,
 } from "./speech";
 import { errMsg } from "./backends";
+import { openDesignVoice } from "./designvoice";
 import { themeRgb } from "./theme";
 import type { MemoryConfig } from "./memory";
 
@@ -96,6 +97,16 @@ export function initVoice(d: Deps) {
     deps.setVoiceSetting(v);
     engineNote();
   });
+  $("#voice-design").addEventListener("click", () =>
+    openDesignVoice("", deps.toast, async (v) => {
+      deps.toast(`Added the designed voice "${v.slice(4)}".`);
+      await loadVoices(true);
+      ($("#voice-pick") as HTMLSelectElement).value = v;
+      setVoice(v);
+      deps.setVoiceSetting(v);
+      engineNote();
+    }),
+  );
   $("#voice-clone").addEventListener("click", () => ($("#voice-clone-file") as HTMLInputElement).click());
   $("#voice-clone-file").addEventListener("change", async () => {
     const input = $("#voice-clone-file") as HTMLInputElement;
@@ -164,6 +175,7 @@ async function loadVoices(force = false) {
   if (sel.value !== cur) sel.value = DEFAULT_VOICE;
   setVoice(sel.value);
   ($("#voice-clone") as HTMLButtonElement).hidden = !vox.length;
+  ($("#voice-design") as HTMLButtonElement).hidden = !vox.length;
   engineNote();
 }
 

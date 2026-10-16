@@ -283,7 +283,8 @@
           <div class="voice-opts">
             <label class="check"><input type="checkbox" id="voice-hands" /> Hands-free (talk any time; talking interrupts)</label>
             <label class="field inline">Voice<select id="voice-pick"><option value="af_heart">af_heart</option></select></label>
-            <button class="btn mini" id="voice-clone" title="Make a VoxCPM2 voice from a 5–30 second recording of someone speaking" hidden>Clone a voice…</button>
+            <button class="btn mini" id="voice-design" title="Describe a voice in words and VoxCPM2 makes it" hidden>Design a voice…</button>
+        <button class="btn mini" id="voice-clone" title="Make a VoxCPM2 voice from a 5–30 second recording of someone speaking" hidden>Clone a voice…</button>
             <input type="file" id="voice-clone-file" accept="audio/*,.wav,.mp3,.m4a,.flac,.ogg,.webm" hidden />
           </div>
           <p class="note center" id="voice-engine-note" hidden></p>
@@ -622,7 +623,7 @@
             </div>
             <div class="ch-fields">
               <label>Name<input id="ch-name" type="text" autocomplete="off" placeholder="e.g. Captain Vex" /></label>
-              <label>Voice<span class="ch-voice-row"><select id="ch-voice"></select><button type="button" class="btn mini" id="ch-clone">Clone from a recording…</button></span></label>
+              <label>Voice<span class="ch-voice-row"><select id="ch-voice"></select><button type="button" class="btn mini" id="ch-design">Design one…</button><button type="button" class="btn mini" id="ch-clone">Clone from a recording…</button></span></label>
               <input type="file" id="ch-clone-file" accept="audio/*,.wav,.mp3,.m4a,.flac,.ogg,.webm" hidden />
             </div>
           </div>
@@ -642,6 +643,26 @@
           </div>
         </div>
       </div>
+    </dialog>
+
+    <!-- Design a voice: VoxCPM2 makes a voice from a description; pick a take and keep it (designvoice.ts) -->
+    <dialog class="sheet design-voice" id="design-voice">
+      <form method="dialog">
+        <h2>Design a voice</h2>
+        <p class="muted">Describe the voice in words and VoxCPM2 makes it up. Each take comes out a little different: listen, then keep the one you like. It's saved like a cloned voice, so it sounds the same every time.</p>
+        <label>What does it sound like?<textarea id="dv-desc" rows="3" placeholder="e.g. A gravelly old pirate, slow and amused, a little hoarse"></textarea></label>
+        <label>What it says in the takes<input id="dv-text" type="text" autocomplete="off" /></label>
+        <div class="dv-row">
+          <label>Takes<select id="dv-count"><option value="2">2</option><option value="3" selected>3</option></select></label>
+          <label>Name<input id="dv-name" type="text" autocomplete="off" placeholder="e.g. old-pirate" /></label>
+          <button type="button" class="btn" id="dv-make">Make takes</button>
+        </div>
+        <p class="muted" id="dv-status"></p>
+        <div class="dv-takes" id="dv-takes"></div>
+        <div class="acts">
+          <button class="btn" value="cancel">Close</button>
+        </div>
+      </form>
     </dialog>
 
     <dialog class="sheet welcome" id="welcome">

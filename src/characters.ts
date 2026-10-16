@@ -7,6 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { errMsg } from "./backends";
 import { cloneVoice, isVox, listVoices, DEFAULT_VOICE } from "./speech";
 import { CONSENT, imageIn, imageToBase64 } from "./reference";
+import { openDesignVoice } from "./designvoice";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
 const inTauri = "__TAURI_INTERNALS__" in window;
@@ -217,6 +218,8 @@ async function renderVoices(cur: string | undefined) {
   }
   sel.value = cur ?? "";
   ($("#ch-clone") as HTMLButtonElement).disabled = !vox.length;
+  ($("#ch-design") as HTMLButtonElement).disabled = !vox.length;
+  $("#ch-design").title = vox.length ? "Describe a voice in words (\"a gravelly old pirate\") and VoxCPM2 makes it" : "Designing a voice needs the workstation's voice server (voice pack)";
   $("#ch-clone").title = vox.length ? "Make a VoxCPM2 voice from a 5–30 second recording of one person speaking" : "Cloning needs the workstation's voice server (voice pack)";
 }
 
@@ -345,6 +348,18 @@ export async function initCharacters(d: Deps) {
     } catch (e) {
       deps.toast(`Couldn't clone that voice: ${errMsg(e)}`, "warn");
     }
+  });
+  // A designed voice too: described in words, a take kept, and picked for the character.
+  $("#ch-design").addEventListener("click", () => {
+    if (!editing) return;
+    readForm();
+    const who = editing;
+    openDesignVoice(who.name === "Unnamed" ? "" : who.name, deps.toast, async (v) => {
+      who.voice = v;
+      await save();
+      deps.toast(`${who.name || "The character"} now speaks with the designed voice "${v.slice(4)}".`);
+      if (editing === who) renderVoices(v);
+    });
   });
   $("#ch-fact-add").addEventListener("click", () => {
     const inp = $("#ch-fact") as HTMLInputElement;
