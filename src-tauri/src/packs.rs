@@ -96,12 +96,13 @@ pub fn catalog(ollama_gb: f64) -> Vec<Pack> {
             v.push(Item::Ollama("qwen3.5:4b".into()));
             v
         }, vram: 7.5, ram: 0.0, card: "voice" },
-        Pack { id: "images", title: "Images", text: "Qwen-Image-2.1 (+ 4-step turbo) and Z-Image-Turbo (ComfyUI): text to image and editing".into(), gb: 36.5, items: vec![
+        Pack { id: "images", title: "Images", text: "Qwen-Image-2.1 (+ 4-step turbo and Lightning) and Z-Image-Turbo (ComfyUI): text to image and editing".into(), gb: 36.6, items: vec![
             comfy("abenzerps/Qwen-Image-2.1-Uncensored-GGUF", "qwen-image-2.1-UC-Q4_K_M.gguf", "unet"),
             comfy("Abiray/Qwen-Image-2.1-viggle-4-steps-turbo-GGUF", "qwen_image_2.1_turbo_Q4_K_M.gguf", "unet"),
             comfy("unsloth/Qwen3-VL-8B-Instruct-GGUF", "Qwen3-VL-8B-Instruct-UD-Q4_K_XL.gguf", "text_encoders"),
             Item::File { url: hf("unsloth/Qwen3-VL-8B-Instruct-GGUF", "mmproj-F16.gguf"), dest: r"models\comfy\text_encoders\Qwen3-VL-8B-Instruct-mmproj-F16.gguf".into(), alts: vec![] },
             comfy("Comfy-Org/Qwen-Image-2.1", "vae/qwen_image_2.1_vae_bf16.safetensors", "vae"),
+            Item::File { url: hf("lightx2v/Qwen-Image-2.1-Lightning", "pytorch_lora_weights.safetensors"), dest: r"models\comfy\loras\qwen-image-2.1-lightning-4step.safetensors".into(), alts: vec![] },
             comfy("Comfy-Org/z_image_turbo", "split_files/diffusion_models/z_image_turbo_bf16.safetensors", "diffusion_models"),
             comfy("Comfy-Org/z_image_turbo", "split_files/text_encoders/qwen_3_4b.safetensors", "text_encoders"),
             comfy("Comfy-Org/z_image_turbo", "split_files/vae/ae.safetensors", "vae"),
@@ -171,9 +172,10 @@ pub fn catalog(ollama_gb: f64) -> Vec<Pack> {
             comfy_same("Comfy-Org/SeedVR2", "diffusion_models/seedvr2_3b_int8_convrot.safetensors"),
             comfy_same("Comfy-Org/SeedVR2", "vae/seedvr2_ema_vae_fp16.safetensors"),
         ], vram: 10.0, ram: 0.0, card: "comfyui" },
-        Pack { id: "reshoot", title: "Reshoot", text: "Multiple-Angles + Outfit Swap LoRAs for Qwen-Image-2.1 (ComfyUI): a new camera angle, try on an outfit (needs Images)".into(), gb: 0.5, items: vec![
+        Pack { id: "reshoot", title: "Reshoot", text: "Multiple-Angles, Outfit Swap and Restore LoRAs for Qwen-Image-2.1 (ComfyUI): a new camera angle, try on an outfit, restore a photo (needs Images)".into(), gb: 0.7, items: vec![
             Item::File { url: hf("akhaliq/Qwen-Image-2.1-Multiple-Angles-LoRA", "checkpoints_v2/angles_v2_full_qwen21_multiple_angles_v2_qwen21_multiple_angles_v2_000001500.safetensors"), dest: r"models\comfy\loras\qwen-image-2.1-multiple-angles-v2.safetensors".into(), alts: vec![] },
             comfy("ausboss/Qwen-Image-2.1-Outfit-Swap-Consistency-LoRA", "qwen-image-2.1-outfit-swap.safetensors", "loras"),
+            comfy("ausboss/Qwen-Image-2.1-Restore-LoRA", "qwen-image-2.1-restore.safetensors", "loras"),
         ], vram: 10.0, ram: 0.0, card: "comfyui" },
         Pack { id: "search", title: "Search", text: "EmbeddingGemma 2 (llama.cpp): search renders, songs, chats and files by meaning (needs llama.cpp b11452 or newer)".into(), gb: 0.9, items: vec![
             gguf("ggml-org/embeddinggemma-2-GGUF", crate::search::MODEL, crate::search::MODEL),

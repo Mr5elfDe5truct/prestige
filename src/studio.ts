@@ -102,6 +102,7 @@ type GenMode =
   | "upvideo"
   | "angle"
   | "outfit"
+  | "restore"
   | "foley";
 
 // How a workflow takes the generation settings: an image model with a latent size and batch, an edit
@@ -126,6 +127,7 @@ interface Mode {
   imageNode?: string; // LoadImage node for image-to-video, edits and reference images
   imageKey?: string; // that node's file input, "image" unless set ("file" for a LoadVideo)
   fallback?: Mode; // used when this workflow file isn't there
+  fast?: number; // with the Lightning LoRA (4 steps): seconds a megapixel, on top of LIGHTNING_LOAD_SECS
 }
 
 /* InfiniteTalk on an RTX 3060 12 GB at 448×640, 4 steps (ComfyUI's log and nvidia-smi): 55 s a step, so each 81-frame
@@ -210,6 +212,7 @@ const MODES: Record<GenMode, Mode> = {
     seed: ["6", "seed"],
     steps: QWEN_STEPS,
     secs: 90,
+    fast: 15,
     note: "keeps the image's size",
     imageNode: "9",
   },
@@ -223,6 +226,7 @@ const MODES: Record<GenMode, Mode> = {
     seed: ["6", "seed"],
     steps: QWEN_STEPS,
     secs: 95,
+    fast: 16,
     note: "only the painted area changes",
     imageNode: "9",
   },
@@ -265,7 +269,7 @@ const MODES: Record<GenMode, Mode> = {
     seed: ["6", "seed"],
     latent: "5",
     steps: { draft: 3, standard: 4, high: 6, max: 8 },
-    secs: 40,
+    secs: 40, // the turbo model; with Lightning on Qwen-Image-2.1 (fastRef) a 1216×832 scene took 29 s, peaking at 7.3 GB
     note: "with your reference",
     imageNode: "9",
   },
@@ -465,6 +469,22 @@ const MODES: Record<GenMode, Mode> = {
     note: "try on outfit",
     imageNode: "9",
   },
+  // Restore photo: the edit graph with ausboss's Restore LoRA (restoreGraph). The picture is redrawn at about 2 MP,
+  // which its author trained and measured at; 25 steps without Lightning, as in its card. On the RTX 3060 a 448×252
+  // JPEG took 278 s at 25 steps and 92 s with Lightning (4 steps), loading included, peaking at 8.3 and 9.6 GB.
+  restore: {
+    file: "qwen-image-21-edit.api.json",
+    label: "Qwen-Image-2.1 Restore",
+    family: "edit",
+    promptNode: "4",
+    promptKey: "prompt",
+    seed: ["6", "seed"],
+    steps: { draft: 16, standard: 25, high: 30, max: 40 },
+    secs: 139,
+    fast: 36,
+    note: "restore photo",
+    imageNode: "9",
+  },
   // Add sound: LTX-2.3 dev with Lightricks' Foley LoRA hears the video (frozen, its own frames) and makes its sound
   // effects, 89 frames (3.7 s) at a time (foleyGraph); Prestige then puts the sound on the original video (mux_foley).
   // secs is one window.
@@ -487,6 +507,31 @@ const RESHOOT_LORAS: Partial<Record<GenMode, { file: string; strength: number }>
   angle: { file: "qwen-image-2.1-multiple-angles-v2.safetensors", strength: 0.9 },
   outfit: { file: "qwen-image-2.1-outfit-swap.safetensors", strength: 1 },
 };
+
+/* lightx2v's Lightning LoRA for Qwen-Image-2.1 (DMD, 4 steps, CFG 1, text to image and edits, one picture or several).
+ * On the RTX 3060 a 1024×576 edit with the uncensored Q4_K_M took 19 s for 4 steps against 93 s for 20 (4.7 s a step),
+ * peaking at 9.4 GB the first time (the LoRA patched in) and 7.3–8 GB after; its result held the subject as 20 steps did,
+ * a little less saturated. It stacks with a taught face or style and with the Restore LoRA, but not with the Reshoot
+ * ones: with it the Multiple-Angles LoRA hardly turned the camera (even at 1.0 and 6 steps), and Outfit Swap moved and
+ * enlarged the person, which is what that LoRA is there to stop. Those two keep their own steps. */
+const LIGHTNING = { file: "qwen-image-2.1-lightning-4step.safetensors", steps: 4 };
+const LIGHTNING_LOAD_SECS = 20;
+/** The modes the Speed setting (Fast or Quality) applies to. Reference's own Turbo pick runs Lightning too. */
+const LIGHTNING_MODES: GenMode[] = ["edit", "inpaint", "restore"];
+const lightningOn = (gm: GenMode) => (LIGHTNING_MODES.includes(gm) && settings().image.edits !== "quality") || gm === "reffast";
+/** The turbo model Reference's Turbo pick falls back to when the Lightning LoRA isn't installed. */
+const TURBO_UNET = "qwen_image_2.1_turbo_Q4_K_M.gguf";
+
+/* Restore photo: ausboss's Restore LoRA (step 1,500, rank 32) at 1.0, or 0.5 for a blurry photo (at 1.0 it stays true to
+ * the blur), with the requests it was trained on. */
+export type RestoreKind = "photo" | "blurry" | "old";
+const RESTORE = { file: "qwen-image-2.1-restore.safetensors", mp: 2 };
+const RESTORE_PROMPTS: Record<RestoreKind, string> = {
+  photo: "Restore the photo: remove blur, noise and compression artifacts and recover sharp, natural detail, keeping the same composition, people and colors.",
+  blurry: "Restore the photo: remove blur, noise and compression artifacts and recover sharp, natural detail, keeping the same composition, people and colors.",
+  old: "Restore the old photo: remove scratches, dust, fading and grain and recover sharp, natural detail and color, keeping the same composition and people.",
+};
+export const restorePrompt = (k: RestoreKind) => RESTORE_PROMPTS[k];
 
 /** The Multiple-Angles LoRA's 12 azimuths (30° apart, clockwise from the front) and 4 elevations, by the labels it was
  *  trained on, with what the menu shows. */
@@ -832,11 +877,13 @@ function plan(gm: GenMode, src: Source | null = srcAsset, o?: Override, song?: P
   }
   if (m.family === "image" || m.family === "edit") {
     const s = settings().image;
-    const steps = stepsOf(m, s.quality)!;
+    const fast = lightningOn(gm) && m.fast != null;
+    const steps = fast ? LIGHTNING.steps : stepsOf(m, s.quality)!;
     const ratio = steps / m.steps!.standard!;
     if (m.family === "edit") {
-      const px = src?.width && src.height ? (src.width * src.height) / MP : 1;
-      p = { w: 0, h: 0, steps, count: 1, load: px, secs: m.secs * px * ratio };
+      // Restore photo redraws the picture at about 2 MP, whatever its size.
+      const px = gm === "restore" ? RESTORE.mp : src?.width && src.height ? (src.width * src.height) / MP : 1;
+      p = { w: 0, h: 0, steps, count: 1, load: px, secs: fast ? LIGHTNING_LOAD_SECS + m.fast! * px : m.secs * px * ratio };
     } else {
       const [w, h] = o ? [o.w, o.h] : imageDims(s.aspect, s.size);
       const count = o ? o.count : s.count;
@@ -1647,8 +1694,11 @@ function settingsFields(gm: GenMode, src: Source | null = srcAsset): Field[] {
     field("Quality", "quality", [["standard", "Standard · ACE-Step 1.5 turbo"], ["high", "High · ACE-Step 1.5 XL, ~3 min"]], v.quality, "High needs the Workstation's music-xl pack and most of a 12 GB card; the song editor uses it too");
   }
   const quality = "quality" in s ? s.quality : "standard";
+  const fast = LIGHTNING_MODES.includes(gm) && settings().image.edits !== "quality";
+  if (LIGHTNING_MODES.includes(gm))
+    field("Speed", "edits", [["fast", "Fast · Lightning, 4 steps"], ["quality", "Quality · more steps"]], fast ? "fast" : "quality", "Fast is about 4× quicker; Quality keeps a little more colour and fine detail");
   if (m.family === "ltx") field("Quality", "quality", [["draft", "Draft · half size, one pass"], ["standard", "Standard · upscaled 2×"]], quality === "draft" ? "draft" : "standard");
-  else if (m.steps) {
+  else if (m.steps && !fast) {
     const q = m.steps[quality] != null ? quality : "standard";
     field("Quality", "quality", levels(m).map((l) => [l, `${QUALITY_NAMES[l]} · ${m.steps![l]} steps`]), q);
   }
@@ -2464,6 +2514,35 @@ async function tryOnOutfit(a: Asset) {
   }
 }
 
+/** Restore photo: a small, compressed, blurry or worn picture redrawn at about 2 MP with the Restore LoRA, keeping the
+ *  people and the framing. One pass is enough (a second came back crunchy, its author found). */
+async function restorePhoto(a: Asset) {
+  closeLightbox();
+  const dlg = $("#restore") as HTMLDialogElement;
+  const kind = $("#rp-kind") as HTMLSelectElement;
+  const fast = $("#rp-fast") as HTMLInputElement;
+  ($("#rp-pic") as HTMLImageElement).src = convertFileSrc(a.path);
+  fast.checked = settings().image.edits !== "quality";
+  const est = () => ($("#rp-est").textContent = `Comes out at about 2 megapixels. Takes ${aboutTime(plan("restore", a).secs)}.`);
+  fast.onchange = () => {
+    update("image", { edits: fast.checked ? "fast" : "quality" });
+    est();
+  };
+  est();
+  dlg.returnValue = "";
+  dlg.showModal();
+  await new Promise((r) => dlg.addEventListener("close", r, { once: true }));
+  if (dlg.returnValue !== "go") return;
+  const k = kind.value as RestoreKind;
+  deps.toast("Restoring the photo. It opens when it's done.");
+  try {
+    const out = await run("restore", restorePrompt(k), a, { restore: k }, undefined, { from: "Restore photo", title: `${a.name}, restored` });
+    if (out[0]) openRender(out[0].path);
+  } catch (e) {
+    if (errMsg(e) !== "stopped") deps.toast(`Couldn't restore it: ${errMsg(e)}`, "warn");
+  }
+}
+
 /** Puts a picture in ComfyUI's input folder (named from its content, so a retry reuses it). */
 async function uploadImage(img: Blob, prefix: string): Promise<string> {
   const bytes = new Uint8Array(await img.arrayBuffer());
@@ -2739,6 +2818,7 @@ function showMenu(e: MouseEvent, a: Asset) {
     ...(image && workflows.cutout ? [{ label: "Remove background", run: () => removeBackground(a), key: "transparent PNG" }] : []),
     ...(image && workflows.angle ? [{ label: "New camera angle…", run: () => newAngle(a), key: "reshoot" }] : []),
     ...(image && workflows.outfit ? [{ label: "Try on outfit…", run: () => tryOnOutfit(a), key: "dress up" }] : []),
+    ...(image && workflows.restore ? [{ label: "Restore photo…", run: () => restorePhoto(a), key: "blur, noise, old prints" }] : []),
     ...(image && ocrReady() ? [{ label: "Read the text", run: () => (closeLightbox(), readText(a.path, a.name)), key: "Unlimited-OCR" }] : []),
     ...(image && translateReady() ? [{ label: "Translate the text…", run: () => (closeLightbox(), openTranslate("", a.path)), key: "Index-Translate" }] : []),
     ...(a.kind === "video" && workflows.vidcut ? [{ label: "Cut out a subject…", run: () => videoCutout(a), key: "green screen" }] : []),
@@ -2902,6 +2982,7 @@ interface QueueOpts {
   edit?: SongEdit; // the song editor's job
   audio?: Blob; // a song from the PC to edit (a gallery song goes as the source's path)
   outfit?: string; // Try on outfit: the outfit picture in ComfyUI's input folder
+  restore?: RestoreKind; // Restore photo: what's wrong with the picture
 }
 
 /** ACE-Step's way of asking for no vocals. */
@@ -2953,13 +3034,45 @@ function reshootGraph(g: any, gm: "angle" | "outfit", outfit?: string) {
   g["8"].inputs.filename_prefix = gm === "angle" ? "qwen-image-angle" : "qwen-image-outfit";
 }
 
-/** A LoRA a render needs must be in ComfyUI's loras folder; say which pack brings it if it isn't. */
-async function checkLora(graph: any) {
-  const want = graph["30"]?.inputs?.lora_name as string | undefined;
-  if (!want) return;
+/** Restore photo: the picture scaled to about 2 MP (sides in 32s) and given to the encoder at that size, so the result
+ *  lines up with it, and the Restore LoRA between the model and the sampler. */
+function restoreGraph(g: any, kind: RestoreKind) {
+  g["10"] = { class_type: "ImageScaleToTotalPixels", inputs: { image: ["9", 0], upscale_method: "lanczos", megapixels: RESTORE.mp, resolution_steps: 32 } };
+  g["4"].inputs["images.image_1"] = ["10", 0];
+  g["4"].inputs.resolution = 0;
+  g["4"].inputs.prompt = restorePrompt(kind);
+  g["30"] = { class_type: "LoraLoaderModelOnly", inputs: { model: ["1", 0], lora_name: RESTORE.file, strength_model: kind === "blurry" ? 0.5 : 1 } };
+  g["6"].inputs.model = ["30", 0];
+  g["8"].inputs.filename_prefix = "qwen-image-restore";
+}
+
+/** Fast: the Lightning LoRA last in the model's chain (after a taught face or style, or the Restore LoRA),
+ *  4 steps at CFG 1. */
+function lightningGraph(g: any) {
+  g["35"] = { class_type: "LoraLoaderModelOnly", inputs: { model: g["6"].inputs.model, lora_name: LIGHTNING.file, strength_model: 1 } };
+  g["6"].inputs.model = ["35", 0];
+  g["6"].inputs.steps = LIGHTNING.steps;
+  g["6"].inputs.cfg = 1;
+}
+
+let lightningMissingSaid = false;
+/** A LoRA a render needs must be in ComfyUI's loras folder; say which pack brings it if it isn't. Without the
+ *  Lightning LoRA a Fast render runs at its Quality steps instead (Reference's Turbo on the turbo model). */
+async function checkLora(graph: any, gm: GenMode) {
   const r = await http(`${COMFY}/object_info/LoraLoaderModelOnly`).catch(() => null);
   const names: string[] = (await r?.json().catch(() => null))?.LoraLoaderModelOnly?.input?.required?.lora_name?.[0] ?? [];
-  if (names.length && !names.includes(want)) throw new Error(`${want} isn't installed: add the Reshoot pack in Packs`);
+  if (!names.length) return;
+  const fast = graph["35"];
+  if (fast && !names.includes(fast.inputs.lora_name)) {
+    graph["6"].inputs.model = fast.inputs.model;
+    delete graph["35"];
+    if (gm === "reffast") graph["1"].inputs.unet_name = TURBO_UNET;
+    else graph["6"].inputs.steps = stepsOf(modeOf(gm), settings().image.quality);
+    if (!lightningMissingSaid) deps.toast("Fast edits need the Lightning LoRA: add the Images pack in Packs. Until then they run at Quality.");
+    lightningMissingSaid = true;
+  }
+  const want = graph["30"]?.inputs?.lora_name as string | undefined;
+  if (want && !names.includes(want)) throw new Error(`${want} isn't installed: add the Reshoot pack in Packs`);
 }
 
 /** Add sound's graph: the video's frames at 24 fps, frozen (a noise mask of 0), and sound made for each 89-frame
@@ -3043,7 +3156,9 @@ function activeLora(gm: GenMode): TrainedLora | null {
 
 /** Builds a render's workflow now, with the current settings and a fresh seed (it may run much later). */
 function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpts) {
-  const wf = workflowOf(gm);
+  // Reference's Turbo is Lightning on Qwen-Image-2.1 (the same nodes as the turbo model's graph), which keeps the
+  // uncensored model loaded; checkLora puts the turbo model back if the LoRA isn't installed.
+  const wf = gm === "reffast" && workflows.ref ? workflows.ref : workflowOf(gm);
   if (!wf) throw new Error(`workflows\\${MODES[gm].file} wasn't found`);
   const m = modeOf(gm);
   const graph = structuredClone(wf);
@@ -3075,6 +3190,8 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
     inpaintGraph(graph, opts.mask);
   }
   if (gm === "angle" || gm === "outfit") reshootGraph(graph, gm, opts.outfit);
+  if (gm === "restore") restoreGraph(graph, opts.restore ?? "photo");
+  if (lightningOn(gm)) lightningGraph(graph);
   // An upscale's size: the shorter side becomes 1080 or 2160 (the longer one follows the shape).
   if (m.family === "upscale") {
     graph["3"].inputs["resize_type.shorter_size"] = opts.upscale ?? 2160;
@@ -3308,7 +3425,7 @@ async function submit(j: QJob) {
     // Uncensored models for what Prestige makes; a photo brought in from outside keeps the standard ones.
     const made = madeHere(src);
     if (m.family === "wan" || m.family === "svi") await applyWanModels(graph, [SVI.high, SVI.low], settings()[m.family === "svi" ? "long" : "animate"], m.family === "svi" ? SVI.fp16 : undefined, made);
-    if (gm === "angle" || gm === "outfit") await checkLora(graph);
+    if (graph["30"] || graph["35"]) await checkLora(graph, gm);
     if (j.cancelled) throw new Error("stopped");
     const r = await http(`${COMFY}/prompt`, {
       method: "POST",
@@ -3825,7 +3942,7 @@ export async function phoneStudio(action: string, a: any = {}): Promise<unknown>
         update(key, { seed: a.value === "last" ? (lastSeed(key) ?? null) : a.value == null || a.value === "" || !Number.isFinite(n) || n < 0 ? null : n });
       } else {
         const k = String(a.k);
-        if (!["aspect", "size", "quality", "count", "res", "seconds", "fps", "shots", "frames", "high", "low", "bpm", "key", "meter", "language", "lora", "fromPicture"].includes(k)) throw new Error(`unknown setting ${k}`);
+        if (!["aspect", "size", "quality", "count", "res", "seconds", "fps", "shots", "frames", "high", "low", "bpm", "key", "meter", "language", "lora", "fromPicture", "edits"].includes(k)) throw new Error(`unknown setting ${k}`);
         update(k === "fromPicture" ? "video" : key, { [k]: fieldValue(k, String(a.value ?? "")) } as any);
       }
       return phoneInfo(a.create ?? { mode: "image" });

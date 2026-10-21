@@ -831,6 +831,29 @@
       </form>
     </dialog>
 
+    <dialog class="sheet talk" id="restore">
+      <form method="dialog">
+        <h2>Restore photo</h2>
+        <div class="talk-top">
+          <img id="rp-pic" alt="" />
+          <div class="talk-fields">
+            <label>What's wrong with it?<select id="rp-kind">
+              <option value="photo">Small, compressed or noisy</option>
+              <option value="blurry">Blurry, shaky or a video still</option>
+              <option value="old">An old print: scratches, dust, fading</option>
+            </select></label>
+            <label class="check"><input type="checkbox" id="rp-fast" /> Fast (Lightning, 4 steps)</label>
+          </div>
+        </div>
+        <p class="muted" id="rp-est"></p>
+        <p class="credit">Restore LoRA by ausboss for Qwen-Image-2.1: a redraw that stays on your picture, not a recovery. Fine detail is made up to fit, and small faces can change.</p>
+        <div class="acts">
+          <button class="btn" value="cancel">Cancel</button>
+          <button class="btn primary" value="go">Restore</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog class="sheet songedit" id="songedit">
       <form method="dialog">
         <h2>Edit song <span class="credit" id="se-name"></span></h2>
