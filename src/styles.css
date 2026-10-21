@@ -1286,3 +1286,16 @@ body:is(.ws-resizing-v, .ws-resizing-h, .ws-dragging) :is(iframe, video) { point
   .ws-split, .chat-edge, .ws-grip, .ws-head .ws-reset { display: none; }
   .ws-head { cursor: default; }
 }
+
+/* MOSS-Image layout (layout.ts) */
+.sheet.layout { width: min(720px, calc(100vw - 32px)); }
+.lo-stage { position: relative; width: 100%; max-height: 52vh; margin: 8px auto; background: repeating-conic-gradient(var(--panel-2) 0 25%, var(--panel) 0 50%) 0 0 / 24px 24px; border: 1px solid var(--line); border-radius: 8px; cursor: crosshair; touch-action: none; user-select: none; overflow: hidden; }
+.lo-box { position: absolute; border: 2px solid var(--gold); background: rgba(217, 164, 65, .12); border-radius: 4px; cursor: move; }
+.lo-box.text { border-color: #6fb6ff; background: rgba(111, 182, 255, .12); }
+.lo-box.character { border-color: #e07a9a; background: rgba(224, 122, 154, .12); }
+.lo-box.on { box-shadow: 0 0 0 2px var(--fg); }
+.lo-box span { position: absolute; left: 4px; top: 2px; right: 4px; font-size: 11px; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 2px #000; pointer-events: none; }
+.lo-form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; align-items: end; }
+.lo-form b { grid-column: 1 / -1; }
+.lo-form select, .lo-form input { width: 100%; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font: 13px var(--body); padding: 8px 10px; }
+@media (max-width: 560px) { .lo-form { grid-template-columns: 1fr; } }

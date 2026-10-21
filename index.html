@@ -854,6 +854,26 @@
       </form>
     </dialog>
 
+    <dialog class="sheet layout" id="layout">
+      <form method="dialog">
+        <h2>Layout <span class="credit" id="lo-size"></span></h2>
+        <p class="muted">Drag on the picture to add a box where text, a thing or a person goes; drag a box to move it. Your prompt describes the whole picture.</p>
+        <div class="lo-stage" id="lo-stage"></div>
+        <p class="muted" id="lo-hint">No boxes yet: MOSS-Image places everything itself.</p>
+        <div class="lo-form" id="lo-form" hidden>
+          <b id="lo-which"></b>
+          <label>What goes here<select id="lo-kind"></select></label>
+          <label>Describe it<input id="lo-caption" type="text" autocomplete="off" placeholder="e.g. a red neon sign on the roof" /></label>
+          <label id="lo-text-row">The words<input id="lo-text" type="text" autocomplete="off" placeholder="e.g. MOON DINER" /></label>
+          <button type="button" class="btn" id="lo-delete">Remove box</button>
+        </div>
+        <div class="acts">
+          <button type="button" class="btn" id="lo-clear">Clear all</button>
+          <button class="btn primary" value="done">Done</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog class="sheet songedit" id="songedit">
       <form method="dialog">
         <h2>Edit song <span class="credit" id="se-name"></span></h2>
