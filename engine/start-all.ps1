@@ -227,8 +227,9 @@ if (-not $NoComfy -and $ComfyDir) {
     # The Workstation's own nodes, copied on every start so they follow this folder's version: workstation_gpus puts
     # text encoders, VAEs and the LTX upscaler on a second card for ComfyUI (it does nothing otherwise), and
     # workstation_music edits ACE-Step songs for Prestige (redo a part, extend, cover), and workstation_lora lets
-    # Qwen-Image-2.1 LoRAs made on the fused weights load onto the GGUF model.
-    foreach ($n in "workstation_gpus", "workstation_music", "workstation_lora") {
+    # Qwen-Image-2.1 LoRAs made on the fused weights load onto the GGUF model. manga_screen is ashukae's MangaScreen
+    # (MIT), for Make it manga.
+    foreach ($n in "workstation_gpus", "workstation_music", "workstation_lora", "manga_screen") {
         Copy-Item "$Root\tools\comfy_nodes\$n" "$ComfyDir\custom_nodes" -Recurse -Force
     }
     Start-Bg "comfyui" 8188 $ComfyPython @(
