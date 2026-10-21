@@ -200,6 +200,8 @@ $PackInfo = [ordered]@{
     talk     = @{ GB = 17.4; Text = "Talking        InfiniteTalk on Wan 2.1 14B (ComfyUI, GGUF) - a face and a voice to a lip-synced video" }
     select   = @{ GB = 2.2;  Text = "Select         SAM 3.1 + BiRefNet (ComfyUI) - click or name to select, cut-outs, background removal" }
     upscale  = @{ GB = 12.3; Text = "Upscale        SeedVR2 7B + 3B (ComfyUI, int8) - sharpen pictures to 1080p or 4K, videos to 1080p" }
+    moss     = @{ GB = 14.2; Text = "MOSS-Image     MOSS-Image (ComfyUI 0.42+, int8, 8 steps) - a second picture model, best with text and layouts" }
+    kromoss  = @{ GB = 6.6;  Text = "Kromoss        Kromoss for MOSS-Image - more natural people (needs moss)" }
 }
 Step 3 "Choosing models"
 if (-not $Packs) {
@@ -397,6 +399,8 @@ if ($desk -and -not $NoComfyDesktop -and -not (Test-Path "$comfy\main.py")) {
     $ver = (Select-String -Path "$($desk.FullName)\ComfyUI\comfyui_version.py" -Pattern '(\d+)\.(\d+)\.\d+' -ErrorAction SilentlyContinue).Matches
     if ($ver -and [version]$ver[0].Value -lt [version]"0.37.0") {
         Warn "Comfy Desktop has ComfyUI $($ver[0].Value); update it in Comfy Desktop for Qwen-Image-2.1 and LTX-2.5"
+    } elseif ($ver -and $Packs -contains "moss" -and [version]$ver[0].Value -lt [version]"0.42.0") {
+        Warn "Comfy Desktop has ComfyUI $($ver[0].Value); MOSS-Image needs 0.42 or newer, so update it in Comfy Desktop"
     }
 } else {
     if (-not (Test-Path "$comfy\main.py")) {
@@ -547,6 +551,20 @@ if ($Packs -contains "select") {
                      @("Comfy-Org/BiRefNet", "background_removal/birefnet.safetensors"))) {
         Download (HF $f[0] $f[1]) (Join-Path $comfyModels ($f[1] -replace "/", "\"))
     }
+}
+if ($Packs -contains "moss") {
+    # MOSS-Image (OpenMOSS, Apache-2.0) for workflows\moss-image-turbo.api.json: int8 DiT, Qwen3.5-9B text encoder
+    # (w4a8) and FLUX.2's small VAE from Comfy-Org, and lodestones' 8-step DMD LoRA, each in a moss\ folder.
+    foreach ($f in "diffusion_models/moss_image_sft_int8_convrot.safetensors", "text_encoders/qwen3.5_9b_w4a8_gptq.safetensors",
+                   "vae/flux2-vae_small.safetensors") {
+        $folder, $name = $f -split "/"
+        Download (HF "Comfy-Org/MOSS-Image" $f) "$comfyModels\$folder\moss\$name"
+    }
+    Download (HF "lodestones/MOSS-Image-SFT-8-steps-dmd" "lora.safetensors") "$comfyModels\loras\moss\moss-image-sft-8-steps-dmd-lora.safetensors"
+}
+if ($Packs -contains "kromoss") {
+    Download (HF "lodestones/Kromoss" "diffusion_models/kromoss_int8_convrot.safetensors") "$comfyModels\diffusion_models\moss\kromoss_int8_convrot.safetensors"
+    Download (HF "lodestones/Kromoss" "8-steps-dmd2-lora.safetensors") "$comfyModels\loras\moss\kromoss-8-steps-dmd2-lora.safetensors"
 }
 if ($Packs -contains "upscale") {
     # SeedVR2 (ByteDance, Apache-2.0) for workflows\seedvr2-upscale-image.api.json (the 7B) and -video.api.json (the
