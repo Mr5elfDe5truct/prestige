@@ -190,7 +190,7 @@ $PackInfo = [ordered]@{
     main     = @{ GB = 22.1; Text = "Main           Qwen3.6 35B Heretic (llama.cpp) - best quality; needs 32 GB RAM" }
     deep     = @{ GB = 10.9; Text = "Deep           Qwen3.8 27B Uncensored (llama.cpp) - strongest reasoning, ~30 tok/s on 12 GB" }
     voice    = @{ GB = 18.1; Text = "Voice          Whisper turbo + VoxCPM2 voices and cloning + Qwen3.5 2B/4B for Live calls (GPU, 8 GB+)" }
-    images   = @{ GB = 36.5; Text = "Images         Qwen-Image-2.1 (+ 4-step turbo) and Z-Image-Turbo (ComfyUI) - text to image and editing" }
+    images   = @{ GB = 36.6; Text = "Images         Qwen-Image-2.1 (+ 4-step turbo and Lightning) and Z-Image-Turbo (ComfyUI) - text to image and editing" }
     video    = @{ GB = 60.3; Text = "Video          LTX-2.5 + Wan 2.2 (ComfyUI) - text/image to video with sound" }
     computer = @{ GB = 6.9;  Text = "Computer use   UI-TARS 1.5 7B (llama.cpp) - drives the mouse and keyboard; asks about Nex-N2.5-mini (+21.6 GB)" }
     music    = @{ GB = 14.8; Text = "Music          ACE-Step 1.5 turbo + base (ComfyUI) - songs with vocals, the song editor and stems" }
@@ -563,6 +563,8 @@ if ($Packs -contains "images") {
     Download (HF "unsloth/Qwen3-VL-8B-Instruct-GGUF" "Qwen3-VL-8B-Instruct-UD-Q4_K_XL.gguf") "$comfyModels\text_encoders\Qwen3-VL-8B-Instruct-UD-Q4_K_XL.gguf"
     Download (HF "unsloth/Qwen3-VL-8B-Instruct-GGUF" "mmproj-F16.gguf") "$comfyModels\text_encoders\Qwen3-VL-8B-Instruct-mmproj-F16.gguf"
     Download (HF "Comfy-Org/Qwen-Image-2.1" "vae/qwen_image_2.1_vae_bf16.safetensors") "$comfyModels\vae\qwen_image_2.1_vae_bf16.safetensors"
+    # lightx2v's Lightning LoRA: Fast edits, Paint to change, Restore photo and Reference in 4 steps.
+    Download (HF "lightx2v/Qwen-Image-2.1-Lightning" "pytorch_lora_weights.safetensors") "$comfyModels\loras\qwen-image-2.1-lightning-4step.safetensors"
     Download (HF "Comfy-Org/z_image_turbo" "split_files/diffusion_models/z_image_turbo_bf16.safetensors") "$comfyModels\diffusion_models\z_image_turbo_bf16.safetensors"
     Download (HF "Comfy-Org/z_image_turbo" "split_files/text_encoders/qwen_3_4b.safetensors") "$comfyModels\text_encoders\qwen_3_4b.safetensors"
     Download (HF "Comfy-Org/z_image_turbo" "split_files/vae/ae.safetensors") "$comfyModels\vae\ae.safetensors"
