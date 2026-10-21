@@ -498,7 +498,7 @@ pub fn comfy_yaml(root: &Path, fast: bool, shared: Option<&Path>) -> String {
             continue;
         }
         y.push_str(&format!(
-            "workstation_{}:\n  base_path: {}\\models\\{dir}\n  checkpoints: checkpoints/\n  diffusion_models: |\n    diffusion_models/\n    unet/\n  unet: unet/\n  text_encoders: text_encoders/\n  clip: text_encoders/\n  vae: vae/\n  loras: loras/\n  latent_upscale_models: latent_upscale_models/\n  upscale_models: upscale_models/\n  clip_vision: clip_vision/\n  geometry_estimation: geometry_estimation/\n  background_removal: background_removal/\n  model_patches: model_patches/\n  audio_encoders: audio_encoders/\n\n",
+            "workstation_{}:\n  base_path: {}\\models\\{dir}\n  checkpoints: checkpoints/\n  diffusion_models: |\n    diffusion_models/\n    unet/\n  unet: unet/\n  text_encoders: text_encoders/\n  clip: text_encoders/\n  vae: vae/\n  loras: loras/\n  latent_upscale_models: latent_upscale_models/\n  upscale_models: upscale_models/\n  clip_vision: clip_vision/\n  geometry_estimation: geometry_estimation/\n  background_removal: background_removal/\n  model_patches: model_patches/\n  audio_encoders: audio_encoders/\n  matanyone2: matanyone2/\n\n",
             dir.replace('-', "_"),
             root.display()
         ));

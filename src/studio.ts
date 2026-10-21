@@ -106,6 +106,7 @@ type GenMode =
   | "restore"
   | "manga"
   | "moss"
+  | "person"
   | "foley";
 
 // How a workflow takes the generation settings: an image model with a latent size and batch, an edit
@@ -114,7 +115,8 @@ type GenMode =
 // InfiniteTalk making a picture speak a voice recording ("talk"), SAM 3.1 selecting something in a picture ("select", not
 // queued), a picture cut out onto transparent ("cutout"), or SAM 3.1 tracking a subject through a video ("vidcut").
 // SeedVR2 sharpening a picture or a video to 1080p or 4K ("upscale"). LTX-2.3 making the sound for a silent video ("foley").
-type Family = "image" | "edit" | "ltx" | "ltx1" | "wan" | "svi" | "song" | "songedit" | "model3d" | "talk" | "select" | "cutout" | "vidcut" | "upscale" | "foley";
+// MatAnyone2 matting a person out of a video ("person").
+type Family = "image" | "edit" | "ltx" | "ltx1" | "wan" | "svi" | "song" | "songedit" | "model3d" | "talk" | "select" | "cutout" | "vidcut" | "upscale" | "foley" | "person";
 
 interface Mode {
   file: string;
@@ -433,6 +435,21 @@ const MODES: Record<GenMode, Mode> = {
     promptNode: "4",
     seed: ["", ""],
     secs: VIDCUT_SECS,
+    imageNode: "2",
+    imageKey: "file",
+  },
+  // Cut out a person: MatAnyone2 (spiritform's ComfyUI nodes) follows the person picked on the first frame (a SAM 3.1
+  // selection) through the video as an alpha matte; the frames come back as RGBA PNGs in a .frames folder, plus the
+  // matte as a video, and person_video (studio.rs) makes them into what was asked for with ffmpeg
+  // (workflows\matanyone2-person.api.json). On an RTX 3060 an 8 s 448×640 clip (199 frames) took 24–28 s, peaking at
+  // 2.5 GB. secs is per second of video, loading included.
+  person: {
+    file: "matanyone2-person.api.json",
+    label: "MatAnyone2",
+    family: "person",
+    promptNode: "",
+    seed: ["", ""],
+    secs: 4,
     imageNode: "2",
     imageKey: "file",
   },
@@ -905,7 +922,7 @@ function plan(gm: GenMode, src: Source | null = srcAsset, o?: Override, song?: P
   let p: Omit<Plan, "warn">;
   // Picture to 3D: one model per picture; its time and VRAM were measured (see MODES.model3d).
   if (m.family === "model3d" || m.family === "select" || m.family === "cutout" || m.family === "upscale" || m.family === "songedit") return { w: 0, h: 0, count: 1, load: 0, secs: m.secs, warn: "" };
-  if (m.family === "vidcut") return { w: 0, h: 0, count: 1, load: 0, secs: m.secs * 8, warn: "" }; // per second of video (videoCutout)
+  if (m.family === "vidcut" || m.family === "person") return { w: 0, h: 0, count: 1, load: 0, secs: m.secs * 8, warn: "" }; // per second of video (videoCutout, personCutout)
   if (m.family === "foley") return { w: 0, h: 0, count: 1, load: 0, secs: m.secs * 2, warn: "" }; // per window (addSound)
   if (m.family === "song") {
     // Measured (see SONG_FIXED_SECS): the same ~5.3 GB at every length, so only a small card gets a warning.
@@ -2645,6 +2662,87 @@ async function videoCutout(a: Asset) {
   }
 }
 
+/** What Cut out a person makes: a transparent WebM, the PNG frames, a green-screen MP4, or an MP4 on a new background. */
+type PersonOut = "webm" | "png" | "green" | "background";
+
+/** Cut out a person: click them on the first frame (SAM 3.1), pick what to make, and MatAnyone2 mattes them through
+ *  the whole video, hair and all. The result opens when it's done (the PNG frames' folder is shown in Explorer). */
+async function personCutout(a: Asset) {
+  closeLightbox();
+  let frame: string;
+  try {
+    frame = await invoke<string>("video_first_frame", { root: deps.root(), video: a.path });
+  } catch (e) {
+    return deps.toast(`Couldn't read the video: ${errMsg(e)}`, "warn");
+  }
+  const still = { ...a, path: frame, kind: "image" as const };
+  const picked = await new Promise<{ mask: Blob; w: number; h: number } | null>((res) => {
+    let done = false;
+    openInpaint(
+      convertFileSrc(frame),
+      a.name,
+      () => {},
+      {
+        select: (q) => segment(still, q),
+        cutout: (mask, w, h) => {
+          done = true;
+          res({ mask, w, h });
+        },
+        selecting: true,
+        pick: { title: "Click the person to cut out", button: "Cut out this person" },
+      },
+    );
+    // Closing the overlay without picking anyone cancels.
+    const overlay = $("#inpaint");
+    const watch = new MutationObserver(() => {
+      if (overlay.hidden && !done) {
+        watch.disconnect();
+        res(null);
+      } else if (done) watch.disconnect();
+    });
+    watch.observe(overlay, { attributes: true, attributeFilter: ["hidden"] });
+  });
+  if (!picked) return;
+  const dlg = $("#person") as HTMLDialogElement;
+  const bgBtn = $("#pc-bg") as HTMLButtonElement;
+  let background: string | null = null;
+  const sync = () => {
+    const out = (dlg.querySelector("input[name=pc-out]:checked") as HTMLInputElement).value as PersonOut;
+    bgBtn.hidden = out !== "background";
+    $("#pc-bg-name").textContent = out === "background" ? (background ? background.split(/[\\/]/).pop()! : "none picked yet") : "";
+    ($("#pc-go") as HTMLButtonElement).disabled = out === "background" && !background;
+  };
+  dlg.querySelectorAll("input[name=pc-out]").forEach((r) => ((r as HTMLInputElement).onchange = sync));
+  bgBtn.onclick = async () => {
+    background = (await invoke<string | null>("pick_background").catch(() => null)) ?? background;
+    sync();
+  };
+  const seconds = await videoSeconds(a.path);
+  $("#pc-est").textContent = `Takes ${aboutTime(MODES.person.secs * Math.max(2, seconds) + 15)} on an RTX 3060.`;
+  sync();
+  dlg.returnValue = "";
+  dlg.showModal();
+  await new Promise((r) => dlg.addEventListener("close", r, { once: true }));
+  if (dlg.returnValue !== "go") return;
+  const out = (dlg.querySelector("input[name=pc-out]:checked") as HTMLInputElement).value as PersonOut;
+  deps.toast("Cutting the person out. It opens when it's done.");
+  try {
+    const name = await uploadImage(picked.mask, "person-mask");
+    const stem = a.name.replace(/\.[^.]+$/, "").replace(/[^\w-]+/g, "-").slice(0, 40);
+    const frames = `${stem}-person-${Date.now().toString(36)}.frames`;
+    const res = await run("person", "Cut out a person", a, { mask: { name, w: picked.w, h: picked.h }, frames }, undefined, { from: "Cut out a person", title: `A person cut out of ${a.name}` });
+    const matte = res.find((x) => x.kind === "video");
+    if (!matte) throw new Error("no matte came back");
+    const dir = `${matte.path.replace(/[\\/][^\\/]+$/, "")}\\${frames}`;
+    const made = await invoke<string>("person_video", { root: deps.root(), frames: dir, source: a.path, out, background });
+    await refresh();
+    if (out === "png") await invoke("reveal", { path: `${made}\\frame_00001_.png` });
+    else openRender(made);
+  } catch (e) {
+    if (errMsg(e) !== "stopped") deps.toast(`Couldn't cut them out: ${errMsg(e)}`, "warn");
+  }
+}
+
 /** Add sound: LTX-2.3 with Lightricks' Foley LoRA watches the video and makes its sound effects (no speech, no
  *  music), then the sound goes onto the original video, saved as a new file next to it. Any sound it had is replaced. */
 async function addSound(a: Asset) {
@@ -2899,6 +2997,7 @@ function showMenu(e: MouseEvent, a: Asset) {
     ...(image && workflows.manga ? [{ label: "Make it manga", run: () => makeManga(a), key: "black & white page" }] : []),
     ...(image && ocrReady() ? [{ label: "Read the text", run: () => (closeLightbox(), readText(a.path, a.name)), key: "Unlimited-OCR" }] : []),
     ...(image && translateReady() ? [{ label: "Translate the text…", run: () => (closeLightbox(), openTranslate("", a.path)), key: "Index-Translate" }] : []),
+    ...(a.kind === "video" && workflows.person && workflows.select ? [{ label: "Cut out a person…", run: () => personCutout(a), key: "click, MatAnyone2" }] : []),
     ...(a.kind === "video" && workflows.vidcut ? [{ label: "Cut out a subject…", run: () => videoCutout(a), key: "green screen" }] : []),
     ...(a.kind === "video" && workflows.foley ? [{ label: "Add sound…", run: () => addSound(a), key: "Foley" }] : []),
     ...upscaleItems(a),
@@ -3051,6 +3150,7 @@ interface QueueOpts {
   kind?: RefKind; // how a reference image is described to Qwen-Image
   override?: Override; // size and count for a chain's first frame
   mask?: { name: string; w: number; h: number }; // inpaint: the mask in ComfyUI's input folder, and the picture's size
+  frames?: string; // Cut out a person: the .frames folder (under the output folder's video\) the frames go in
   lyrics?: string; // a song's (empty: an instrumental)
   song?: Partial<MusicSettings>; // a song's tempo, key or language over the saved settings (chat's songwriter)
   talk?: { audio: Blob; seconds: number }; // a talking video's voice recording and its length
@@ -3261,7 +3361,7 @@ let current: QJob | null = null;
 let jobIds = 1;
 
 /** Renders whose workflow has no Studio settings (and so no seed setting of their own). */
-const NO_SETTINGS: Family[] = ["talk", "select", "cutout", "vidcut", "upscale", "songedit", "foley"];
+const NO_SETTINGS: Family[] = ["talk", "select", "cutout", "vidcut", "upscale", "songedit", "foley", "person"];
 
 /** The modes that render with Qwen-Image-2.1, so a face or style taught with Fizgig can join them. */
 const QWEN_LORA_MODES: GenMode[] = ["image", "fast", "edit", "inpaint", "ref", "reffast"];
@@ -3312,6 +3412,12 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
   if (gm === "angle" || gm === "outfit") reshootGraph(graph, gm, opts.outfit);
   if (gm === "restore") restoreGraph(graph, opts.restore ?? "photo");
   if (gm === "manga") mangaGraph(graph);
+  if (gm === "person") {
+    if (!opts.mask || !opts.frames) throw new Error("nobody is picked");
+    graph["20"].inputs.image = opts.mask.name;
+    graph["44"].inputs.filename_prefix = `video/${opts.frames}/frame`;
+    graph["46"].inputs.filename_prefix = `video/${opts.frames.replace(/\.frames$/, "")}-matte`;
+  }
   if (lightningOn(gm)) lightningGraph(graph);
   // An upscale's size: the shorter side becomes 1080 or 2160 (the longer one follows the shape).
   if (m.family === "upscale") {
@@ -3548,6 +3654,7 @@ async function submit(j: QJob) {
     if (m.family === "wan" || m.family === "svi") await applyWanModels(graph, [SVI.high, SVI.low], settings()[m.family === "svi" ? "long" : "animate"], m.family === "svi" ? SVI.fp16 : undefined, made);
     if (graph["30"] || graph["35"]) await checkLora(graph, gm);
     if (gm === "moss" && !(await comfyKnows("CLIPLoader", "type", "moss_image"))) throw new Error("MOSS-Image needs ComfyUI 0.42 or newer: update ComfyUI in Comfy Desktop");
+    if (gm === "person" && !(await hasNode("MatAnyone2Run"))) throw new Error("ComfyUI doesn't have MatAnyone2: add the Video matting pack, then restart the services");
     if (gm === "manga" && !(await hasNode("MangaFinish"))) throw new Error("ComfyUI doesn't have the Manga nodes yet: restart Prestige's services to copy them in");
     if (j.cancelled) throw new Error("stopped");
     const r = await http(`${COMFY}/prompt`, {
