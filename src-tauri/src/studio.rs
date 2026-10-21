@@ -62,7 +62,8 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>, depth: u32) {
     for e in rd.flatten() {
         let p = e.path();
         if p.is_dir() {
-            if depth < 4 {
+            // A cut-out person's frames (person_video) aren't renders of their own.
+            if depth < 4 && !p.extension().is_some_and(|x| x == "frames") {
                 walk(&p, out, depth + 1);
             }
         } else {
@@ -356,6 +357,127 @@ pub async fn mux_foley(root: Option<String>, video: String, audio: String) -> Re
         }
         let _ = fs::remove_file(&a);
         Ok(out.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// A video's first frame as a PNG, to pick what to cut out of it (Cut out a person), in a .frames folder of ComfyUI's
+/// output folder, which the gallery leaves out.
+#[tauri::command]
+pub async fn video_first_frame(root: Option<String>, video: String) -> Result<String, String> {
+    let out_dir = output_dir(root);
+    tauri::async_runtime::spawn_blocking(move || {
+        let v = PathBuf::from(&video);
+        if !v.starts_with(&out_dir) || !v.is_file() {
+            return Err(format!("{} isn't a render", v.display()));
+        }
+        let dir = out_dir.join("first.frames");
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let png = dir.join(format!("{}.png", v.file_stem().and_then(|s| s.to_str()).unwrap_or("video")));
+        let ok = hidden(&mut Command::new("ffmpeg")).args(["-v", "error", "-y", "-i"]).arg(&v).args(["-frames:v", "1"]).arg(&png).status().map_err(|e| format!("ffmpeg: {e}"))?;
+        if !ok.success() || !png.exists() {
+            return Err("ffmpeg couldn't read the video's first frame".into());
+        }
+        Ok(png.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// A picture or video from the PC to put behind a cut-out person. None if cancelled.
+#[tauri::command]
+pub async fn pick_background(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let exts: Vec<&str> = IMAGE_EXT.iter().chain(VIDEO_EXT.iter()).copied().collect();
+    let dialog = app.dialog().file().add_filter("Pictures and videos", &exts).set_title("A new background");
+    let picked = tauri::async_runtime::spawn_blocking(move || dialog.blocking_pick_file()).await.map_err(|e| e.to_string())?;
+    Ok(picked.and_then(|p| p.into_path().ok()).map(|p| p.to_string_lossy().into_owned()))
+}
+
+fn probe(args: &[&str], file: &Path) -> String {
+    hidden(&mut Command::new("ffprobe"))
+        .args(["-v", "error"])
+        .args(args)
+        .args(["-of", "csv=p=0"])
+        .arg(file)
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default()
+}
+
+/// Cut out a person: the matted frames ComfyUI saved (RGBA PNGs in a .frames folder) made into what was asked for, next
+/// to the source video and with its sound: "webm" (transparent, VP9 with alpha), "green" (a green-screen MP4),
+/// "background" (an MP4 on a picture or a looping video, scaled to cover), or "png" (the frames themselves, kept). The
+/// frames are removed once made into a video. Returns the new file (or the frames' folder).
+#[tauri::command]
+pub async fn person_video(root: Option<String>, frames: String, source: String, out: String, background: Option<String>) -> Result<String, String> {
+    let out_dir = output_dir(root);
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = PathBuf::from(&frames);
+        let src = PathBuf::from(&source);
+        if !dir.starts_with(&out_dir) || !dir.is_dir() || !dir.extension().is_some_and(|x| x == "frames") {
+            return Err(format!("{} isn't a folder of cut-out frames", dir.display()));
+        }
+        if !src.is_file() {
+            return Err(format!("{} isn't there", src.display()));
+        }
+        let first = dir.join("frame_00001_.png");
+        if !first.exists() {
+            return Err("no frames came back".into());
+        }
+        if out == "png" {
+            return Ok(dir.to_string_lossy().into_owned());
+        }
+        let fps = probe(&["-select_streams", "v:0", "-show_entries", "stream=r_frame_rate"], &src);
+        let fps = if fps.is_empty() { "24".to_string() } else { fps };
+        let size = probe(&["-show_entries", "stream=width,height"], &first);
+        let (w, h) = size.split_once(',').ok_or("couldn't read the frames' size")?;
+        let stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or("video");
+        let (suffix, ext) = match out.as_str() {
+            "webm" => ("person", "webm"),
+            "green" => ("green-screen", "mp4"),
+            "background" => ("new-background", "mp4"),
+            o => return Err(format!("unknown output {o}")),
+        };
+        let parent = src.parent().unwrap_or(&out_dir);
+        let file = (1..1000)
+            .map(|n| parent.join(format!("{stem}-{suffix}{}.{ext}", if n == 1 { String::new() } else { format!("-{n}") })))
+            .find(|p| !p.exists())
+            .ok_or("too many versions")?;
+        let mut ffmpeg = Command::new("ffmpeg");
+        let cmd = hidden(&mut ffmpeg);
+        cmd.args(["-v", "error", "-y"]);
+        // Input 0 is what goes behind (nothing for a transparent WebM), then the frames, then the source for its sound.
+        let behind = match out.as_str() {
+            "green" => {
+                cmd.args(["-f", "lavfi", "-i"]).arg(format!("color=c=0x00B140:s={w}x{h}:r={fps}"));
+                true
+            }
+            "background" => {
+                let bg = PathBuf::from(background.as_deref().ok_or("no background picked")?);
+                let looped = if VIDEO_EXT.contains(&ext_of(&bg).as_str()) { "-stream_loop" } else { "-loop" };
+                cmd.args([looped, if looped == "-loop" { "1" } else { "-1" }, "-i"]).arg(&bg);
+                true
+            }
+            _ => false,
+        };
+        cmd.args(["-framerate", &fps, "-start_number", "1", "-i"]).arg(dir.join("frame_%05d_.png")).arg("-i").arg(&src);
+        let (fg, sound) = if behind { (1, 2) } else { (0, 1) };
+        if behind {
+            let bg = if out == "background" { format!("[0:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},fps={fps},setsar=1[bg];[bg]") } else { "[0:v]".to_string() };
+            cmd.arg("-filter_complex").arg(format!("{bg}[{fg}:v]overlay=shortest=1,format=yuv420p[v]")).args(["-map", "[v]"]);
+            cmd.args(["-c:v", "libx264", "-crf", "18", "-preset", "medium", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart"]);
+        } else {
+            cmd.args(["-map", "0:v", "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-crf", "30", "-b:v", "0", "-row-mt", "1", "-c:a", "libopus"]);
+        }
+        cmd.args(["-map", &format!("{sound}:a?"), "-shortest"]).arg(&file);
+        let ok = cmd.status().map_err(|e| format!("ffmpeg: {e}"))?;
+        if !ok.success() || !file.exists() {
+            return Err("ffmpeg couldn't make the video".into());
+        }
+        let _ = fs::remove_dir_all(&dir);
+        Ok(file.to_string_lossy().into_owned())
     })
     .await
     .map_err(|e| e.to_string())?

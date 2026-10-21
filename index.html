@@ -1054,6 +1054,24 @@
       <div class="kb-list" id="tn-list"></div>
     </dialog>
 
+    <dialog class="sheet" id="person">
+      <form method="dialog">
+        <h2>Cut out a person</h2>
+        <p class="muted">MatAnyone2 follows the person you picked through the whole video, hair and all. What should it make?</p>
+        <label class="check"><input type="radio" name="pc-out" value="webm" checked /> A transparent video (WebM, for editors and the web)</label>
+        <label class="check"><input type="radio" name="pc-out" value="png" /> PNG frames with transparency (a folder)</label>
+        <label class="check"><input type="radio" name="pc-out" value="green" /> A green-screen video (MP4)</label>
+        <label class="check"><input type="radio" name="pc-out" value="background" /> On a new background (MP4)</label>
+        <p class="muted talk-file-row"><button type="button" class="btn" id="pc-bg" hidden>Choose a picture or video…</button> <span id="pc-bg-name"></span></p>
+        <p class="muted" id="pc-est"></p>
+        <p class="credit">MatAnyone2 (Yang et al., CVPR 2026) is under the NTU S-Lab License 1.0: free for non-commercial use only. Only cut out people with their permission. The sound is kept, and a white-on-black matte video is saved next to the result.</p>
+        <div class="acts">
+          <button class="btn" value="cancel">Cancel</button>
+          <button class="btn primary" value="go" id="pc-go">Cut out</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog class="sheet" id="ask">
       <form method="dialog">
         <h2 id="ask-title"></h2>

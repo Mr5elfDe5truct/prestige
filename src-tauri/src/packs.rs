@@ -26,7 +26,14 @@ pub enum Item {
     Env { name: String, probe: String, steps: Vec<Vec<String>> },
     /// A zip unpacked into `dir`, checked against the SHA-256 at `sha_url`; `probe` is a file inside once it's there.
     Zip { url: String, sha_url: String, dir: String, probe: String },
+    /// A ComfyUI custom node pack cloned from `url` into the custom_nodes folder of the ComfyUI Prestige uses, then
+    /// `steps` (uv commands; {venv} is ComfyUI's Python environment, {node} the pack's folder). Done once its folder
+    /// has the marker file the last step leaves.
+    ComfyNode { name: String, url: String, steps: Vec<Vec<String>> },
 }
+
+/// Left in a node pack's folder once its steps have run.
+const NODE_MARKER: &str = ".prestige-installed";
 
 #[derive(Clone, Debug)]
 pub struct Pack {
@@ -187,6 +194,17 @@ pub fn catalog(ollama_gb: f64) -> Vec<Pack> {
             moss("lodestones/Kromoss", "diffusion_models/kromoss_int8_convrot.safetensors", "diffusion_models", None),
             moss("lodestones/Kromoss", "8-steps-dmd2-lora.safetensors", "loras", Some("kromoss-8-steps-dmd2-lora.safetensors")),
         ], vram: 8.5, ram: 0.0, card: "comfyui" },
+        // MatAnyone2 (CVPR 2026) through spiritform's ComfyUI nodes: a person's alpha matte through a video from a
+        // first-frame mask. Its model is under the NTU S-Lab License 1.0 (non-commercial use only). Its package doesn't
+        // build with hatchling 1.27+ (a file it force-includes twice), so it's built against an older one.
+        Pack { id: "matting", title: "Video matting", text: "MatAnyone2 (ComfyUI, non-commercial licence): cut a person out of a video, hair and all; restart the services after".into(), gb: 0.3, items: vec![
+            Item::ComfyNode { name: "ComfyUI-MatAnyone2".into(), url: "https://github.com/spiritform/comfy-matanyone2.git".into(), steps: vec![
+                uv(&["pip", "install", "-q", "-p", "{venv}", "-r", r"{node}\requirements.txt", "opencv-python", "hydra-core", "thinplate @ git+https://github.com/cheind/py-thin-plate-spline@master"]),
+                uv(&["pip", "install", "-q", "-p", "{venv}", "hatchling<1.27", "editables"]),
+                uv(&["pip", "install", "-q", "-p", "{venv}", "--no-deps", "--no-build-isolation", "git+https://github.com/pq-yang/MatAnyone2.git"]),
+            ] },
+            Item::File { url: "https://github.com/pq-yang/MatAnyone2/releases/download/v1.0.0/matanyone2.pth".into(), dest: r"models\comfy\matanyone2\matanyone2.pth".into(), alts: vec![] },
+        ], vram: 2.5, ram: 0.0, card: "comfyui" },
         Pack { id: "reshoot", title: "Reshoot", text: "Multiple-Angles, Outfit Swap and Restore LoRAs for Qwen-Image-2.1 (ComfyUI): a new camera angle, try on an outfit, restore a photo (needs Images)".into(), gb: 0.7, items: vec![
             Item::File { url: hf("akhaliq/Qwen-Image-2.1-Multiple-Angles-LoRA", "checkpoints_v2/angles_v2_full_qwen21_multiple_angles_v2_qwen21_multiple_angles_v2_000001500.safetensors"), dest: r"models\comfy\loras\qwen-image-2.1-multiple-angles-v2.safetensors".into(), alts: vec![] },
             comfy("ausboss/Qwen-Image-2.1-Outfit-Swap-Consistency-LoRA", "qwen-image-2.1-outfit-swap.safetensors", "loras"),
@@ -305,6 +323,7 @@ fn present(root: &Path, item: &Item, tags: Option<&HashSet<String>>) -> Option<b
         Item::Ollama(m) => tags.map(|t| has_model(t, m)),
         Item::Env { probe, .. } => Some(root.join(probe).exists()),
         Item::Zip { dir, probe, .. } => Some(zip_probe(root, dir, probe)),
+        Item::ComfyNode { name, .. } => Some(prep::find_comfy(root).is_some_and(|(dir, _)| dir.join("custom_nodes").join(name).join(NODE_MARKER).exists())),
     }
 }
 
@@ -314,6 +333,7 @@ fn item_label(item: &Item) -> String {
         Item::Ollama(m) => format!("{m} (Ollama)"),
         Item::Env { name, .. } => format!("{name} Python environment"),
         Item::Zip { url, .. } => url.rsplit('/').next().unwrap_or("").to_string(),
+        Item::ComfyNode { name, .. } => format!("{name} (ComfyUI nodes)"),
     }
 }
 
@@ -631,6 +651,25 @@ fn get_item(app: &AppHandle, root: &Path, id: &str, n: usize, steps: usize, item
             unzip(&tmp, &root.join(dir))?;
             let _ = fs::remove_file(&tmp);
             Ok(())
+        }
+        Item::ComfyNode { name, url, steps: cmds } => {
+            let (dir, python) = prep::find_comfy(root).ok_or("ComfyUI isn't installed (add Images first)")?;
+            let venv = python.parent().and_then(Path::parent).ok_or("ComfyUI's Python environment wasn't found")?.to_string_lossy().into_owned();
+            let node = dir.join("custom_nodes").join(name);
+            let log = root.join("logs").join(format!("pack-{id}.log"));
+            let _ = fs::create_dir_all(root.join("logs"));
+            if !node.join(".git").exists() {
+                let _ = fs::remove_dir_all(&node);
+                let n = node.to_string_lossy().into_owned();
+                run_logged(root, Path::new("git"), &uv(&["clone", "-q", "--depth", "1", url, &n]), &log, cancel).map_err(|e| if e.contains("couldn't run") { "git isn't installed".into() } else { e })?;
+            }
+            let node_s = node.to_string_lossy().into_owned();
+            for (i, c) in cmds.iter().enumerate() {
+                emit(app, id, "running", n, steps, &format!("{label}: step {} of {}", i + 1, cmds.len()), 0, 0, None);
+                let c: Vec<String> = c.iter().map(|a| a.replace("{venv}", &venv).replace("{node}", &node_s)).collect();
+                run_logged(root, &uv_exe(), &c, &log, cancel)?;
+            }
+            fs::write(node.join(NODE_MARKER), "").map_err(|e| e.to_string())
         }
     }
 }
@@ -1061,7 +1100,9 @@ mod tests {
                 assert!(!p.items.is_empty());
                 for i in &p.items {
                     if let Item::File { url, dest, .. } = i {
-                        assert!(url.starts_with("https://huggingface.co/") && url.contains("/resolve/main/"), "{url}");
+                        let hf = url.starts_with("https://huggingface.co/") && url.contains("/resolve/main/");
+                        let release = url.starts_with("https://github.com/") && url.contains("/releases/download/");
+                        assert!(hf || release, "{url}");
                         assert!(dest.starts_with(r"models\") && !dest.contains('/'), "{dest}");
                     }
                 }

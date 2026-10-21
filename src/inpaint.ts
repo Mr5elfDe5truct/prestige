@@ -31,6 +31,9 @@ export interface InpaintOptions {
   cutout?: (mask: Blob, width: number, height: number) => void;
   /** Open with the Select tool picked. */
   selecting?: boolean;
+  /** Only pick something: no prompt, Remove or Change, and the Cut out button (renamed) hands back the selection's
+   *  mask through `cutout`. Used for a video's first frame (Cut out a person). */
+  pick?: { title: string; button: string };
 }
 
 /** What Qwen-Image is asked when the selection is to be removed. */
@@ -93,8 +96,8 @@ function hint() {
   if (selecting) return "Selecting…";
   if (tool === "select")
     return painted
-      ? "Click more of it to add, Shift-click a part to leave out, Ctrl-click to select something else too. Then say what should be there, remove it, or cut it out."
-      : "Click on something to select it, or type what to select (e.g. the car, all the people).";
+      ? `Click more of it to add, Shift-click a part to leave out, Ctrl-click to select something else too. ${opts.pick ? `Then ${opts.pick.button.toLowerCase()}.` : "Then say what should be there, remove it, or cut it out."}`
+      : `Click on something to select it, or type what to select (e.g. ${opts.pick ? "the woman, the man in the red jacket" : "the car, all the people"}).`;
   return painted
     ? "Only the painted area changes; the rest stays exactly as it is. Say what should be there."
     : "Paint over what to change, or just type an instruction to edit the whole picture (e.g. make it night).";
@@ -244,11 +247,13 @@ export function openInpaint(url: string, name: string, onSubmit: (r: InpaintRequ
   tool = o.selecting && o.select ? "select" : "brush";
   $("#ip-select").hidden = $("#ip-find-wrap").hidden = !o.select;
   $("#ip-cut").hidden = !o.cutout;
-  $("#ip-remove").hidden = !o.select;
+  $("#ip-remove").hidden = !o.select || !!o.pick;
+  $("#ip-prompt").hidden = $("#ip-go").hidden = !!o.pick;
+  $("#ip-cut").textContent = o.pick?.button ?? "Cut out";
   ($("#ip-prompt") as HTMLInputElement).value = "";
   ($("#ip-find") as HTMLInputElement).value = "";
   $("#ip-name").textContent = name;
-  $("#ip-title").textContent = tool === "select" ? "Select to change" : "Paint to change";
+  $("#ip-title").textContent = o.pick?.title ?? (tool === "select" ? "Select to change" : "Paint to change");
   $("#inpaint").hidden = false;
   document.addEventListener("keydown", onKey);
   zoom.reset();
