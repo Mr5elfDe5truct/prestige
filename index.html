@@ -406,6 +406,16 @@
       <form method="dialog">
         <h2>Memory</h2>
         <p class="muted">What every model knows about you. Facts marked <i>always</i> go into every reply; the others only when they're relevant. Kept on this PC.</p>
+        <div class="mem-writer">
+          <label>Learn from chats
+            <select id="mem-writer">
+              <option value="off">Off: only what you ask it to remember</option>
+              <option value="chat">With the chat model, after a chat goes quiet</option>
+              <option value="hymemory">With Hy-Memory, after a chat goes quiet</option>
+            </select>
+          </label>
+          <small class="muted" id="mem-writer-note"></small>
+        </div>
         <div class="mem-add">
           <input id="mem-add-text" type="text" spellcheck="true" placeholder="Add a fact, e.g. I live in Ohio" />
           <button class="btn" type="button" id="mem-add">Add</button>

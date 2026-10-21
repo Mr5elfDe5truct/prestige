@@ -49,6 +49,7 @@ import { initCatalog, openCatalog, phoneCatalog } from "./catalog";
 import { checkForUpdates, initUpdates } from "./updates";
 import { GROUPS, LAST_ROUND, TOOL_ROUNDS, describeCall, fitToolResults, withoutToolCalls, loadTools, runTool, toolContext, tokensIn, toolSpecs, type ToolDef, type ToolStep } from "./tools";
 import { ctxOf, errMsg, freeLlamaVram, http, nameFor, listModels, ping, streamChat, OLLAMA, LLAMA, type ChatMessage, type ModelInfo, type StreamStats } from "./backends";
+import { initMemoryWriter, pauseMemoryWrite, queueMemoryWrite } from "./memwriter";
 import { addFact, memoryContext, factCount, listFacts, listOwui, syncFromOwui, rememberRequest, DEFAULT_OWUI, type MemoryConfig } from "./memory";
 import { initMemoryPanel, openMemoryPanel } from "./memorypanel";
 import { initPacks } from "./packs";
@@ -2193,6 +2194,7 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
   const lastReply = [...chat.messages].reverse().find((m) => m.role === "assistant" && !m.error);
   const youMsg: StoredMessage = { role: "user", content: text, images };
   chat.messages.push(youMsg);
+  pauseMemoryWrite();
   renderChat();
 
   // A character answers as itself (named on the reply, with the model underneath).
@@ -2462,6 +2464,9 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     chat.messages.push(reply);
     bubble.dataset.i = String(chat.messages.length - 1);
     if (!reply.error) reactButton(bubble, reply);
+    // The memory writer reads the exchange once the chat goes quiet (not in a call, or as a character, who keeps its
+    // own memory).
+    if (!live && !char && !reply.error && !busy?.signal.aborted) queueMemoryWrite(text, reply.content, model);
     if (speakIt && !busy?.signal.aborted) speakEnd();
     busy = null;
     document.body.classList.remove("busy");
@@ -3220,6 +3225,7 @@ async function main() {
     },
   });
   initMemoryPanel({ owui: memCfg, toast, onChange: () => refreshMemoryStatus() });
+  initMemoryWriter({ root: () => settings.stackRoot ?? null, owui: memCfg, toast, onChange: () => refreshMemoryStatus() });
   initKnowledge({
     toast,
     useAll: () => settings.kbAll !== false,
