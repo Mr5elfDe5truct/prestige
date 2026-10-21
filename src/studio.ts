@@ -51,6 +51,7 @@ import { CONSENT, bindRefChoices, dragRender, hasFiles, hasRender, imageIn, load
 import { characterById, characters, faceBlob, onCharactersChange } from "./characters";
 import { initInpaint, openInpaint, type SelectQuery } from "./inpaint";
 import { initLaser, openLaser } from "./laser";
+import { layoutBoxes, layoutPrompt, onLayoutChange, openLayout } from "./layout";
 import { attachZoom, type Zoom } from "./zoom";
 import { checkOcr, ocrReady, readText } from "./ocr";
 import { checkTranslate, openTranslate, translateReady } from "./translate";
@@ -104,6 +105,7 @@ type GenMode =
   | "outfit"
   | "restore"
   | "manga"
+  | "moss"
   | "foley";
 
 // How a workflow takes the generation settings: an image model with a latent size and batch, an edit
@@ -246,6 +248,21 @@ const MODES: Record<GenMode, Mode> = {
       seed: ["16", "noise_seed"],
       secs: 360,
     },
+  },
+  // MOSS-Image (OpenMOSS, Apache-2.0): a second text-to-image model, int8 with lodestones' 8-step DMD LoRA at CFG 1,
+  // its Qwen3.5-9B text encoder (w4a8) and FLUX.2's small VAE (workflows\moss-image-turbo.api.json). Best with
+  // lettering and with a layout (layout.ts); Kromoss can stand in for it (mossGraph). Text to image only: references
+  // and edits stay on Qwen-Image-2.1. On an RTX 3060 a 1024² picture took 14 s (21 s with loading), peaking at 8.1 GB.
+  moss: {
+    file: "moss-image-turbo.api.json",
+    label: "MOSS-Image",
+    family: "image",
+    promptNode: "4",
+    seed: ["6", "seed"],
+    latent: "5",
+    steps: { draft: 4, standard: 8 },
+    secs: 15,
+    note: "text and layouts",
   },
   // A reference image placed in a new scene: the text-to-image graph with the picture fed to the text encoder.
   ref: {
@@ -549,6 +566,11 @@ const RESTORE_PROMPTS: Record<RestoreKind, string> = {
   old: "Restore the old photo: remove scratches, dust, fading and grain and recover sharp, natural detail and color, keeping the same composition and people.",
 };
 export const restorePrompt = (k: RestoreKind) => RESTORE_PROMPTS[k];
+
+/* Kromoss (lodestones' full fine-tune of MOSS-Image-Base) in place of the SFT model, with its own DMD2 8-step LoRA.
+ * Next to the SFT one it drew people more naturally but misspelt a sign ("RCG TUDIOS" for "RG STUDIOS"), so MOSS-Image
+ * stays the default. Both are in models\comfy\<folder>\moss. */
+const KROMOSS = { unet: "moss\kromoss_int8_convrot.safetensors", lora: "moss\kromoss-8-steps-dmd2-lora.safetensors" };
 
 /* Make it manga: the edit request from ashukae's QWEN-Manga workflow (Qwen-Image-2.1 decides what is paper, tone and
  * ink by meaning, not brightness), then Manga Finish with that workflow's settings and Manga Panel with no crop. */
@@ -1053,9 +1075,10 @@ function apply(m: Mode, g: any, p: Plan, seed: number) {
   }
 }
 // The Image mode's model: Qwen-Image-2.1, or its 4-step turbo when "fast" is picked (remembered).
-let imageMode: "image" | "fast" = (() => {
+let imageMode: ImageMode = (() => {
   try {
-    return localStorage.getItem("studio.imageModel") === "fast" ? "fast" : "image";
+    const v = localStorage.getItem("studio.imageModel");
+    return v === "fast" || v === "moss" ? v : "image";
   } catch {
     return "image";
   }
@@ -1175,10 +1198,15 @@ export function initStudio(d: Deps) {
     }
     if (t.closest(".opt.model")) flipModel(mode === "video");
     if (t.closest(".opt.board")) deps.storyboard("");
+    if (t.closest(".opt.layout")) {
+      const p = plan("moss");
+      openLayout(p.w, p.h).then(renderCreate);
+    }
     // The pictures selected in the gallery start the photo set.
     if (t.closest(".opt.teach")) openTrain(items.filter((a) => a.kind === "image" && selected.has(a.path)).map((a) => a.path));
   });
   onSettingsChange(() => renderCreate());
+  onLayoutChange(() => renderCreate());
   initSongWriter();
   $("#gen-form").addEventListener("submit", (e) => {
     e.preventDefault();
@@ -1263,6 +1291,11 @@ const animatePick = (): GenMode => (animateMode === "long" ? (workflows.long ? "
 /** The reference-image workflow for the Image mode's model pick (Qwen-Image-2.1 or its turbo). */
 const refImageMode = (): GenMode => (imageMode === "fast" ? (workflows.reffast ? "reffast" : "ref") : workflows.ref ? "ref" : "reffast");
 
+/** Image mode's model: Qwen-Image-2.1, its turbo, or MOSS-Image (text to image only, so a reference or an edit uses
+ *  Qwen-Image whatever is picked). */
+type ImageMode = "image" | "fast" | "moss";
+const IMAGE_MODES: ImageMode[] = ["image", "fast", "moss"];
+
 /** A video from a reference: Qwen-Image makes the first frame first, unless the reference itself is the first frame. */
 const chained = (gm: GenMode) => gm === "refvideo" && refPrefs().frame === "scene";
 
@@ -1331,7 +1364,7 @@ function renderCreate() {
   // In Image mode the model chip switches between Qwen-Image-2.1 and its faster turbo (or Z-Image-Turbo);
   // when animating a picture, between one Wan 2.2 clip and a long Wan 2.2 SVI video.
   const animating = gm === "animate" || gm === "long";
-  const label = chain ? `${modeOf(first).label} → ${m.label}` : m.label;
+  const label = chain ? `${modeOf(first).label} → ${m.label}` : gm === "moss" && settings().image.moss === "kromoss" ? "Kromoss" : m.label;
   const chip = canPick(gm)
     ? `<button type="button" class="opt pick model" title="${animating ? "Switch between one clip and a long video" : "Switch image model"}"><b>${label}</b> ⇄</button>`
     : `<span class="opt"><b>${label}</b></span>`;
@@ -1342,8 +1375,11 @@ function renderCreate() {
   const gear = `<button type="button" class="opt pick set${settingsOpen ? " on" : ""}" title="${what}…" aria-expanded="${settingsOpen}">⚙ Settings</button>`;
   // Qwen-Image modes can learn a face or a style (train.ts); select pictures in the gallery first to start from them.
   const teach = QWEN_LORA_MODES.includes(gm) ? `<button type="button" class="opt pick teach" title="Teach Qwen-Image a face or a style from your photos (select pictures in the gallery first to use them)">✦ Teach a face or style</button>` : "";
+  // MOSS-Image takes a layout: boxes for where text and things go (layout.ts).
+  const n = layoutBoxes().length;
+  const layout = gm === "moss" ? `<button type="button" class="opt pick layout" title="Drag boxes for where text, things and people go">▦ Layout${n ? ` · ${n} box${n > 1 ? "es" : ""}` : ""}</button>` : "";
   $("#gen-opts").innerHTML = wf
-    ? chip + summary(gm, shown).map((o) => `<span class="opt"><b>${o}</b></span>`).join("") + gear + teach
+    ? chip + summary(gm, shown).map((o) => `<span class="opt"><b>${o}</b></span>`).join("") + gear + teach + layout
     : `<span class="opt">workflows\\${esc(missing)} not found, so this mode is off</span>`;
   const warn = $("#gen-warn");
   warn.hidden = !wf || !p.warn;
@@ -1360,7 +1396,7 @@ const buttonText = (gm: GenMode) =>
 /** Whether the model chip can switch: Qwen-Image-2.1 and its turbo, or one Wan 2.2 clip and a long SVI video. */
 const canPick = (gm: GenMode) =>
   !!(
-    ((gm === "image" || gm === "fast") && workflows.fast && workflows.image && active.image !== ZIMAGE) ||
+    ((gm === "image" || gm === "fast" || gm === "moss") && IMAGE_MODES.filter((x) => workflows[x]).length > 1 && active.image !== ZIMAGE) ||
     ((gm === "ref" || gm === "reffast") && workflows.ref && workflows.reffast) ||
     ((gm === "animate" || gm === "long") && workflows.animate && workflows.long)
   );
@@ -1373,7 +1409,9 @@ function flipModel(video: boolean) {
       localStorage.setItem("studio.animateModel", animateMode);
     } catch {}
   } else {
-    imageMode = imageMode === "fast" ? "image" : "fast";
+    // The next installed one: Qwen-Image-2.1 → its turbo → MOSS-Image → back.
+    const have = IMAGE_MODES.filter((x) => workflows[x]);
+    imageMode = have[(have.indexOf(imageMode) + 1) % have.length] ?? "fast";
     try {
       localStorage.setItem("studio.imageModel", imageMode);
     } catch {}
@@ -1386,8 +1424,10 @@ function promptHint(gm: GenMode) {
   const chain = chained(gm);
   return gm === "song"
       ? "Describe the style… e.g. dreamy indie pop, soft female vocals, warm guitars, summer night"
-      : gm === "image" || gm === "fast"
-      ? "Describe an image… e.g. a red and gold dragon coiled around a glowing GPU"
+      : gm === "image" || gm === "fast" || gm === "moss"
+      ? gm === "moss" && layoutBoxes().length
+        ? "Describe the whole picture; the layout's boxes say what goes where…"
+        : "Describe an image… e.g. a red and gold dragon coiled around a glowing GPU"
       : gm === "ref" || gm === "reffast"
         ? "Describe the new scene… e.g. sitting at a café in Paris at golden hour, laughing"
         : gm === "edit"
@@ -1725,6 +1765,8 @@ function settingsFields(gm: GenMode, src: Source | null = srcAsset): Field[] {
     const q = m.steps[quality] != null ? quality : "standard";
     field("Quality", "quality", levels(m).map((l) => [l, `${QUALITY_NAMES[l]} · ${m.steps![l]} steps`]), q);
   }
+  if (gm === "moss")
+    field("MOSS model", "moss", [["sft", "MOSS-Image · best with text and layouts"], ["kromoss", "Kromoss · more natural people"]], settings().image.moss ?? "sft", "Kromoss comes with the Workstation's Kromoss pack");
   if (m.family === "image") field("How many", "count", [1, 2, 3, 4].map((n) => [n, n === 1 ? "1 image" : `${n} images`]), settings().image.count);
   // A face or style taught with Fizgig; its trigger word goes into the prompt by itself.
   if (QWEN_LORA_MODES.includes(gm) && trainedLoras().length) {
@@ -2973,7 +3015,7 @@ async function generate() {
   const src = gm === "animate" || gm === "long" || gm === "edit" ? srcAsset : gm === "ref" || gm === "reffast" || gm === "refvideo" ? ref : null;
   const lyrics = gm === "song" ? ($("#song-lyrics-text") as HTMLTextAreaElement).value : undefined;
   try {
-    enqueue(gm, prompt, src, { kind: refPrefs().kind, lyrics });
+    enqueue(gm, prompt, src, { kind: refPrefs().kind, lyrics, layout: true });
   } catch (e) {
     deps.toast(`Couldn't add the render: ${errMsg(e)}`, "warn");
   }
@@ -3019,6 +3061,7 @@ interface QueueOpts {
   audio?: Blob; // a song from the PC to edit (a gallery song goes as the source's path)
   outfit?: string; // Try on outfit: the outfit picture in ComfyUI's input folder
   restore?: RestoreKind; // Restore photo: what's wrong with the picture
+  layout?: boolean; // MOSS-Image from Studio's create bar: with the layout's boxes (chat's /image goes without)
 }
 
 /** ACE-Step's way of asking for no vocals. */
@@ -3082,6 +3125,16 @@ function restoreGraph(g: any, kind: RestoreKind) {
   g["8"].inputs.filename_prefix = "qwen-image-restore";
 }
 
+/** MOSS-Image: Kromoss if it's picked, and its prompt (the layout's JSON prompt from Studio, see layout.ts). */
+function mossGraph(g: any, prompt: string) {
+  if (settings().image.moss === "kromoss") {
+    g["1"].inputs.unet_name = KROMOSS.unet;
+    g["32"].inputs.lora_name = KROMOSS.lora;
+    g["8"].inputs.filename_prefix = "kromoss";
+  }
+  g["4"].inputs.text = prompt;
+}
+
 /** Make it manga: the picture at about 2 MP redrawn as an inked panel, printed by Manga Finish and framed by Manga Panel. */
 function mangaGraph(g: any) {
   g["10"] = { class_type: "ImageScaleToTotalPixels", inputs: { image: ["9", 0], upscale_method: "lanczos", megapixels: MANGA_MP, resolution_steps: 32 } };
@@ -3111,6 +3164,14 @@ async function hasNode(name: string): Promise<boolean> {
   const r = await http(`${COMFY}/object_info/${name}`).catch(() => null);
   if (!r?.ok) return true;
   return name in ((await r.json().catch(() => ({}))) ?? {});
+}
+
+/** Whether one of a ComfyUI node's choices is there (a model type a newer ComfyUI added). Unreachable counts as yes. */
+async function comfyKnows(node: string, input: string, choice: string): Promise<boolean> {
+  const r = await http(`${COMFY}/object_info/${node}`).catch(() => null);
+  const info = r?.ok ? await r.json().catch(() => null) : null;
+  const opts = info?.[node]?.input?.required?.[input]?.[0];
+  return !Array.isArray(opts) || opts.includes(choice);
 }
 
 let lightningMissingSaid = false;
@@ -3239,6 +3300,7 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
     songEditGraph(graph, opts.edit);
   }
   apply(m, graph, p, seed);
+  if (gm === "moss") mossGraph(graph, opts.layout ? layoutPrompt(prompt, p.w, p.h) : prompt);
   if (gm === "foley") {
     if (!opts.foley) throw new Error("no video to hear");
     foleyGraph(graph, opts.foley, seed);
@@ -3485,6 +3547,7 @@ async function submit(j: QJob) {
     const made = madeHere(src);
     if (m.family === "wan" || m.family === "svi") await applyWanModels(graph, [SVI.high, SVI.low], settings()[m.family === "svi" ? "long" : "animate"], m.family === "svi" ? SVI.fp16 : undefined, made);
     if (graph["30"] || graph["35"]) await checkLora(graph, gm);
+    if (gm === "moss" && !(await comfyKnows("CLIPLoader", "type", "moss_image"))) throw new Error("MOSS-Image needs ComfyUI 0.42 or newer: update ComfyUI in Comfy Desktop");
     if (gm === "manga" && !(await hasNode("MangaFinish"))) throw new Error("ComfyUI doesn't have the Manga nodes yet: restart Prestige's services to copy them in");
     if (j.cancelled) throw new Error("stopped");
     const r = await http(`${COMFY}/prompt`, {
@@ -4002,7 +4065,7 @@ export async function phoneStudio(action: string, a: any = {}): Promise<unknown>
         update(key, { seed: a.value === "last" ? (lastSeed(key) ?? null) : a.value == null || a.value === "" || !Number.isFinite(n) || n < 0 ? null : n });
       } else {
         const k = String(a.k);
-        if (!["aspect", "size", "quality", "count", "res", "seconds", "fps", "shots", "frames", "high", "low", "bpm", "key", "meter", "language", "lora", "fromPicture", "edits"].includes(k)) throw new Error(`unknown setting ${k}`);
+        if (!["aspect", "size", "quality", "count", "res", "seconds", "fps", "shots", "frames", "high", "low", "bpm", "key", "meter", "language", "lora", "fromPicture", "edits", "moss"].includes(k)) throw new Error(`unknown setting ${k}`);
         update(k === "fromPicture" ? "video" : key, { [k]: fieldValue(k, String(a.value ?? "")) } as any);
       }
       return phoneInfo(a.create ?? { mode: "image" });

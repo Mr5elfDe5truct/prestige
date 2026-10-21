@@ -53,6 +53,11 @@ fn comfy(repo: &str, path: &str, folder: &str) -> Item {
     let name = path.rsplit('/').next().unwrap();
     Item::File { url: hf(repo, path), dest: format!(r"models\comfy\{folder}\{name}"), alts: vec![] }
 }
+/// A MOSS-Image file: models\comfy\<folder>\moss\<name> (the file's own name unless given).
+fn moss(repo: &str, path: &str, folder: &str, name: Option<&str>) -> Item {
+    let name = name.unwrap_or_else(|| path.rsplit('/').next().unwrap());
+    Item::File { url: hf(repo, path), dest: format!(r"models\comfy\{folder}\moss\{name}"), alts: vec![] }
+}
 fn comfy_same(repo: &str, path: &str) -> Item {
     let (folder, _) = path.split_once('/').unwrap();
     comfy(repo, path, folder)
@@ -172,6 +177,16 @@ pub fn catalog(ollama_gb: f64) -> Vec<Pack> {
             comfy_same("Comfy-Org/SeedVR2", "diffusion_models/seedvr2_3b_int8_convrot.safetensors"),
             comfy_same("Comfy-Org/SeedVR2", "vae/seedvr2_ema_vae_fp16.safetensors"),
         ], vram: 10.0, ram: 0.0, card: "comfyui" },
+        // MOSS-Image, in a moss\ folder of each model folder (its files can be a junction to another drive).
+        Pack { id: "moss", title: "MOSS-Image", text: "MOSS-Image (ComfyUI 0.42+, int8, 8 steps): a second picture model, best with text and layouts".into(), gb: 14.2, items: [
+            ("Comfy-Org/MOSS-Image", "diffusion_models/moss_image_sft_int8_convrot.safetensors", "diffusion_models"),
+            ("Comfy-Org/MOSS-Image", "text_encoders/qwen3.5_9b_w4a8_gptq.safetensors", "text_encoders"),
+            ("Comfy-Org/MOSS-Image", "vae/flux2-vae_small.safetensors", "vae"),
+        ].iter().map(|(r, p, d)| moss(r, p, d, None)).chain([moss("lodestones/MOSS-Image-SFT-8-steps-dmd", "lora.safetensors", "loras", Some("moss-image-sft-8-steps-dmd-lora.safetensors"))]).collect(), vram: 8.5, ram: 0.0, card: "comfyui" },
+        Pack { id: "kromoss", title: "Kromoss", text: "Kromoss for MOSS-Image (ComfyUI): more natural people; pick it in MOSS-Image's settings (needs MOSS-Image)".into(), gb: 6.6, items: vec![
+            moss("lodestones/Kromoss", "diffusion_models/kromoss_int8_convrot.safetensors", "diffusion_models", None),
+            moss("lodestones/Kromoss", "8-steps-dmd2-lora.safetensors", "loras", Some("kromoss-8-steps-dmd2-lora.safetensors")),
+        ], vram: 8.5, ram: 0.0, card: "comfyui" },
         Pack { id: "reshoot", title: "Reshoot", text: "Multiple-Angles, Outfit Swap and Restore LoRAs for Qwen-Image-2.1 (ComfyUI): a new camera angle, try on an outfit, restore a photo (needs Images)".into(), gb: 0.7, items: vec![
             Item::File { url: hf("akhaliq/Qwen-Image-2.1-Multiple-Angles-LoRA", "checkpoints_v2/angles_v2_full_qwen21_multiple_angles_v2_qwen21_multiple_angles_v2_000001500.safetensors"), dest: r"models\comfy\loras\qwen-image-2.1-multiple-angles-v2.safetensors".into(), alts: vec![] },
             comfy("ausboss/Qwen-Image-2.1-Outfit-Swap-Consistency-LoRA", "qwen-image-2.1-outfit-swap.safetensors", "loras"),
