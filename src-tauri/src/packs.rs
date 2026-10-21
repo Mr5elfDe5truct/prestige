@@ -24,7 +24,8 @@ pub enum Item {
     Ollama(String),
     /// A Python environment: `probe` (relative) exists once it's set up; `steps` are uv commands run in the root.
     Env { name: String, probe: String, steps: Vec<Vec<String>> },
-    /// A zip unpacked into `dir`, checked against the SHA-256 at `sha_url`; `probe` is a file inside once it's there.
+    /// A zip unpacked into `dir`, checked against the SHA-256 at `sha_url` (or given in it as "sha256:<hex>", for a
+    /// release without checksum files); `probe` is a file inside once it's there.
     Zip { url: String, sha_url: String, dir: String, probe: String },
     /// A ComfyUI custom node pack cloned from `url` into the custom_nodes folder of the ComfyUI Prestige uses, then
     /// `steps` (uv commands; {venv} is ComfyUI's Python environment, {node} the pack's folder). Done once its folder
@@ -48,6 +49,9 @@ pub struct Pack {
     /// Which plan service's card it runs on ("comfyui", "llama", "ollama", "voice").
     pub card: &'static str,
 }
+
+/// audio.cpp's release with Fish Audio Drama 3.
+const AUDIOCPP: &str = "https://github.com/0xShug0/audio.cpp/releases/download/v0.9.2-drama3-base-small";
 
 fn hf(repo: &str, path: &str) -> String {
     format!("https://huggingface.co/{repo}/resolve/main/{path}")
@@ -221,6 +225,22 @@ pub fn catalog(ollama_gb: f64) -> Vec<Pack> {
         Pack { id: "humanize", title: "Humanizer", text: "humanizer 12B (llama.cpp, Gemma 4): Make it sound human rewrites AI-written text, facts kept".into(), gb: 7.6, items: vec![
             gguf("jialinyyzz/humanizer", crate::humanize::MODEL, crate::humanize::MODEL),
         ], vram: 10.0, ram: 0.0, card: "llama" },
+        // Fish Audio's Drama 3 through audio.cpp's own build (its release has no checksum files, so these are pinned).
+        Pack { id: "drama", title: "Audio drama", text: "Fish Audio Drama 3 (audio.cpp, Q2 experts): /drama writes and voices a multi-speaker play or podcast (Fish Audio Community License)".into(), gb: 17.9, items: vec![
+            Item::Zip {
+                url: format!("{AUDIOCPP}/audio-v0.9.2-drama3-base-small-bin-windows-x64-cuda13.3.zip"),
+                sha_url: "sha256:b570efa4b17c2aa32c431c653489c009b58f57f60d68782b3b94b6c06304a9e8".into(),
+                dir: r"bin\audio.cpp".into(),
+                probe: "audiocpp_cli.exe".into(),
+            },
+            Item::Zip {
+                url: format!("{AUDIOCPP}/audio-v0.9.2-drama3-base-small-cudart-windows-x64-cuda13.3.zip"),
+                sha_url: "sha256:cf58e70c53db680af5e4b8e5ef538ffd1d81bd489ef49843fe486fcd079c9182".into(),
+                dir: r"bin\audio.cpp".into(),
+                probe: "cudart64_13.dll".into(),
+            },
+            Item::File { url: hf("Jmica/Drama-3-GGUF", crate::drama::MODEL), dest: format!(r"models\tts\{}\{}", crate::drama::DIR, crate::drama::MODEL), alts: vec![] },
+        ], vram: 11.4, ram: 11.0, card: "comfyui" },
         Pack { id: "hy-memory", title: "Hy-Memory", text: "Hy-Memory-30B-A3B (llama.cpp, experts in RAM): a model made to write memory, deciding after a chat what Prestige remembers".into(), gb: 18.2, items: vec![Item::File {
             url: hf("tencent/Hy-Memory-30B-A3B-GGUF", crate::memwriter::MODEL),
             dest: format!(r"models\gguf\{}\{}", crate::memwriter::DIR, crate::memwriter::MODEL),
@@ -306,6 +326,9 @@ fn found(root: &Path, dest: &str, alts: &[String]) -> Option<PathBuf> {
 }
 
 fn zip_probe(root: &Path, dir: &str, probe: &str) -> bool {
+    if root.join(dir).join(probe).exists() {
+        return true;
+    }
     // NeMo-Speech unpacks into a versioned folder: bin\nemo-speech\<version>\bin\nemo-speech.exe.
     fs::read_dir(root.join(dir)).map(|rd| rd.flatten().any(|e| e.path().join("bin").join(probe).exists() || e.path().join(probe).exists())).unwrap_or(false)
 }
@@ -647,7 +670,10 @@ fn get_item(app: &AppHandle, root: &Path, id: &str, n: usize, steps: usize, item
         Item::Zip { url, sha_url, dir, .. } => {
             let tmp = std::env::temp_dir().join(url.rsplit('/').next().unwrap_or("download.zip"));
             fetch_resume(url, &tmp, cancel, progress)?;
-            let want = ureq::get(sha_url).call().map_err(|e| e.to_string())?.into_string().map_err(|e| e.to_string())?;
+            let want = match sha_url.strip_prefix("sha256:") {
+                Some(hex) => hex.to_string(),
+                None => ureq::get(sha_url).call().map_err(|e| e.to_string())?.into_string().map_err(|e| e.to_string())?,
+            };
             let want = want.split_whitespace().next().unwrap_or("").to_lowercase();
             if sha256_hex(&tmp)? != want {
                 let _ = fs::remove_file(&tmp);
