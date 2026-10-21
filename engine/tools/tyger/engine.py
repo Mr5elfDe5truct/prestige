@@ -49,19 +49,37 @@ class EarsEngine:
         threading.Thread(target=self._asr_loop, name="ears-asr", daemon=True).start()
 
     # ---- the ASR thread ----
+    def close(self):
+        """Prestige: ends the ASR thread and gives the GPU memory back. The weights move to the CPU and the decoder's
+        buffers are dropped: a worker thread's traceback (the layer-15 hook stops encodes by raising) can keep the
+        Python objects alive after this, but not the memory."""
+        self.asr_q.put(None)
+        self.asr.model.to("cpu")
+        self.head.model.to("cpu")
+        self.head.h = None
+        for k, v in list(vars(self.asr.rnnt).items()):
+            if torch.is_tensor(v) and v.is_cuda:
+                setattr(self.asr.rnnt, k, None)
+
     def _asr_loop(self):
         while True:
             jobs = [self.asr_q.get()]
+            if jobs[0] is None:
+                return
             while True:
                 try:
                     jobs.append(self.asr_q.get_nowait())
                 except queue.Empty:
                     break
+            stop = None in jobs
+            jobs = [j for j in jobs if j is not None]
             t0 = time.perf_counter()
             # enqueue order: a turn's segments are done before its final; finals first, an endpoint waits on them
             self._finish_finals([j for j in jobs if j.kind in ("final", "segment")])
             self._finish_partials([j for j in jobs if j.kind == "partial"])
             self.t_asr += time.perf_counter() - t0
+            if stop:
+                return
 
     def _transcribe_or_none(self, jobs, what):
         """Their texts, or None if transcription failed (logged by kind only)."""

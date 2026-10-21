@@ -93,6 +93,8 @@ const BARGE_HOLD_MS = 1200;
 const PATIENT_MS = 1200;
 // The voice card needs this much free memory for TYGER (~4.3 GB measured) beside the call's other models.
 const TURNS_GB = 5.0;
+/** Short words that do mean "stop" when said over Prestige. */
+const STOP_WORDS = /\b(stop|wait|no|nope|hold|hang|hey|sorry|excuse|pause|shush|quiet|enough|actually|but)\b/i;
 
 let deps: Deps;
 let state: State = "off";
@@ -152,7 +154,11 @@ export function initLive(d: Deps) {
     speaker.voice = v;
     if (state === "off" || state === "starting" || state === "error") return;
     if (!isVox(v)) {
-      if (wasVox) unloadVox(); // Kokoro runs on the CPU; VoxCPM2's memory goes back
+      if (wasVox) {
+        // Kokoro runs on the CPU; VoxCPM2's memory goes back, which may make room for TYGER.
+        await unloadVox();
+        if (!turns) startTurns();
+      }
       return;
     }
     const prev = state;
@@ -591,7 +597,7 @@ function onBlock(b: Float32Array) {
       else setState("listening");
       return;
     }
-    if (ducked) decideBarge(blocks, rate, lastVoiced);
+    if (ducked) decideBarge(blocks, rate, lastVoiced, voicedMs);
     else finishUtterance(blocks, rate, lastVoiced);
   }
 }
@@ -612,8 +618,10 @@ function resume() {
 }
 
 /** A short burst over Prestige's voice ended: a backchannel ("mm-hm", "yeah") or its own echo lets it carry on;
- *  anything else is an interruption and the next turn. */
-async function decideBarge(blocks: Float32Array[], rate: number, endedAt: number) {
+ *  anything else is an interruption and the next turn. A lone short word that isn't a stop word counts as a
+ *  backchannel too (Whisper heard a synthetic "mm-hm" as "Mom"). With TYGER, which would already have stopped Prestige
+ *  for a real barge-in, it takes three words or more (or a stop word). */
+async function decideBarge(blocks: Float32Array[], rate: number, endedAt: number, voiced: number) {
   let text = "";
   try {
     text = await stt(toWav(blocks, rate));
@@ -622,7 +630,9 @@ async function decideBarge(blocks: Float32Array[], rate: number, endedAt: number
   }
   if (!ducked) return; // decided meanwhile (TYGER, or they kept talking)
   const t = text.trim();
-  if (!t || BACKCHANNEL.test(t) || isEcho(t, replyText)) {
+  const words = t.match(/[a-z0-9']+/gi) ?? [];
+  const passing = !STOP_WORDS.test(t) && (turns?.ready ? words.length < 3 : words.length === 1 && voiced < 700);
+  if (!t || BACKCHANNEL.test(t) || passing || isEcho(t, replyText)) {
     if (t) console.info("[live] carried on through:", t);
     return resume();
   }

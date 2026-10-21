@@ -480,6 +480,7 @@ async def turns_ws(ws: WebSocket):
 def _unload_turns():
     with turns["lock"]:
         if turns["engine"] is not None and not turns["calls"]:
+            turns["engine"].close()  # its ASR thread holds it otherwise
             turns["engine"] = None
             import gc
 
