@@ -2519,11 +2519,11 @@ async function tryOnOutfit(a: Asset) {
 async function restorePhoto(a: Asset) {
   closeLightbox();
   const dlg = $("#restore") as HTMLDialogElement;
-  const kind = $("#rs-kind") as HTMLSelectElement;
-  const fast = $("#rs-fast") as HTMLInputElement;
-  ($("#rs-pic") as HTMLImageElement).src = convertFileSrc(a.path);
+  const kind = $("#rp-kind") as HTMLSelectElement;
+  const fast = $("#rp-fast") as HTMLInputElement;
+  ($("#rp-pic") as HTMLImageElement).src = convertFileSrc(a.path);
   fast.checked = settings().image.edits !== "quality";
-  const est = () => ($("#rs-est").textContent = `Comes out at about 2 megapixels. Takes ${aboutTime(plan("restore", a).secs)}.`);
+  const est = () => ($("#rp-est").textContent = `Comes out at about 2 megapixels. Takes ${aboutTime(plan("restore", a).secs)}.`);
   fast.onchange = () => {
     update("image", { edits: fast.checked ? "fast" : "quality" });
     est();
