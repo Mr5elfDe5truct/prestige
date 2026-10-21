@@ -2,6 +2,7 @@
 // Open WebUI copy (when it's connected) brought up to date on request.
 import { errMsg } from "./backends";
 import { addFact, editFact, listFacts, removeFact, syncFromOwui, type MemoryConfig } from "./memory";
+import { hyMemoryInstalled, memoryWriter, setMemoryWriter, type MemoryWriter } from "./memwriter";
 
 interface Deps {
   owui: () => MemoryConfig | null;
@@ -33,7 +34,7 @@ async function render() {
     text.title = f.type === "user" ? "Given to every reply" : "Given when it's relevant to the conversation";
     const tag = document.createElement("small");
     tag.className = "muted";
-    tag.textContent = [f.type === "user" ? "always" : "when relevant", f.owui ? "also in Open WebUI" : ""].filter(Boolean).join(" · ");
+    tag.textContent = [f.type === "user" ? "always" : "when relevant", f.type === "learned" ? "learned from a chat" : "", f.owui ? "also in Open WebUI" : ""].filter(Boolean).join(" · ");
     const acts = document.createElement("span");
     acts.className = "mem-acts";
     const edit = document.createElement("button");
@@ -73,8 +74,22 @@ async function render() {
   $("#mem-owui").hidden = !cfg;
 }
 
+/** The writer picker: Hy-Memory only once its pack is in. */
+function renderWriter() {
+  const sel = $("#mem-writer") as HTMLSelectElement;
+  const hy = sel.querySelector("option[value=hymemory]") as HTMLOptionElement;
+  hy.disabled = !hyMemoryInstalled();
+  hy.textContent = hyMemoryInstalled() ? "With Hy-Memory, after a chat goes quiet" : "With Hy-Memory (add the Hy-Memory pack in Packs)";
+  sel.value = memoryWriter();
+  $("#mem-writer-note").textContent =
+    sel.value === "off"
+      ? ""
+      : `${sel.value === "hymemory" ? "Hy-Memory (Tencent, made for writing memory) loads in place of a llama.cpp chat model for a minute or so." : "The model you're chatting with does it."} It reads what you said, then adds, updates or removes facts here; a new message stops it.`;
+}
+
 export function openMemoryPanel() {
   const dlg = $<HTMLDialogElement>("#memory");
+  renderWriter();
   ($("#mem-filter") as HTMLInputElement).value = "";
   render();
   if (!dlg.open) dlg.showModal();
@@ -98,6 +113,10 @@ export function initMemoryPanel(d: Deps) {
     if (e.key === "Enter") (e.preventDefault(), save());
   });
   $("#mem-filter").addEventListener("input", () => render());
+  $("#mem-writer").addEventListener("change", (e) => {
+    setMemoryWriter((e.target as HTMLSelectElement).value as MemoryWriter);
+    renderWriter();
+  });
   $("#mem-owui").addEventListener("click", async () => {
     const cfg = deps.owui();
     if (!cfg) return;

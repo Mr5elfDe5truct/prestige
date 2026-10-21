@@ -1299,3 +1299,9 @@ body:is(.ws-resizing-v, .ws-resizing-h, .ws-dragging) :is(iframe, video) { point
 .lo-form b { grid-column: 1 / -1; }
 .lo-form select, .lo-form input { width: 100%; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font: 13px var(--body); padding: 8px 10px; }
 @media (max-width: 560px) { .lo-form { grid-template-columns: 1fr; } }
+
+/* Memory: who learns from chats (memwriter.ts) */
+.mem-writer { margin: 10px 0 12px; }
+.mem-writer label { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.mem-writer select { flex: 1; min-width: 220px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font: 13px var(--body); padding: 8px 10px; }
+.mem-writer small { display: block; margin-top: 6px; }

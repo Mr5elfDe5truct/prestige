@@ -23,6 +23,7 @@ mod services;
 mod setup;
 mod sprites;
 mod studio;
+mod memwriter;
 mod translate;
 mod train;
 mod workstation;
@@ -608,6 +609,8 @@ pub fn run() {
             ocr::ocr_read,
             humanize::humanize_status,
             humanize::humanize,
+            memwriter::hymemory_status,
+            memwriter::hymemory_ready,
             translate::translate_status,
             translate::translate_text,
             translate::translate_image,

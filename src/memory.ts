@@ -17,7 +17,7 @@ const OLLAMA = "http://127.0.0.1:11434";
 export interface Fact {
   id: string;
   content: string;
-  type: string; // "user": always given to the model; anything else only when relevant
+  type: string; // "user": always given to the model; anything else ("learned": by the memory writer) only when relevant
   path?: string | null;
   created: number;
   owui?: string; // its id in Open WebUI
@@ -135,13 +135,33 @@ export async function memoryContext(recentUserText: string): Promise<{ text: str
   return { text, count: lines.length, total: s.facts.length };
 }
 
+/** The stored facts most like these texts (by meaning when the embedding model is there, else the newest), at most
+ *  `k`, for the memory writer to compare new facts with. */
+export async function relatedFacts(texts: string[], k = 20): Promise<{ id: string; content: string }[]> {
+  const s = await load();
+  if (s.facts.length <= k || !texts.length) return s.facts.map(({ id, content }) => ({ id, content }));
+  const m = await fillVectors(s);
+  const q = m ? await embed(texts) : null;
+  // Facts that always go to the model have no vector of their own here: they're made one for the comparison.
+  const missing = s.facts.filter((f) => !f.vec || f.vecModel !== q?.model);
+  const extra = q && missing.length ? await embed(missing.map(label)) : null;
+  const vecOf = new Map<Fact, number[]>(missing.map((f, i) => [f, extra?.vecs[i] ?? []]));
+  if (!q) return [...s.facts].sort((a, b) => b.created - a.created).slice(0, k).map(({ id, content }) => ({ id, content }));
+  return s.facts
+    .map((f) => ({ f, score: Math.max(...q.vecs.map((v) => cosine(v, f.vec && f.vecModel === q.model ? f.vec : (vecOf.get(f) ?? [])))) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, k)
+    .map(({ f }) => ({ id: f.id, content: f.content }));
+}
+
 // ---------- changes ----------
-/** Saves a fact (unless it's already there); also gives it to Open WebUI when connected. */
-export async function addFact(content: string, owui: MemoryConfig | null): Promise<Fact> {
+/** Saves a fact (unless it's already there); also gives it to Open WebUI when connected. `type` "user" goes into
+ *  every reply; the memory writer's facts are "learned", given when relevant. */
+export async function addFact(content: string, owui: MemoryConfig | null, type = "user"): Promise<Fact> {
   const s = await load();
   const have = s.facts.find((f) => norm(f.content) === norm(content));
   if (have) return have;
-  const f: Fact = { id: newId(), content: content.trim(), type: "user", created: Date.now() };
+  const f: Fact = { id: newId(), content: content.trim(), type, created: Date.now() };
   s.facts.push(f);
   await save();
   // Waits a moment for Open WebUI (it's local and quick) so the Memory sheet shows the fact as shared straight away.

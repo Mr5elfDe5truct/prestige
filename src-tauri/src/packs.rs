@@ -221,6 +221,11 @@ pub fn catalog(ollama_gb: f64) -> Vec<Pack> {
         Pack { id: "humanize", title: "Humanizer", text: "humanizer 12B (llama.cpp, Gemma 4): Make it sound human rewrites AI-written text, facts kept".into(), gb: 7.6, items: vec![
             gguf("jialinyyzz/humanizer", crate::humanize::MODEL, crate::humanize::MODEL),
         ], vram: 10.0, ram: 0.0, card: "llama" },
+        Pack { id: "hy-memory", title: "Hy-Memory", text: "Hy-Memory-30B-A3B (llama.cpp, experts in RAM): a model made to write memory, deciding after a chat what Prestige remembers".into(), gb: 18.2, items: vec![Item::File {
+            url: hf("tencent/Hy-Memory-30B-A3B-GGUF", crate::memwriter::MODEL),
+            dest: format!(r"models\gguf\{}\{}", crate::memwriter::DIR, crate::memwriter::MODEL),
+            alts: vec![],
+        }], vram: 10.0, ram: 12.0, card: "llama" },
         Pack { id: "translate", title: "Translate", text: "Index-Translate 35B-A3B (llama.cpp, experts in RAM): text and pictures between 150 languages".into(), gb: 22.3, items: [crate::translate::MODEL, crate::translate::MMPROJ].iter().map(|f| Item::File {
             url: hf("IndexTeam/Index-Translate-35B-A3B-preview-GGUF", f),
             dest: format!(r"models\gguf\{}\{f}", crate::translate::DIR),
