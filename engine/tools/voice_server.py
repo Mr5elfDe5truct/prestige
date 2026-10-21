@@ -12,6 +12,7 @@ OpenAI-compatible, so Open WebUI and Prestige use it like any speech API:
   POST /v1/audio/design           {"description", "text", "takes"}: 1-3 takes of a voice made from words (base64 WAVs)
   POST /v1/audio/unload           frees the GPU (both models); Prestige calls it before a chat reply
   POST /v1/audio/load             {"models": ["stt", "tts"], "voice"}: loads them now and keeps them warm (Live mode)
+  WS   /v1/turns                  a Live call's turn-taking with TYGER: when the user has finished, or cuts in
 
 Both models load on first use and unload after a few idle minutes. Whisper runs on the GPU (~1 GB, 0.1-0.3 s a
 sentence; ~25 s on the CPU) and falls back to the CPU base model when the GPU is full. VoxCPM2 needs ~6 GB of GPU
@@ -37,7 +38,7 @@ import numpy as np
 import soundfile as sf
 import torch
 import uvicorn
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 
@@ -409,6 +410,85 @@ def load(body: dict | None = None):
             "free_vram_gb": round(_free_vram() / 1e9, 1)}
 
 
+# ---------- turn-taking (TYGER) ----------
+# TYGER (NineNineSix; the turns pack, models\speech\tyger) hears both sides of a Live call: the user's mic and what
+# Prestige is playing, 16 kHz, a 320 ms hop at a time, and says when the user has finished (ENDPOINT) and when they
+# cut in while Prestige talks (BARGE). Its runtime is tools\tyger (tyger-s2s's, unchanged). It runs outside gpu_lock:
+# a hop takes ~55 ms on an RTX 3060 and must not wait for a sentence of VoxCPM2. One call at a time; ~2.6 GB of VRAM,
+# loaded when a call opens /v1/turns and unloaded after TURNS_IDLE seconds without one.
+TYGER_DIR = ROOT / "models" / "speech" / "tyger"
+TURNS_IDLE = int(os.getenv("VOICE_TURNS_IDLE", "120"))
+# Barge-in at the threshold TYGER was evaluated at (its default 0.5 also fires on "mm-hm"); endpoint at its default.
+BARGE_THR = 0.93
+turns = {"engine": None, "lock": threading.Lock(), "used": 0.0, "calls": 0}
+
+
+def _tyger():
+    with turns["lock"]:
+        if turns["engine"] is None:
+            import sys
+
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from tyger.engine import EarsEngine
+
+            turns["engine"] = EarsEngine(str(TYGER_DIR), slots=1, device="cuda", cuda_graph=False)
+        turns["used"] = time.time()
+        return turns["engine"]
+
+
+@app.websocket("/v1/turns")
+async def turns_ws(ws: WebSocket):
+    """A Live call's turn-taking. Each binary message is one hop: a mode byte (0 listening, 1 Prestige speaking), then
+    5120 int16 samples of the mic and 5120 of Prestige's voice, 16 kHz. Each answer is {"ev": [events]}: BARGE
+    {yield_prob, onset_s} while speaking, ENDPOINT {p_end} and BACKCHANNEL {bc_prob} while listening."""
+    await ws.accept()
+    if not (TYGER_DIR / "model.safetensors").exists():
+        await ws.send_json({"error": "the Turn-taking pack isn't installed"})
+        await ws.close()
+        return
+    if turns["calls"]:
+        await ws.send_json({"error": "another call is using turn-taking"})
+        await ws.close()
+        return
+    turns["calls"] += 1
+    try:
+        engine = await asyncio.to_thread(_tyger)
+        from tyger.constants import HOP_N
+        from tyger.session import EarsSession
+
+        # No partial transcripts: Whisper transcribes the turn, and they cost GPU memory and time.
+        sess = EarsSession(0, barge_thr=BARGE_THR, partial_refresh_s=1e9)
+        await ws.send_json({"ready": True})
+        while True:
+            msg = await ws.receive_bytes()
+            if len(msg) != 1 + 4 * HOP_N:
+                continue
+            mode = "speaking" if msg[0] == 1 else "listen"
+            pcm = np.frombuffer(msg, dtype=np.int16, offset=1).astype(np.float32) / 32768
+            res = await asyncio.to_thread(engine.process, [(sess, pcm[:HOP_N], pcm[HOP_N:], mode)])
+            turns["used"] = time.time()
+            events, _ = res[sess]
+            out = [{k: v for k, v in e.items() if k in ("kind", "yield_prob", "onset_s", "p_end", "bc_prob")}
+                   for e in events if e.get("kind") in ("BARGE", "ENDPOINT", "BACKCHANNEL")]
+            await ws.send_json({"ev": out})
+    except WebSocketDisconnect:
+        pass
+    finally:
+        turns["calls"] -= 1
+
+
+def _unload_turns():
+    with turns["lock"]:
+        if turns["engine"] is not None and not turns["calls"]:
+            turns["engine"].close()  # its ASR thread holds it otherwise
+            turns["engine"] = None
+            import gc
+
+            gc.collect()
+            torch.cuda.empty_cache()
+            print("unloaded TYGER", flush=True)
+
+
 @app.get("/v1/audio/voices")
 def voices():
     return {"voices": _voice_list(), "designed": DESIGNED}
@@ -492,12 +572,15 @@ def unload(body: dict | None = None):
             _unload("tts")
         if which in ("all", "stt", "whisper"):
             _unload("whisper")
+    if which in ("all", "turns", "tyger"):
+        _unload_turns()
     return {"ok": True}
 
 
 @app.get("/health")
 def health():
     return {"status": "ok", "whisper": state["whisper_device"], "voxcpm2": state["tts"] is not None,
+            "turns": (TYGER_DIR / "model.safetensors").exists(), "turns_loaded": turns["engine"] is not None,
             "free_vram_gb": round(_free_vram() / 1e9, 1),
             "torch_reserved_gb": round(torch.cuda.memory_reserved() / 1e9, 2) if torch.cuda.is_available() else 0}
 
@@ -518,6 +601,8 @@ def _janitor():
                     print(f"unloaded {which} after {idle} s idle", flush=True)
                 finally:
                     gpu_lock.release()
+        if turns["engine"] is not None and not turns["calls"] and now - turns["used"] > TURNS_IDLE:
+            _unload_turns()
 
 
 if __name__ == "__main__":

@@ -1,7 +1,9 @@
 // Live mode: a hands-free call with Prestige, like a video call. The mic is always open; a voice-activity detector
 // cuts each utterance (with a short pre-roll so the first syllable isn't lost), Whisper turbo transcribes it, the
 // Live model answers (with the current webcam frame when the camera is on) and the reply is spoken sentence by
-// sentence as it streams. Talking over Prestige stops its speech and its reply at once and it listens again.
+// sentence as it streams. Talking over Prestige lowers its voice at once; a real interruption (TYGER says so, or the
+// user keeps talking) stops its speech and its reply and it listens again, and a "mm-hm" or "yeah" lets it carry on.
+// With TYGER (turns.ts) it also waits through the user's pauses until they've finished.
 // Every turn lands in the normal chat history. Everything runs on this PC.
 // Its own file, not an inlined data: URL, which the app's content security policy would block.
 import workletUrl from "./mic-worklet.js?url&no-inline";
@@ -10,6 +12,7 @@ import { errMsg, freeLlamaVram, http, OLLAMA, type ModelInfo } from "./backends"
 import { freeGB, readGpus, sharesCard } from "./gpus";
 import { audio, isVox, listVoices, outputLevel, transcribe, DEFAULT_VOICE, PHONON_SERVER, VOICE_SERVER } from "./speech";
 import { LiveSpeaker } from "./livespeech";
+import { BACKCHANNEL, Turns } from "./turns";
 import { addStache } from "./talk";
 import { themeRgb } from "./theme";
 import { snapshot } from "./camera";
@@ -83,6 +86,15 @@ const START = { need: 4, of: 6 };
 const BARGE = { need: 9, of: 14 };
 const MIN_SPEECH_MS = 260; // shorter bursts (a cough, a click) are ignored
 const MAX_UTTERANCE_MS = 30_000;
+// Talking over Prestige: its voice drops to a fifth while it's decided whether that was an interruption. This much
+// voice is one (a backchannel is a word or two); shorter ones are decided by their words once they end.
+const BARGE_HOLD_MS = 1200;
+// With TYGER, a pause ends the turn when it says the user has finished, or after this long whatever it says.
+const PATIENT_MS = 1200;
+// The voice card needs this much free memory for TYGER (~4.3 GB measured) beside the call's other models.
+const TURNS_GB = 5.0;
+/** Short words that do mean "stop" when said over Prestige. */
+const STOP_WORDS = /\b(stop|wait|no|nope|hold|hang|hey|sorry|excuse|pause|shush|quiet|enough|actually|but)\b/i;
 
 let deps: Deps;
 let state: State = "off";
@@ -115,6 +127,12 @@ let interruptedSilent = false; // the reply was stopped before it said anything:
 let carry = "";
 let replying = false; // a reply for this call is streaming
 let spoken = ""; // the reply that was playing when the user cut in
+// Turn-taking: TYGER when it's installed and fits, its tap on Prestige's voice, a pending maybe-interruption, and when
+// TYGER last said the user had finished.
+let turns: Turns | null = null;
+let tap: AudioWorkletNode | null = null;
+let ducked = false;
+let tygerEnd = 0;
 
 export function initLive(d: Deps) {
   deps = d;
@@ -136,7 +154,11 @@ export function initLive(d: Deps) {
     speaker.voice = v;
     if (state === "off" || state === "starting" || state === "error") return;
     if (!isVox(v)) {
-      if (wasVox) unloadVox(); // Kokoro runs on the CPU; VoxCPM2's memory goes back
+      if (wasVox) {
+        // Kokoro runs on the CPU; VoxCPM2's memory goes back, which may make room for TYGER.
+        await unloadVox();
+        if (!turns) startTurns();
+      }
       return;
     }
     const prev = state;
@@ -247,6 +269,50 @@ export async function startLive() {
   clearInterval(warmTimer);
   warmTimer = window.setInterval(() => warmVoice().catch(() => {}), 60_000);
   setState("listening");
+  startTurns();
+}
+
+/** TYGER, when the turns pack is in and the voice card has room for it: loaded in the background (the call works
+ *  without it meanwhile), then fed both sides of the call. */
+async function startTurns() {
+  let h: any = null;
+  try {
+    h = await (await http(`${VOICE_SERVER}/health`)).json();
+  } catch {
+    return;
+  }
+  if (!h?.turns) return;
+  if (!h.turns_loaded && Number(h.free_vram_gb) < TURNS_GB) {
+    console.info(`[live] TYGER turn-taking left out: ${h.free_vram_gb} GB free on the voice card, it needs ${TURNS_GB}`);
+    return;
+  }
+  const t = new Turns(audio().sampleRate, {
+    onBarge: () => {
+      if (aiTurn() && (ducked || speaker.busy)) bargeIn();
+    },
+    onEndpoint: () => (tygerEnd = performance.now()),
+  });
+  if (!(await t.open()) || state === "off") return t.close();
+  turns = t;
+  const ctx = audio();
+  tap = new AudioWorkletNode(ctx, "mic-tap");
+  tap.port.onmessage = (e) => turns?.playback(e.data as Float32Array);
+  const sink = ctx.createGain();
+  sink.gain.value = 0;
+  speaker.out().connect(tap);
+  tap.connect(sink).connect(ctx.destination);
+  $("#live-model").textContent = `${model?.name ?? ""} · TYGER`;
+  $("#live-model").title = "TYGER turn-taking: it knows when you've finished, and when you're cutting in rather than saying \"mm-hm\"";
+}
+
+function stopTurns() {
+  turns?.close();
+  turns = null;
+  tap?.port.close();
+  tap?.disconnect();
+  tap = null;
+  ducked = false;
+  tygerEnd = 0;
 }
 
 /** Makes room on the GPU, then loads Whisper, the voice and the Live model that fits beside them, so the first
@@ -358,6 +424,7 @@ export function end() {
   clearInterval(warmTimer);
   cancelAnimationFrame(raf);
   closeMic();
+  stopTurns();
   setCamera(false, false);
   utter = null;
   turn = null;
@@ -478,6 +545,7 @@ function onBlock(b: Float32Array) {
   const rms = Math.sqrt(s / b.length);
   micLvl = muted ? 0 : rms;
   if (muted) return;
+  turns?.mic(b, speaker.busy);
   const now = performance.now();
 
   if (!utter) {
@@ -494,7 +562,11 @@ function onBlock(b: Float32Array) {
     while (recent.length > rule.of) recent.shift();
     if (recent.filter(Boolean).length >= rule.need) {
       recent = [];
-      if (aiTurn()) interrupt();
+      // Over its voice: quieter until it's clear whether that was an interruption. While it's still thinking, stop.
+      if (aiTurn() && speaker.busy) {
+        ducked = true;
+        speaker.duck(true);
+      } else if (aiTurn()) interrupt();
       utter = ring.slice(-Math.ceil(((echo ? BARGE_PREROLL_SEC : PREROLL_SEC) * 1000) / blockMs));
       ring = [];
       utterStart = now - utter.length * blockMs;
@@ -511,15 +583,62 @@ function onBlock(b: Float32Array) {
     lastVoiced = now;
     voicedMs += blockMs;
   }
-  if (now - lastVoiced > HANGOVER_MS || now - utterStart > MAX_UTTERANCE_MS) {
+  // Still talking over it after a word or two: that's an interruption.
+  if (ducked && voicedMs > BARGE_HOLD_MS) bargeIn();
+  // A pause ends the turn; with TYGER, only once it says they've finished (or the pause runs long), so a thinking
+  // pause doesn't hand Prestige the turn.
+  const quiet = now - lastVoiced;
+  const finished = turns?.ready && !ducked ? (quiet > HANGOVER_MS && tygerEnd > lastVoiced - 400) || quiet > PATIENT_MS : quiet > HANGOVER_MS;
+  if (finished || now - utterStart > MAX_UTTERANCE_MS) {
     const blocks = utter;
     utter = null;
     if (voicedMs < MIN_SPEECH_MS) {
-      setState("listening");
+      if (ducked) resume();
+      else setState("listening");
       return;
     }
-    finishUtterance(blocks, rate, lastVoiced);
+    if (ducked) decideBarge(blocks, rate, lastVoiced, voicedMs);
+    else finishUtterance(blocks, rate, lastVoiced);
   }
+}
+
+/** A real interruption: Prestige stops, and what they're saying is the next turn. */
+function bargeIn() {
+  if (!ducked && !speaker.busy) return;
+  ducked = false;
+  interrupt();
+  setState("hearing");
+}
+
+/** It wasn't an interruption: Prestige's voice comes back up and it carries on. */
+function resume() {
+  ducked = false;
+  speaker.duck(false);
+  setState(speaker.busy ? "speaking" : replying ? "thinking" : "listening");
+}
+
+/** A short burst over Prestige's voice ended: a backchannel ("mm-hm", "yeah") or its own echo lets it carry on;
+ *  anything else is an interruption and the next turn. A lone short word that isn't a stop word counts as a
+ *  backchannel too (Whisper heard a synthetic "mm-hm" as "Mom"). With TYGER, which would already have stopped Prestige
+ *  for a real barge-in, it takes three words or more (or a stop word). */
+async function decideBarge(blocks: Float32Array[], rate: number, endedAt: number, voiced: number) {
+  let text = "";
+  try {
+    text = await stt(toWav(blocks, rate));
+  } catch {
+    /* no words: treated as a backchannel */
+  }
+  if (!ducked) return; // decided meanwhile (TYGER, or they kept talking)
+  const t = text.trim();
+  const words = t.match(/[a-z0-9']+/gi) ?? [];
+  const passing = !STOP_WORDS.test(t) && (turns?.ready ? words.length < 3 : words.length === 1 && voiced < 700);
+  if (!t || BACKCHANNEL.test(t) || passing || isEcho(t, replyText)) {
+    if (t) console.info("[live] carried on through:", t);
+    return resume();
+  }
+  ducked = false;
+  interrupt();
+  finishUtterance(blocks, rate, endedAt, t);
 }
 
 /** The user started talking over Prestige: silence it and drop the reply. */
@@ -536,14 +655,14 @@ function interrupt() {
   turn = null;
 }
 
-async function finishUtterance(blocks: Float32Array[], rate: number, endedAt: number) {
+async function finishUtterance(blocks: Float32Array[], rate: number, endedAt: number, heard?: string) {
   const thisTurn: NonNullable<typeof turn> = { end: endedAt };
   turn = thisTurn;
   setState("transcribing");
   const frame = camOn ? snapshot($("#live-self") as HTMLVideoElement, 640) : null;
-  let text = "";
+  let text = heard ?? "";
   try {
-    text = await stt(toWav(blocks, rate));
+    if (heard === undefined) text = await stt(toWav(blocks, rate));
   } catch (e) {
     deps.toast(`Speech-to-text failed: ${errMsg(e)}`, "warn");
   }

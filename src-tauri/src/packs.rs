@@ -241,6 +241,12 @@ pub fn catalog(ollama_gb: f64) -> Vec<Pack> {
             },
             Item::File { url: hf("Jmica/Drama-3-GGUF", crate::drama::MODEL), dest: format!(r"models\tts\{}\{}", crate::drama::DIR, crate::drama::MODEL), alts: vec![] },
         ], vram: 11.4, ram: 11.0, card: "comfyui" },
+        // TYGER (NineNineSix, OpenMDW-1.1): the voice server's turn-taking for Live calls (tools\tyger, /v1/turns).
+        Pack { id: "turns", title: "Turn-taking", text: "TYGER (Nemotron 3.5 streaming ASR + a turn-taking GRU): Live calls know when you've finished and when you're cutting in, not just saying \"mm-hm\" (needs Voice; English)".into(), gb: 2.6, items: ["config.json", "model.safetensors", "nemotron/config.json", "nemotron/generation_config.json", "nemotron/processor_config.json", "nemotron/tokenizer.json", "nemotron/tokenizer_config.json"].iter().map(|f| Item::File {
+            url: hf("nineninesix/tyger", f),
+            dest: format!(r"models\speech\tyger\{}", f.replace('/', r"\")),
+            alts: vec![],
+        }).collect(), vram: 4.3, ram: 0.0, card: "voice" },
         Pack { id: "hy-memory", title: "Hy-Memory", text: "Hy-Memory-30B-A3B (llama.cpp, experts in RAM): a model made to write memory, deciding after a chat what Prestige remembers".into(), gb: 18.2, items: vec![Item::File {
             url: hf("tencent/Hy-Memory-30B-A3B-GGUF", crate::memwriter::MODEL),
             dest: format!(r"models\gguf\{}\{}", crate::memwriter::DIR, crate::memwriter::MODEL),

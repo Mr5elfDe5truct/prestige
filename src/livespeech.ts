@@ -39,6 +39,22 @@ export class LiveSpeaker {
     return this.running || this.sentences.length > 0 || this.playEnd > audio().currentTime + 0.02;
   }
 
+  private bus: GainNode | null = null;
+
+  /** Where the speech goes: a gain (for duck()) into the speakers' analyser. Turn-taking taps it to hear Prestige. */
+  out(): GainNode {
+    if (!this.bus) {
+      this.bus = audio().createGain();
+      this.bus.connect(outputNode());
+    }
+    return this.bus;
+  }
+
+  /** Lowers the voice while the user might be cutting in (back up when they weren't), quickly but without a click. */
+  duck(on: boolean) {
+    this.out().gain.setTargetAtTime(on ? 0.2 : 1, audio().currentTime, 0.04);
+  }
+
   /** Starts a new reply (after stop() or the last one finished). */
   begin() {
     this.pending = "";
@@ -75,6 +91,7 @@ export class LiveSpeaker {
     this.sources.clear();
     this.playEnd = 0;
     this.running = false;
+    this.duck(false);
   }
 
   private flush(all: boolean) {
@@ -188,7 +205,7 @@ export class LiveSpeaker {
       buf.copyToChannel(pcm, 0);
       const src = ctx.createBufferSource();
       src.buffer = buf;
-      src.connect(outputNode());
+      src.connect(this.out());
       const at = Math.max(this.playEnd, ctx.currentTime + 0.03);
       // Ran dry mid-sentence: a gap the listener hears (counted for tuning; see the cushion above).
       if (inSentence && at - this.playEnd > 0.02) {
