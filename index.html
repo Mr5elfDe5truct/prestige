@@ -1082,6 +1082,25 @@
       </form>
     </dialog>
 
+    <dialog class="sheet drama" id="drama">
+      <form method="dialog">
+        <h2>Audio drama <span class="credit" id="dr-title"></span></h2>
+        <p class="muted">A voice for each character: one you've saved or cloned in Voice, or Drama 3's own.</p>
+        <div class="dr-cast" id="dr-cast"></div>
+        <label class="field">The script (one "Name: words" line each; cues like [laughs], [sighs], [whispering] are acted)
+          <textarea id="dr-script" rows="10" spellcheck="true"></textarea>
+        </label>
+        <label class="check"><input type="checkbox" id="dr-music" /> A music bed underneath (ACE-Step):</label>
+        <input id="dr-style" type="text" autocomplete="off" placeholder="e.g. soft eerie ambient piano" />
+        <p class="muted" id="dr-est"></p>
+        <p class="credit">Built with Fish Audio: Drama 3 is under the Fish Audio Community License (free below US$500k a year of revenue). Only clone a real person's voice with their consent, and don't remove or hide anything that marks the audio as generated.</p>
+        <div class="acts">
+          <button class="btn" value="cancel">Cancel</button>
+          <button class="btn primary" value="go">Make it</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog class="sheet" id="ask">
       <form method="dialog">
         <h2 id="ask-title"></h2>

@@ -1305,3 +1305,12 @@ body:is(.ws-resizing-v, .ws-resizing-h, .ws-dragging) :is(iframe, video) { point
 .mem-writer label { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .mem-writer select { flex: 1; min-width: 220px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font: 13px var(--body); padding: 8px 10px; }
 .mem-writer small { display: block; margin-top: 6px; }
+
+/* Audio drama's cast card (main.ts castDrama) */
+.sheet.drama { width: min(720px, calc(100vw - 32px)); }
+.dr-cast { display: grid; gap: 8px; margin: 8px 0 12px; }
+.dr-row { display: grid; grid-template-columns: 1fr minmax(160px, 220px); gap: 12px; align-items: center; }
+.dr-row small { display: block; }
+.dr-row select, #dr-style, #dr-script { width: 100%; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font: 13px var(--body); padding: 8px 10px; }
+#dr-script { resize: vertical; text-transform: none; letter-spacing: 0; }
+@media (max-width: 560px) { .dr-row { grid-template-columns: 1fr; } }

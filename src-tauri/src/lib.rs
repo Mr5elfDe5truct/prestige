@@ -23,6 +23,7 @@ mod services;
 mod setup;
 mod sprites;
 mod studio;
+mod drama;
 mod memwriter;
 mod translate;
 mod train;
@@ -609,6 +610,10 @@ pub fn run() {
             ocr::ocr_read,
             humanize::humanize_status,
             humanize::humanize,
+            drama::drama_status,
+            drama::drama_voices,
+            drama::drama_render,
+            drama::drama_mix,
             memwriter::hymemory_status,
             memwriter::hymemory_ready,
             translate::translate_status,

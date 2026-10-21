@@ -36,7 +36,8 @@ import { DIRECTOR_ASK, DIRECTOR_CMD, PLAN_SECS, SHOT_SECONDS, SONG_SECS, askedSe
 import { STORYBOARD_CMD, boardFromPlan, hasBoard, initStoryboard, openStoryboard, type BoardRender } from "./storyboard";
 import { askSpeech, speakLine } from "./talking";
 import { SONG_CMD, writeSong } from "./songwriter";
-import { onSettingsChange } from "./gensettings";
+import { DRAMA_CMD, parseScript, scriptSeconds, scriptText, taggedText, writeDrama, type Line, type Script } from "./drama";
+import { aboutTime, onSettingsChange } from "./gensettings";
 import { CONSENT, bindRefChoices, dragRender, hasFiles, hasRender, imageIn, imageToBase64, onRefPrefsChange, refChoicesHtml, referenceFromBase64, renderIn, type Reference } from "./reference";
 import { initVoice, showVoice } from "./voice";
 import { initCamera, showCameraPane } from "./camera";
@@ -1479,6 +1480,151 @@ async function makeSong(text: string, request: string, hooks?: ReplyHooks, image
   }
 }
 
+/** /drama or /podcast: the chat model writes the script, the cast card gives each character a voice (and lets the
+ *  script be changed), then Drama 3 reads it all and an ACE-Step music bed goes under it if asked for. One MP3 out. */
+async function makeDrama(text: string, request: string, hooks?: ReplyHooks) {
+  if (!inTauri) {
+    toast("Audio dramas are made in the desktop app.");
+    return hooks?.onDone?.(false);
+  }
+  const model = current;
+  if (!model) {
+    toast("No model is available to write the script. Start the services first.", "warn");
+    return hooks?.onDone?.(false);
+  }
+  if (!(await invoke<boolean>("drama_status", { root: settings.stackRoot ?? null }).catch(() => false))) {
+    toast("Audio drama needs the Audio drama pack (Drama 3 and audio.cpp, 18 GB): add it in Packs.", "warn");
+    return hooks?.onDone?.(false);
+  }
+  if (chat.messages.length === 0) chat.title = text.replace(/\s+/g, " ").slice(0, 60);
+  chat.messages.push({ role: "user", content: text });
+  renderChat();
+  const reply: StoredMessage = { role: "assistant", content: "", model: "Drama 3" };
+  const bubble = addAiBubble("Drama 3", () => reply.content);
+  const body = $(".msg-body", bubble);
+  const replyChat = chat.id;
+  phoneReplyStart("Drama 3", text);
+  body.innerHTML = `<div class="render-progress"><div class="progress"><i></i></div><span class="status-line">Starting…</span></div>`;
+  const progress = (pct: number, label: string) => {
+    ($(".progress", body) as HTMLElement | null)?.style.setProperty("--v", String(pct));
+    const l = $(".status-line", body);
+    if (l) l.textContent = label;
+  };
+  scrollDown(true);
+  busy = new AbortController();
+  busy.signal.addEventListener("abort", () => cancelRender(), { once: true });
+  setBusyUi(true);
+  const t0 = Date.now();
+  let unlisten: (() => void) | null = null;
+  try {
+    progress(1, `${model.name} is writing the script…`);
+    const script = await writeDrama(model, request, busy.signal, (n) => progress(2, `${model.name} is writing the script… ${n} characters`));
+    progress(4, "Pick the voices…");
+    const cast = await castDrama(script);
+    if (!cast) throw new Error("stopped");
+    const lines = cast.lines;
+    reply.content = `**${script.title}**\n\n${lines.map((l) => `**${l.who}:** ${l.text}`).join("\n\n")}`;
+    const draft = document.createElement("div");
+    draft.className = "song-draft";
+    renderBody(draft, reply.content);
+    body.appendChild(draft);
+    scrollDown();
+    // Drama 3 borrows ComfyUI's card: what's loaded there goes first.
+    progress(5, "Freeing the GPU…");
+    await http("http://127.0.0.1:8188/free", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ unload_models: true, free_memory: true }) }).catch(() => {});
+    await unloadAll(undefined, "comfyui");
+    const seconds = scriptSeconds(lines);
+    // Measured on an RTX 3060: 4.3-6.4 s of work per second of speech, plus ~15 s to start.
+    const est = 15 + seconds * 6;
+    unlisten = await listen<number>("drama", (e) => progress(Math.min(cast.music ? 75 : 95, 5 + (e.payload / est) * (cast.music ? 70 : 90)), `Drama 3 is performing it… ${e.payload} s (about ${aboutTime(est)} in all)`));
+    const wav = await invoke<string>("drama_render", {
+      root: settings.stackRoot ?? null,
+      text: taggedText(lines, script.cast),
+      cast: script.cast.map((c, i) => ({ speaker: i, voice: cast.voices[i] ?? "" })),
+      seed: Math.floor(Math.random() * 2 ** 31),
+      name: script.title,
+    });
+    unlisten();
+    unlisten = null;
+    let music: string | null = null;
+    if (cast.music) {
+      const got = await renderSong(cast.music, "", (pct, label) => progress(75 + pct * 0.2, `Music bed: ${label}`), { seconds: Math.min(240, Math.ceil(seconds) + 6) });
+      music = got[0]?.path ?? null;
+    }
+    progress(97, "Putting it together…");
+    const mp3 = await invoke<string>("drama_mix", { root: settings.stackRoot ?? null, voice: wav, music });
+    reply.render = { path: mp3, prompt: request, seconds: Math.round((Date.now() - t0) / 1000), kind: "audio", reply: true, title: script.title };
+    renderFigure(bubble, reply.render);
+    renderBody(body, reply.content);
+  } catch (e) {
+    if (busy?.signal.aborted || errMsg(e) === "stopped") reply.content = reply.content ? `${reply.content}\n\n*(stopped)*` : "*(stopped)*";
+    else {
+      reply.error = true;
+      reply.content = `Couldn't make the audio drama: ${errMsg(e)}`;
+      bubble.classList.add("error");
+    }
+    body.innerHTML = md(reply.content);
+  } finally {
+    unlisten?.();
+    chat.messages.push(reply);
+    bubble.dataset.i = String(chat.messages.length - 1);
+    if (!reply.error) reactButton(bubble, reply);
+    busy = null;
+    setBusyUi(false);
+    scrollDown();
+    persist()
+      .catch((e) => toast(`Couldn't save this chat: ${e}`, "warn"))
+      .finally(() => phoneReplyEnd(replyChat));
+    if (hooks) {
+      hooks.onDelta?.(reply.render ? "Here's your audio drama." : "I couldn't make that audio drama.");
+      hooks.onDone?.(!!reply.render);
+    }
+  }
+}
+
+/** The cast card: a voice for each character (a saved voice, or Drama 3's own), the script to change, and whether a
+ *  music bed goes under it. Null when cancelled. */
+async function castDrama(script: Script): Promise<{ voices: string[]; lines: Line[]; music: string } | null> {
+  const dlg = $("#drama") as HTMLDialogElement;
+  const voices = await invoke<string[]>("drama_voices", { root: settings.stackRoot ?? null }).catch(() => [] as string[]);
+  $("#dr-title").textContent = script.title;
+  const rows = $("#dr-cast");
+  rows.innerHTML = "";
+  script.cast.forEach((c, i) => {
+    const row = document.createElement("div");
+    row.className = "dr-row";
+    const opts = [`<option value="">Drama 3's own voice</option>`, ...voices.map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`)];
+    row.innerHTML = `<span><b>${escapeHtml(c.name)}</b>${c.about ? `<small class="muted">${escapeHtml(c.about)}</small>` : ""}</span><select data-i="${i}">${opts.join("")}</select>`;
+    // A different saved voice for each character to start with, in order.
+    (row.querySelector("select") as HTMLSelectElement).value = voices[i] ?? "";
+    rows.append(row);
+  });
+  const box = $("#dr-script") as HTMLTextAreaElement;
+  box.value = scriptText(script);
+  const music = $("#dr-music") as HTMLInputElement;
+  const style = $("#dr-style") as HTMLInputElement;
+  music.checked = !!script.music;
+  style.value = script.music;
+  const est = () => {
+    const secs = scriptSeconds(parseScript(box.value, script.cast));
+    $("#dr-est").textContent = `About ${Math.round(secs)} s of speech; Drama 3 takes ${aboutTime(15 + secs * 6)} on an RTX 3060${music.checked ? ", and the music bed a little more" : ""}.`;
+  };
+  box.oninput = est;
+  music.onchange = est;
+  est();
+  dlg.returnValue = "";
+  dlg.showModal();
+  await new Promise((r) => dlg.addEventListener("close", r, { once: true }));
+  if (dlg.returnValue !== "go") return null;
+  const lines = parseScript(box.value, script.cast);
+  if (!lines.length) throw new Error("the script has no lines left");
+  return {
+    voices: [...rows.querySelectorAll("select")].map((s) => (s as HTMLSelectElement).value),
+    lines,
+    music: music.checked ? style.value.trim() || "soft ambient underscore" : "",
+  };
+}
+
 /** /storyboard: the chat model plans the video as the Director would (the song and the shots), and the plan opens as a
  *  storyboard (storyboard.ts) to change before anything is rendered; every shot's frame starts drawing straight away. */
 async function makeStoryboard(text: string, idea: string, hooks?: ReplyHooks) {
@@ -2115,6 +2261,16 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
       return;
     }
     return makeStoryboard(text, idea, opts.hooks);
+  }
+  // "/drama a ghost story in a lighthouse" or "/podcast …": a script for several voices, performed by Drama 3.
+  if (!live && DRAMA_CMD.test(text)) {
+    const idea = text.replace(DRAMA_CMD, "").trim();
+    if (!idea) {
+      toast("Say what it's about after /drama, e.g. /drama two astronauts arguing about who left the airlock open, 1 minute");
+      opts.hooks?.onDone?.(false);
+      return;
+    }
+    return makeDrama(text, idea, opts.hooks);
   }
   // "/director a fox in a neon city" or "make me a music video about…": the Director plans, renders and joins it.
   if (!live && !opts.images && !attachments.length && (DIRECTOR_CMD.test(text) || DIRECTOR_ASK.test(text))) {
