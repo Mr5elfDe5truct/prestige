@@ -103,6 +103,7 @@ type GenMode =
   | "angle"
   | "outfit"
   | "restore"
+  | "manga"
   | "foley";
 
 // How a workflow takes the generation settings: an image model with a latent size and batch, an edit
@@ -485,6 +486,22 @@ const MODES: Record<GenMode, Mode> = {
     note: "restore photo",
     imageNode: "9",
   },
+  // Make it manga: the edit graph redraws the picture as an inked black-and-white panel at about 2 MP, then
+  // ashukae's Manga Finish prints it with a real screentone and Manga Panel frames it (mangaGraph). On the RTX 3060 a
+  // 1024² picture took 204 s to sample at 20 steps and 44 s with Lightning, peaking at 9.1 and 10.3 GB.
+  manga: {
+    file: "qwen-image-21-edit.api.json",
+    label: "Qwen-Image-2.1 Manga",
+    family: "edit",
+    promptNode: "4",
+    promptKey: "prompt",
+    seed: ["6", "seed"],
+    steps: QWEN_STEPS,
+    secs: 115,
+    fast: 30,
+    note: "manga panel",
+    imageNode: "9",
+  },
   // Add sound: LTX-2.3 dev with Lightricks' Foley LoRA hears the video (frozen, its own frames) and makes its sound
   // effects, 89 frames (3.7 s) at a time (foleyGraph); Prestige then puts the sound on the original video (mux_foley).
   // secs is one window.
@@ -517,7 +534,7 @@ const RESHOOT_LORAS: Partial<Record<GenMode, { file: string; strength: number }>
 const LIGHTNING = { file: "qwen-image-2.1-lightning-4step.safetensors", steps: 4 };
 const LIGHTNING_LOAD_SECS = 20;
 /** The modes the Speed setting (Fast or Quality) applies to. Reference's own Turbo pick runs Lightning too. */
-const LIGHTNING_MODES: GenMode[] = ["edit", "inpaint", "restore"];
+const LIGHTNING_MODES: GenMode[] = ["edit", "inpaint", "restore", "manga"];
 const lightningOn = (gm: GenMode) => (LIGHTNING_MODES.includes(gm) && settings().image.edits !== "quality") || gm === "reffast";
 /** The turbo model Reference's Turbo pick falls back to when the Lightning LoRA isn't installed. */
 const TURBO_UNET = "qwen_image_2.1_turbo_Q4_K_M.gguf";
@@ -532,6 +549,12 @@ const RESTORE_PROMPTS: Record<RestoreKind, string> = {
   old: "Restore the old photo: remove scratches, dust, fading and grain and recover sharp, natural detail and color, keeping the same composition and people.",
 };
 export const restorePrompt = (k: RestoreKind) => RESTORE_PROMPTS[k];
+
+/* Make it manga: the edit request from ashukae's QWEN-Manga workflow (Qwen-Image-2.1 decides what is paper, tone and
+ * ink by meaning, not brightness), then Manga Finish with that workflow's settings and Manga Panel with no crop. */
+const MANGA_PROMPT =
+  "Redraw <image1> as a printed black-and-white manga page panel, as if inked by the original artist for serialization. Keep the exact composition, pose, character design, face, expression and drawing style of <image1>. Use confident ink lines with varied line weight, solid black for dark hair and deep shadows, white paper for skin and light surfaces, ink hatching lines for shadows on cloth, and regular screentone only where a mid tone is needed. No color and no smooth gradients. Do not add anything that is not in <image1>.";
+const MANGA_MP = 2;
 
 /** The Multiple-Angles LoRA's 12 azimuths (30° apart, clockwise from the front) and 4 elevations, by the labels it was
  *  trained on, with what the menu shows. */
@@ -882,7 +905,7 @@ function plan(gm: GenMode, src: Source | null = srcAsset, o?: Override, song?: P
     const ratio = steps / m.steps!.standard!;
     if (m.family === "edit") {
       // Restore photo redraws the picture at about 2 MP, whatever its size.
-      const px = gm === "restore" ? RESTORE.mp : src?.width && src.height ? (src.width * src.height) / MP : 1;
+      const px = gm === "restore" ? RESTORE.mp : gm === "manga" ? MANGA_MP : src?.width && src.height ? (src.width * src.height) / MP : 1;
       p = { w: 0, h: 0, steps, count: 1, load: px, secs: fast ? LIGHTNING_LOAD_SECS + m.fast! * px : m.secs * px * ratio };
     } else {
       const [w, h] = o ? [o.w, o.h] : imageDims(s.aspect, s.size);
@@ -2543,6 +2566,18 @@ async function restorePhoto(a: Asset) {
   }
 }
 
+/** Make it manga: the picture as a black-and-white manga panel with screentone, as a new render. */
+async function makeManga(a: Asset) {
+  closeLightbox();
+  deps.toast(`Making it manga (${aboutTime(plan("manga", a).secs)}). It opens when it's done.`);
+  try {
+    const out = await run("manga", "Make it manga", a, {}, undefined, { from: "Make it manga", title: `${a.name} as manga` });
+    if (out[0]) openRender(out[0].path);
+  } catch (e) {
+    if (errMsg(e) !== "stopped") deps.toast(`Couldn't make it manga: ${errMsg(e)}`, "warn");
+  }
+}
+
 /** Puts a picture in ComfyUI's input folder (named from its content, so a retry reuses it). */
 async function uploadImage(img: Blob, prefix: string): Promise<string> {
   const bytes = new Uint8Array(await img.arrayBuffer());
@@ -2819,6 +2854,7 @@ function showMenu(e: MouseEvent, a: Asset) {
     ...(image && workflows.angle ? [{ label: "New camera angle…", run: () => newAngle(a), key: "reshoot" }] : []),
     ...(image && workflows.outfit ? [{ label: "Try on outfit…", run: () => tryOnOutfit(a), key: "dress up" }] : []),
     ...(image && workflows.restore ? [{ label: "Restore photo…", run: () => restorePhoto(a), key: "blur, noise, old prints" }] : []),
+    ...(image && workflows.manga ? [{ label: "Make it manga", run: () => makeManga(a), key: "black & white page" }] : []),
     ...(image && ocrReady() ? [{ label: "Read the text", run: () => (closeLightbox(), readText(a.path, a.name)), key: "Unlimited-OCR" }] : []),
     ...(image && translateReady() ? [{ label: "Translate the text…", run: () => (closeLightbox(), openTranslate("", a.path)), key: "Index-Translate" }] : []),
     ...(a.kind === "video" && workflows.vidcut ? [{ label: "Cut out a subject…", run: () => videoCutout(a), key: "green screen" }] : []),
@@ -3046,6 +3082,21 @@ function restoreGraph(g: any, kind: RestoreKind) {
   g["8"].inputs.filename_prefix = "qwen-image-restore";
 }
 
+/** Make it manga: the picture at about 2 MP redrawn as an inked panel, printed by Manga Finish and framed by Manga Panel. */
+function mangaGraph(g: any) {
+  g["10"] = { class_type: "ImageScaleToTotalPixels", inputs: { image: ["9", 0], upscale_method: "lanczos", megapixels: MANGA_MP, resolution_steps: 32 } };
+  g["4"].inputs["images.image_1"] = ["10", 0];
+  g["4"].inputs.resolution = 0;
+  g["4"].inputs.prompt = MANGA_PROMPT;
+  g["50"] = {
+    class_type: "MangaFinish",
+    inputs: { image: ["7", 0], screen_lines: 250, white_point: 0.8, black_point: 0.3, light_tone: 0.18, dark_tone: 0.42, gradation: 1, pen_threshold: 0.3, white_lines: 0.4 },
+  };
+  g["51"] = { class_type: "MangaPanel", inputs: { image: ["50", 0], frame: "original", crop_x: 0.5, crop_y: 0.4, border: 5, margin: 60, paper: "white", ink: 0.5 } };
+  g["8"].inputs.images = ["51", 0];
+  g["8"].inputs.filename_prefix = "qwen-image-manga";
+}
+
 /** Fast: the Lightning LoRA last in the model's chain (after a taught face or style, or the Restore LoRA),
  *  4 steps at CFG 1. */
 function lightningGraph(g: any) {
@@ -3053,6 +3104,13 @@ function lightningGraph(g: any) {
   g["6"].inputs.model = ["35", 0];
   g["6"].inputs.steps = LIGHTNING.steps;
   g["6"].inputs.cfg = 1;
+}
+
+/** Whether ComfyUI has a node (one from a custom node pack, say). Unreachable counts as yes: the render then says why. */
+async function hasNode(name: string): Promise<boolean> {
+  const r = await http(`${COMFY}/object_info/${name}`).catch(() => null);
+  if (!r?.ok) return true;
+  return name in ((await r.json().catch(() => ({}))) ?? {});
 }
 
 let lightningMissingSaid = false;
@@ -3191,6 +3249,7 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
   }
   if (gm === "angle" || gm === "outfit") reshootGraph(graph, gm, opts.outfit);
   if (gm === "restore") restoreGraph(graph, opts.restore ?? "photo");
+  if (gm === "manga") mangaGraph(graph);
   if (lightningOn(gm)) lightningGraph(graph);
   // An upscale's size: the shorter side becomes 1080 or 2160 (the longer one follows the shape).
   if (m.family === "upscale") {
@@ -3426,6 +3485,7 @@ async function submit(j: QJob) {
     const made = madeHere(src);
     if (m.family === "wan" || m.family === "svi") await applyWanModels(graph, [SVI.high, SVI.low], settings()[m.family === "svi" ? "long" : "animate"], m.family === "svi" ? SVI.fp16 : undefined, made);
     if (graph["30"] || graph["35"]) await checkLora(graph, gm);
+    if (gm === "manga" && !(await hasNode("MangaFinish"))) throw new Error("ComfyUI doesn't have the Manga nodes yet: restart Prestige's services to copy them in");
     if (j.cancelled) throw new Error("stopped");
     const r = await http(`${COMFY}/prompt`, {
       method: "POST",
