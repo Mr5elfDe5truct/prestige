@@ -47,11 +47,11 @@ import {
   type SettingsKey,
   type VideoSettings,
 } from "./gensettings";
-import { CONSENT, bindRefChoices, dragRender, hasFiles, hasRender, imageIn, loadReference, onRefPrefsChange, refChoicesHtml, refPrefs, refPrompt, referenceFromBase64, renderIn, sceneOf, setRefPrefs, uploadReference, type RefKind, type Reference } from "./reference";
+import { CONSENT, bindRefChoices, dragRender, hasFiles, hasRender, imageIn, loadReference, onRefPrefsChange, refChoicesHtml, refKeep, refPrefs, refPrompt, referenceFromBase64, renderIn, sceneOf, setRefPrefs, uploadReference, type RefKind, type Reference } from "./reference";
 import { characterById, characters, faceBlob, onCharactersChange } from "./characters";
 import { initInpaint, openInpaint, type SelectQuery } from "./inpaint";
 import { initLaser, openLaser } from "./laser";
-import { layoutBoxes, layoutPrompt, onLayoutChange, openLayout } from "./layout";
+import { editLayoutPrompt, layoutBoxes, layoutMask, layoutPrompt, layoutRefBox, boxWhat, onLayoutChange, openLayout, useLayout } from "./layout";
 import { attachZoom, type Zoom } from "./zoom";
 import { checkOcr, ocrReady, readText } from "./ocr";
 import { checkTranslate, openTranslate, translateReady } from "./translate";
@@ -1215,10 +1215,8 @@ export function initStudio(d: Deps) {
     }
     if (t.closest(".opt.model")) flipModel(mode === "video");
     if (t.closest(".opt.board")) deps.storyboard("");
-    if (t.closest(".opt.layout")) {
-      const p = plan("moss");
-      openLayout(p.w, p.h).then(renderCreate);
-    }
+    const lo = t.closest<HTMLElement>(".opt.layout");
+    if (lo) lo.classList.contains("off") ? deps.toast(lo.title, "warn") : openLayoutFor(currentMode()).catch((err) => deps.toast(errMsg(err), "warn"));
     // The pictures selected in the gallery start the photo set.
     if (t.closest(".opt.teach")) openTrain(items.filter((a) => a.kind === "image" && selected.has(a.path)).map((a) => a.path));
   });
@@ -1302,6 +1300,64 @@ function currentMode(): GenMode {
   return workflows[imageMode] ? imageMode : "fast";
 }
 
+/** What layout boxes do in a mode (layout.ts): lay out a MOSS-Image picture, pick what an edit changes, or place a
+ *  reference and the rest of its scene. "off" while animating a picture, which they can't steer; null where there's
+ *  no layout. */
+function layoutUse(gm: GenMode): "moss" | "edit" | "ref" | "off" | null {
+  if (gm === "moss") return "moss";
+  if (gm === "edit") return workflows.inpaint ? "edit" : null;
+  if (gm === "ref" || gm === "reffast") return workflows.moss && workflows.inpaint ? "ref" : null;
+  return gm === "animate" || gm === "long" || gm === "refvideo" ? "off" : null;
+}
+
+const LAYOUT_TEXT = {
+  moss: { title: "Drag boxes for where text, things and people go" },
+  edit: {
+    title: "Drag boxes on the picture: only they change, each to what you say",
+    intro: "Drag on the picture to box what should change, and say what goes in each box; drag a box to move it. Everything outside the boxes stays as it is.",
+    hint: "No boxes yet: the edit follows your prompt over the whole picture.",
+  },
+  ref: {
+    title: "Drag boxes for where your reference, other things and text go",
+    intro: "Drag boxes for where your reference goes (the box marked Your reference) and where other things, people and text go. MOSS-Image lays out the scene, then Qwen-Image puts your reference in its box.",
+    hint: "No boxes yet: Qwen-Image places your reference in the scene itself.",
+  },
+};
+
+/** The layout boxes in use: an edit's are its picture's own. */
+const syncLayout = (gm: GenMode) => (gm === "edit" && srcAsset ? useLayout("edit", srcAsset.path) : useLayout("scene"));
+
+/** Whether a render will follow layout boxes: an edit with a box that says what goes in it, or a reference with boxes. */
+const laidOut = (gm: GenMode) => {
+  const use = layoutUse(gm);
+  return use === "edit" ? editLayoutPrompt("") != null : use === "ref" && !!ref && layoutBoxes().length > 0;
+};
+
+/** A picture's size in pixels (read from the file when the gallery doesn't know it). */
+async function pictureSize(a: Asset): Promise<{ w: number; h: number }> {
+  if (a.width && a.height) return { w: a.width, h: a.height };
+  const img = new Image();
+  img.src = convertFileSrc(a.path);
+  await img.decode();
+  return { w: img.naturalWidth, h: img.naturalHeight };
+}
+
+/** Opens the layout editor for the mode: on the picture being edited, beside the reference, or on a blank canvas. */
+async function openLayoutFor(gm: GenMode) {
+  const use = layoutUse(gm);
+  if (use === "edit" && srcAsset) {
+    const { w, h } = await pictureSize(srcAsset);
+    await openLayout(w, h, { picture: convertFileSrc(srcAsset.path), ...LAYOUT_TEXT.edit });
+  } else if (use === "ref" && ref) {
+    const p = plan(gm, ref);
+    await openLayout(p.w, p.h, { reference: ref.url, ...LAYOUT_TEXT.ref });
+  } else {
+    const p = plan("moss");
+    await openLayout(p.w, p.h);
+  }
+  renderCreate();
+}
+
 /** The workflow that animates a picture: the remembered pick, or whichever of the two is there. */
 const animatePick = (): GenMode => (animateMode === "long" ? (workflows.long ? "long" : "animate") : workflows.animate ? "animate" : workflows.long ? "long" : "animate");
 
@@ -1334,6 +1390,7 @@ const workflowOf = (gm: GenMode) => (gm === "refvideo" && wanFromPicture() ? wor
 function renderCreate() {
   const webcam = mode === "webcam";
   const gm = currentMode();
+  syncLayout(gm);
   $$(".modes [data-mode]").forEach((x) => x.classList.toggle("on", x.dataset.mode === mode));
   // Storyboard: the idea for a music video; the chat model plans it and it opens as a storyboard (storyboard.ts).
   if (mode === "storyboard") {
@@ -1387,14 +1444,22 @@ function renderCreate() {
     : `<span class="opt"><b>${label}</b></span>`;
   const p = plan(gm);
   // A chained video's time includes making its first frame.
-  const shown = chain ? { ...p, secs: p.secs + plan(first, ref, frameSize()).secs } : p;
+  // So does a reference laid out by MOSS-Image first.
+  const shown = chain ? { ...p, secs: p.secs + plan(first, ref, frameSize()).secs } : laidOut(gm) ? { ...p, count: 1, secs: p.secs + plan("moss").secs } : p;
   const what = gm === "song" ? "Length, tempo, key, language, seed" : `Size, quality, seed${isVideo(gm) ? ", length" : ", count"}`;
   const gear = `<button type="button" class="opt pick set${settingsOpen ? " on" : ""}" title="${what}…" aria-expanded="${settingsOpen}">⚙ Settings</button>`;
   // Qwen-Image modes can learn a face or a style (train.ts); select pictures in the gallery first to start from them.
   const teach = QWEN_LORA_MODES.includes(gm) ? `<button type="button" class="opt pick teach" title="Teach Qwen-Image a face or a style from your photos (select pictures in the gallery first to use them)">✦ Teach a face or style</button>` : "";
-  // MOSS-Image takes a layout: boxes for where text and things go (layout.ts).
+  // Layout boxes (layout.ts): where text and things go in a MOSS-Image picture, what an edit changes, or where a
+  // reference goes in its scene. Animating a picture can't take them, so the button says why instead.
+  const use = layoutUse(gm);
   const n = layoutBoxes().length;
-  const layout = gm === "moss" ? `<button type="button" class="opt pick layout" title="Drag boxes for where text, things and people go">▦ Layout${n ? ` · ${n} box${n > 1 ? "es" : ""}` : ""}</button>` : "";
+  const layout =
+    use === "off"
+      ? `<button type="button" class="opt pick layout off" aria-disabled="true" title="Layout boxes can't steer an animation. Lay out the picture first (drop it on Edit and use Layout), then animate the result.">▦ Layout</button>`
+      : use
+        ? `<button type="button" class="opt pick layout" title="${LAYOUT_TEXT[use].title}">▦ Layout${n ? ` · ${n} box${n > 1 ? "es" : ""}` : ""}</button>`
+        : "";
   $("#gen-opts").innerHTML = wf
     ? chip + summary(gm, shown).map((o) => `<span class="opt"><b>${o}</b></span>`).join("") + gear + teach + layout
     : `<span class="opt">workflows\\${esc(missing)} not found, so this mode is off</span>`;
@@ -1446,9 +1511,13 @@ function promptHint(gm: GenMode) {
         ? "Describe the whole picture; the layout's boxes say what goes where…"
         : "Describe an image… e.g. a red and gold dragon coiled around a glowing GPU"
       : gm === "ref" || gm === "reffast"
-        ? "Describe the new scene… e.g. sitting at a café in Paris at golden hour, laughing"
+        ? laidOut(gm)
+          ? "Describe the whole scene; the boxes say where your reference and the rest go…"
+          : "Describe the new scene… e.g. sitting at a café in Paris at golden hour, laughing"
         : gm === "edit"
-          ? "Say what to change… e.g. make it night, swap the car for a horse, remove the sign"
+          ? laidOut(gm)
+            ? "Anything more for the boxes (optional)… e.g. hand-painted, in the evening light"
+            : "Say what to change… e.g. make it night, swap the car for a horse, remove the sign"
           : gm === "animate"
             ? "Describe the motion… e.g. slow push-in, snow falling, warm light flickering"
             : gm === "long"
@@ -1644,7 +1713,9 @@ const refWhat = (gm: GenMode) =>
     ? chained(gm)
       ? `Reference: ${modeOf(refImageMode()).label} puts it in the first frame, then ${modeOf(gm).label} animates it`
       : `Reference: ${modeOf(gm).label} animates this picture as it is`
-    : `Reference: ${modeOf(gm).label} puts it in the scene you describe`;
+    : laidOut(gm)
+      ? `Reference: MOSS-Image lays out the scene from your boxes, then ${modeOf(gm).label} puts it in its box`
+      : `Reference: ${modeOf(gm).label} puts it in the scene you describe`;
 
 /** The settings as chips: size, steps, length, seed and a time estimate. */
 function summary(gm: GenMode, p: Plan): string[] {
@@ -1668,6 +1739,7 @@ function summary(gm: GenMode, p: Plan): string[] {
   if (p.count > 1) out.push(`${p.count} images`);
   if (m.note) out.push(m.note);
   if (gm === "refvideo") out.push(chained(gm) ? "your reference in a new first frame" : "your reference as the first frame");
+  if (laidOut(gm)) out.push(gm === "edit" ? "only the boxes change" : "laid out by MOSS-Image");
   const lora = activeLora(gm);
   if (lora) out.push(`with ${lora.name || lora.trigger}`);
   out.push(s.seed != null ? `seed ${s.seed}` : "random seed");
@@ -3096,10 +3168,17 @@ async function generate() {
     return deps.storyboard(prompt);
   }
   const gm = currentMode();
-  if (!prompt || !workflowOf(gm)) return;
+  syncLayout(gm);
+  // An edit with layout boxes needs no prompt: the boxes say what changes.
+  const boxedEdit = laidOut(gm) && gm === "edit";
+  if ((!prompt && !boxedEdit) || !workflowOf(gm)) return;
+  if (laidOut(gm) && gm !== "edit" && !layoutRefBox())
+    return deps.toast("Mark one of the layout's boxes as Your reference, so Qwen-Image knows where it goes (or clear the layout).", "warn");
   // Something already rendering: this one waits its turn in the queue.
   const busy = rq.some((j) => j.state === "waiting" || j.state === "running");
   if (busy) deps.toast("Added to the render queue. It starts when the ones ahead of it finish.");
+  if (boxedEdit) return layoutEdit(prompt, srcAsset!);
+  if (laidOut(gm)) return layoutScene(prompt, ref!, gm);
   if (chained(gm)) {
     // Two renders: the reference in a new first frame, then the video from it. Errors arrive as a rejection.
     const t0 = Date.now();
@@ -3139,6 +3218,42 @@ function run(
   });
 }
 
+/** An edit with layout boxes: one masked Qwen-Image edit redraws only the boxes, each with what it says (layout.ts). */
+async function layoutEdit(prompt: string, a: Asset) {
+  try {
+    const { w, h } = await pictureSize(a);
+    const name = await uploadMask(await layoutMask(w, h));
+    enqueue("inpaint", editLayoutPrompt(prompt)!, a, { mask: { name, w, h }, regions: true }, { title: prompt || "Layout edit" });
+  } catch (e) {
+    deps.toast(`Couldn't add the render: ${errMsg(e)}`, "warn");
+  }
+}
+
+/** A reference placed by layout boxes: MOSS-Image lays out the scene (the reference's box described), then a masked
+ *  Qwen-Image edit puts the reference in place of what MOSS drew in its box. One picture, whatever the count. */
+async function layoutScene(prompt: string, r: Reference, gm: GenMode) {
+  const box = layoutRefBox()!;
+  const kind = refPrefs().kind;
+  const label = kind === "character" ? "character" : "object";
+  const p = plan(gm, r);
+  const t0 = Date.now();
+  try {
+    const [scene] = await run("moss", prompt, null, { layout: true, refLabel: label, override: { w: p.w, h: p.h, count: 1 } }, undefined, { note: "Step 1 of 2 · layout · " });
+    const mask = await uploadMask(await layoutMask(p.w, p.h, box));
+    const place = await uploadReference(r);
+    const subject = kind === "character" ? "the character" : kind === "item" ? "the object" : "the subject";
+    const text = `Replace ${boxWhat(box, label)} in image 1 with ${subject} from image 2. ${refKeep(kind, 2)} It should sit naturally in the scene, in the same light. Keep everything else exactly the same.`;
+    const [out] = await run("inpaint", text, scene, { mask: { name: mask, w: p.w, h: p.h }, place, fast: gm === "reffast" }, undefined, {
+      front: true,
+      note: "Step 2 of 2 · your reference · ",
+      title: prompt,
+    });
+    if (studioShown()) deps.toast(`Done in ${Math.round((Date.now() - t0) / 1000)} s: ${out.name}`);
+  } catch (e) {
+    if (errMsg(e) !== "stopped") deps.toast(`The render failed: ${errMsg(e)}`, "warn");
+  }
+}
+
 /** A video featuring the reference: Qwen-Image puts it in a first frame at the video's shape, then LTX animates it. */
 async function refVideo(prompt: string, r: Reference, kind: RefKind, progress?: (pct: number, label: string) => void, from?: string) {
   const first = refImageMode();
@@ -3162,6 +3277,10 @@ interface QueueOpts {
   outfit?: string; // Try on outfit: the outfit picture in ComfyUI's input folder
   restore?: RestoreKind; // Restore photo: what's wrong with the picture
   layout?: boolean; // MOSS-Image from Studio's create bar: with the layout's boxes (chat's /image goes without)
+  refLabel?: "character" | "object"; // MOSS-Image laying out a reference's scene: what its box holds
+  regions?: boolean; // inpaint: the prompt already says what fills each box (a layout edit)
+  place?: string; // inpaint: a reference in ComfyUI's input folder to put in the masked area, as image 2
+  fast?: boolean; // Lightning whatever the Speed setting (Reference's Turbo pick)
 }
 
 /** ACE-Step's way of asking for no vocals. */
@@ -3176,18 +3295,28 @@ const inpaintPrompt = (p: string) =>
 /** Turns the edit graph into an inpaint: the painted area is greyed out in the picture Qwen-Image sees, the source is
  *  encoded at the size it works at (its text encoder's latent is empty), only the masked part is noised and redrawn,
  *  and the result is scaled back and pasted over the original through the soft-edged mask, so the unpainted pixels
- *  stay exactly as they were. (Tested: mean change outside the mask 0.002 of 255.) */
-function inpaintGraph(g: any, mask: NonNullable<QueueOpts["mask"]>) {
+ *  stay exactly as they were. (Tested: mean change outside the mask 0.002 of 255.)
+ *  A layout edit's prompt (`regions`) already names what fills each grey box. Placing a reference (`place`) keeps
+ *  what's under the mask for Qwen-Image to replace (greyed out, it drew the reference smaller with a ghostly pane
+ *  beside it) and gives it the reference as image 2. */
+function inpaintGraph(g: any, mask: NonNullable<QueueOpts["mask"]>, how: Pick<QueueOpts, "regions" | "place"> = {}) {
   const res = Number(g["4"]?.inputs?.resolution) || 1024;
   const ratio = mask.w / mask.h;
   const w = Math.max(32, Math.round(Math.sqrt(res * res * ratio) / 32) * 32);
   const h = Math.max(32, Math.round(Math.sqrt((res * res) / ratio) / 32) * 32);
   g["20"] = { class_type: "LoadImageMask", inputs: { image: mask.name, channel: "red" } };
-  g["26"] = { class_type: "EmptyImage", inputs: { width: mask.w, height: mask.h, batch_size: 1, color: 0x808080 } };
-  g["27"] = { class_type: "ImageCompositeMasked", inputs: { destination: ["9", 0], source: ["26", 0], x: 0, y: 0, resize_source: false, mask: ["20", 0] } };
-  g["4"].inputs["images.image_1"] = ["27", 0];
-  g["4"].inputs.prompt = inpaintPrompt(g["4"].inputs.prompt);
-  g["21"] = { class_type: "ImageScale", inputs: { image: ["27", 0], upscale_method: "lanczos", width: w, height: h, crop: "disabled" } };
+  let seen: [string, number] = ["9", 0];
+  if (how.place) {
+    g["28"] = { class_type: "LoadImage", inputs: { image: how.place } };
+    g["4"].inputs["images.image_2"] = ["28", 0];
+  } else {
+    g["26"] = { class_type: "EmptyImage", inputs: { width: mask.w, height: mask.h, batch_size: 1, color: 0x808080 } };
+    g["27"] = { class_type: "ImageCompositeMasked", inputs: { destination: ["9", 0], source: ["26", 0], x: 0, y: 0, resize_source: false, mask: ["20", 0] } };
+    seen = ["27", 0];
+    g["4"].inputs["images.image_1"] = seen;
+    if (!how.regions) g["4"].inputs.prompt = inpaintPrompt(g["4"].inputs.prompt);
+  }
+  g["21"] = { class_type: "ImageScale", inputs: { image: seen, upscale_method: "lanczos", width: w, height: h, crop: "disabled" } };
   g["22"] = { class_type: "VAEEncode", inputs: { pixels: ["21", 0], vae: ["3", 0] } };
   g["23"] = { class_type: "SetLatentNoiseMask", inputs: { samples: ["22", 0], mask: ["20", 0] } };
   g["6"].inputs.latent_image = ["23", 0];
@@ -3400,14 +3529,14 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
     songEditGraph(graph, opts.edit);
   }
   apply(m, graph, p, seed);
-  if (gm === "moss") mossGraph(graph, opts.layout ? layoutPrompt(prompt, p.w, p.h) : prompt);
+  if (gm === "moss") mossGraph(graph, opts.layout ? layoutPrompt(prompt, p.w, p.h, opts.refLabel) : prompt);
   if (gm === "foley") {
     if (!opts.foley) throw new Error("no video to hear");
     foleyGraph(graph, opts.foley, seed);
   }
   if (gm === "inpaint") {
     if (!opts.mask) throw new Error("nothing is painted");
-    inpaintGraph(graph, opts.mask);
+    inpaintGraph(graph, opts.mask, opts);
   }
   if (gm === "angle" || gm === "outfit") reshootGraph(graph, gm, opts.outfit);
   if (gm === "restore") restoreGraph(graph, opts.restore ?? "photo");
@@ -3418,7 +3547,7 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
     graph["44"].inputs.filename_prefix = `video/${opts.frames}/frame`;
     graph["46"].inputs.filename_prefix = `video/${opts.frames.replace(/\.frames$/, "")}-matte`;
   }
-  if (lightningOn(gm)) lightningGraph(graph);
+  if (lightningOn(gm) || opts.fast) lightningGraph(graph);
   // An upscale's size: the shorter side becomes 1080 or 2160 (the longer one follows the shape).
   if (m.family === "upscale") {
     graph["3"].inputs["resize_type.shorter_size"] = opts.upscale ?? 2160;

@@ -1287,8 +1287,13 @@ body:is(.ws-resizing-v, .ws-resizing-h, .ws-dragging) :is(iframe, video) { point
   .ws-head { cursor: default; }
 }
 
-/* MOSS-Image layout (layout.ts) */
+/* Layout boxes: MOSS-Image, an edit, a reference (layout.ts) */
 .sheet.layout { width: min(720px, calc(100vw - 32px)); }
+.lo-wrap { position: relative; }
+.lo-stage.pic { background: center / 100% 100% no-repeat; }
+.lo-ref { position: absolute; right: 8px; bottom: 8px; width: 72px; height: 72px; object-fit: cover; border: 2px solid #5fd08a; border-radius: 8px; box-shadow: 0 2px 8px rgba(0, 0, 0, .5); pointer-events: none; }
+.lo-box.ref { border-color: #5fd08a; background: rgba(95, 208, 138, .14); }
+.opt.layout.off { opacity: .5; cursor: not-allowed; }
 .lo-stage { position: relative; width: 100%; max-height: 52vh; margin: 8px auto; background: repeating-conic-gradient(var(--panel-2) 0 25%, var(--panel) 0 50%) 0 0 / 24px 24px; border: 1px solid var(--line); border-radius: 8px; cursor: crosshair; touch-action: none; user-select: none; overflow: hidden; }
 .lo-box { position: absolute; border: 2px solid var(--gold); background: rgba(217, 164, 65, .12); border-radius: 4px; cursor: move; }
 .lo-box.text { border-color: #6fb6ff; background: rgba(111, 182, 255, .12); }

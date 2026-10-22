@@ -867,9 +867,12 @@
     <dialog class="sheet layout" id="layout">
       <form method="dialog">
         <h2>Layout <span class="credit" id="lo-size"></span></h2>
-        <p class="muted">Drag on the picture to add a box where text, a thing or a person goes; drag a box to move it. Your prompt describes the whole picture.</p>
-        <div class="lo-stage" id="lo-stage"></div>
-        <p class="muted" id="lo-hint">No boxes yet: MOSS-Image places everything itself.</p>
+        <p class="muted" id="lo-intro"></p>
+        <div class="lo-wrap">
+          <div class="lo-stage" id="lo-stage"></div>
+          <img class="lo-ref" id="lo-ref" alt="Your reference" title="Your reference: mark the box it goes in as Your reference" hidden />
+        </div>
+        <p class="muted" id="lo-hint"></p>
         <div class="lo-form" id="lo-form" hidden>
           <b id="lo-which"></b>
           <label>What goes here<select id="lo-kind"></select></label>
