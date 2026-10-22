@@ -111,15 +111,17 @@ export async function uploadReference(r: Reference): Promise<string> {
 
 /** The prompt Qwen-Image gets: keep the subject of image 1 the same and put it in the scene described. */
 export function refPrompt(kind: RefKind, scene: string) {
-  const keep =
-    kind === "character"
-      ? "Keep the character from image 1 exactly the same: same face, hair, eyes, body and clothes."
-      : kind === "item"
-        ? "Keep the object from image 1 exactly the same: same shape, colours, materials, markings and details."
-        : // Naming people and objects together here made Qwen-Image put a person into an item, so Auto stays neutral.
-          "Keep the subject of image 1 exactly as it looks, with all of its details.";
-  return `${keep} New scene: ${scene}`;
+  return `${refKeep(kind)} New scene: ${scene}`;
 }
+
+/** How Qwen-Image is told to keep the reference, which is image `n` of the ones it's given. */
+export const refKeep = (kind: RefKind, n = 1) =>
+  kind === "character"
+    ? `Keep the character from image ${n} exactly the same: same face, hair, eyes, body and clothes.`
+    : kind === "item"
+      ? `Keep the object from image ${n} exactly the same: same shape, colours, materials, markings and details.`
+      : // Naming people and objects together here made Qwen-Image put a person into an item, so Auto stays neutral.
+        `Keep the subject of image ${n} exactly as it looks, with all of its details.`;
 
 /** The scene part of a prompt written by refPrompt (what to show and reuse), or the prompt as it is. */
 export const sceneOf = (prompt: string) =>
