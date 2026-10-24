@@ -114,6 +114,18 @@ export function refPrompt(kind: RefKind, scene: string) {
   return `${refKeep(kind)} New scene: ${scene}`;
 }
 
+/** The prompt MOSS-Image's edit LoRA gets: an instruction to move the subject. With refPrompt's "Keep … New scene:"
+ *  it drew a red felt hat for a red knitted beanie in two seeds of three; told to move it, the beanie in all three. */
+export function mossRefPrompt(kind: RefKind, scene: string) {
+  const what =
+    kind === "character"
+      ? "the character from image 1 into a new scene, keeping them exactly the same: same face, hair, eyes, body and clothes"
+      : kind === "item"
+        ? "the object from image 1 into a new scene, keeping it exactly the same: same shape, colours, materials, markings and details"
+        : "the subject of image 1 into a new scene, keeping it exactly as it looks, with all of its details";
+  return `Move ${what}. The new scene: ${scene}`;
+}
+
 /** How Qwen-Image is told to keep the reference, which is image `n` of the ones it's given. */
 export const refKeep = (kind: RefKind, n = 1) =>
   kind === "character"
@@ -127,6 +139,7 @@ export const refKeep = (kind: RefKind, n = 1) =>
 export const sceneOf = (prompt: string) =>
   prompt
     .replace(/^Keep the (?:character from|object from|subject of) image 1[\s\S]*?New scene: /, "")
+    .replace(/^Move the (?:character from|object from|subject of) image 1 into a new scene[\s\S]*?The new scene: /, "")
     // A Paint to change prompt (studio.ts inpaintPrompt).
     .replace(/^Fill the flat gray area with: ([\s\S]*?)\. It should blend naturally[\s\S]*$/, "$1");
 

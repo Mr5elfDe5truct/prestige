@@ -1168,14 +1168,14 @@ function setBusyUi(on: boolean) {
 }
 
 /** Makes images with the Studio's image model (Qwen-Image-2.1 or its turbo), or a video with LTX, and shows them in the chat. */
-async function makeMedia(text: string, kind: MediaKind, prompt: string, hooks?: ReplyHooks, refB64?: string, refKind?: RefKind, edit = false) {
+async function makeMedia(text: string, kind: MediaKind, prompt: string, hooks?: ReplyHooks, refB64?: string, refKind?: RefKind, edit = false, moreB64: string[] = []) {
   const what = kind === "video" ? "video" : "image";
   if (!inTauri) {
     toast(`${kind === "video" ? "Videos" : "Images"} are made in the desktop app.`);
     return hooks?.onDone?.(false);
   }
   if (chat.messages.length === 0) chat.title = text.replace(/\s+/g, " ").slice(0, 60);
-  chat.messages.push({ role: "user", content: text, images: refB64 ? [refB64] : undefined });
+  chat.messages.push({ role: "user", content: text, images: refB64 ? [refB64, ...moreB64] : undefined });
   renderChat();
   const label = edit ? editLabel() : await modelLabel(kind, !!refB64);
   const reply: StoredMessage = { role: "assistant", content: "", model: label };
@@ -1203,8 +1203,10 @@ async function makeMedia(text: string, kind: MediaKind, prompt: string, hooks?: 
       }
     };
     // /edit changes the picture itself; otherwise it's a new picture (with the reference's subject in it, if any).
-    const got = edit && ref ? await editMedia(prompt, ref, progress) : await renderMedia(kind, prompt, progress, ref, refKind);
+    const extras = edit ? await Promise.all(moreB64.map((b) => referenceFromBase64(b))) : [];
+    const got = edit && ref ? await editMedia(prompt, ref, progress, extras) : await renderMedia(kind, prompt, progress, ref, refKind);
     if (ref) URL.revokeObjectURL(ref.url);
+    for (const x of extras) URL.revokeObjectURL(x.url);
     const [a, ...more] = got;
     reply.render = { path: a.path, prompt, seconds: Math.round((Date.now() - t0) / 1000), kind, ...(more.length ? { more: more.map((x) => x.path) } : {}) };
     // What chat models see in later turns.
@@ -2211,9 +2213,11 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
       opts.hooks?.onDone?.(false);
       return;
     }
+    // Further attached pictures go along as images 2 and 3 ("put the hat from image 2 on her").
+    const more = attachments.slice(1, 3);
     attachments = [];
     renderAttachments();
-    return makeMedia(text, "image", instruction, opts.hooks, src, undefined, true);
+    return makeMedia(text, "image", instruction, opts.hooks, src, undefined, true, more);
   }
   if (!live && RESEARCH_CMD.test(text)) {
     const question = text.replace(RESEARCH_CMD, "").trim();
