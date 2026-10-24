@@ -1,7 +1,8 @@
 // Uncensored models for Prestige's own renders, picked when a render is sent to ComfyUI. They apply to text-to-image
 // and text-to-video and to pictures Prestige made (renders, and references taken from them); a photo brought in
 // from outside (picked, pasted, dropped, attached, webcam, phone) keeps the standard models.
-// - Qwen-Image-2.1 needs nothing here: its diffusion model (qwen-image-2.1-UC) has no filter, and on the RTX 3060 the
+// - Qwen-Image-2.1 needs nothing here: studio.ts puts abenzerps' uncensored LoRA on the int8 model for every render
+//   (qwenModels; the GGUF fallback, qwen-image-2.1-UC, has it merged in), and on the RTX 3060 the
 //   stock text encoder gave the same nude results as an abliterated (Heretic) one in text to image and in edits. A
 //   one-word edit like "Nude" changes nothing; an instruction like "Remove her clothes, fully nude" does.
 // - Wan 2.2 (Animate, long video, video from a picture): a model pick of null means "uncensored if one is installed"
