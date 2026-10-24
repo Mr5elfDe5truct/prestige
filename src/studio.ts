@@ -1291,13 +1291,17 @@ async function loadWorkflows() {
   renderCreate();
 }
 
+/** A new picture's workflow: the model picked on the chip, or MOSS-Image when Background is Transparent. */
+const transparentOn = () => settings().image.transparent === "on" && !!workflows.moss;
+const pictureMode = (): GenMode => (transparentOn() ? "moss" : workflows[imageMode] ? imageMode : "fast");
+
 /** The workflow the create bar runs now. */
 function currentMode(): GenMode {
   if (mode === "music") return "song";
   if (mode === "video") return srcAsset ? animatePick() : ref ? "refvideo" : "video";
   if (srcAsset) return "edit";
   if (ref) return refImageMode();
-  return workflows[imageMode] ? imageMode : "fast";
+  return pictureMode();
 }
 
 /** What layout boxes do in a mode (layout.ts): lay out a MOSS-Image picture, pick what an edit changes, or place a
@@ -1438,7 +1442,7 @@ function renderCreate() {
   // In Image mode the model chip switches between Qwen-Image-2.1 and its faster turbo (or Z-Image-Turbo);
   // when animating a picture, between one Wan 2.2 clip and a long Wan 2.2 SVI video.
   const animating = gm === "animate" || gm === "long";
-  const label = chain ? `${modeOf(first).label} → ${m.label}` : gm === "moss" && settings().image.moss === "kromoss" ? "Kromoss" : m.label;
+  const label = chain ? `${modeOf(first).label} → ${m.label}` : gm === "moss" && transparentOn() ? "MOSS-Image · transparent" : gm === "moss" && settings().image.moss === "kromoss" ? "Kromoss" : m.label;
   const chip = canPick(gm)
     ? `<button type="button" class="opt pick model" title="${animating ? "Switch between one clip and a long video" : "Switch image model"}"><b>${label}</b> ⇄</button>`
     : `<span class="opt"><b>${label}</b></span>`;
@@ -1804,6 +1808,14 @@ function settingsFields(gm: GenMode, src: Source | null = srcAsset): Field[] {
     const img = settings().image;
     field("Shape", "aspect", ASPECTS, img.aspect);
     field("Size", "size", SIZES.map(([v, l]) => [v, `${l} · ${imageDims(img.aspect, v).join(" × ")}`]), img.size);
+    if (workflows.moss && !ref)
+      field(
+        "Background",
+        "transparent",
+        [["off", "Normal"], ["on", "Transparent · MOSS-Image, a PNG with alpha"]],
+        img.transparent ?? "off",
+        "Transparent draws one subject on nothing (a sticker, a sprite, a logo) with MOSS-Image's Alpha LoRA. That LoRA is for non-commercial research and evaluation only",
+      );
   }
   if (m.family === "ltx" || m.family === "ltx1") {
     const v = settings().video;
@@ -3355,13 +3367,48 @@ function restoreGraph(g: any, kind: RestoreKind) {
 }
 
 /** MOSS-Image: Kromoss if it's picked, and its prompt (the layout's JSON prompt from Studio, see layout.ts). */
-function mossGraph(g: any, prompt: string) {
+function mossGraph(g: any, prompt: string, alpha = false) {
+  if (alpha) return mossAlphaGraph(g, prompt);
   if (settings().image.moss === "kromoss") {
     g["1"].inputs.unet_name = KROMOSS.unet;
     g["32"].inputs.lora_name = KROMOSS.lora;
     g["8"].inputs.filename_prefix = "kromoss";
   }
   g["4"].inputs.text = prompt;
+}
+
+/* Transparent pictures (Background: Transparent in the image settings): paralaif's MOSS-Image Alpha LoRA on the SFT
+ * model teaches it latents that carry an alpha channel, and trmz/flux2-klein-alpha's RGBA VAE (Apache-2.0, loaded by
+ * the engine's Workstation RGBA VAE Loader) decodes them to a PNG with real, partial transparency. The LoRA's card
+ * settings: strength 1, the prompt ending ", isolated on a transparent background", and with the 8-step DMD LoRA,
+ * 8 steps at CFG 1 with er_sde. The LoRA is a proof of concept released for non-commercial research and evaluation
+ * only (some of its training pictures came from Qwen-Image 2.1), which the setting says. On the RTX 3060
+ * a 1024² sticker (a fox knight, a glass potion, a chrome logo) took 12 s (18 s with loading), peaking at 6.5 GB, with
+ * the glass and the chrome partly see-through. */
+const MOSS_ALPHA = {
+  lora: "moss\\moss-alpha-v1.safetensors",
+  vae: "moss\\flux2-klein-alpha-rgba-vae.safetensors",
+  trigger: ", isolated on a transparent background",
+};
+
+/** MOSS-Image with the Alpha LoRA after its 8-step LoRA, decoded by the RGBA VAE: a transparent PNG. Always the SFT
+ *  model, which the LoRA was trained on. */
+function mossAlphaGraph(g: any, prompt: string) {
+  g["4"].inputs.text = `${prompt.trim().replace(/[.,;\s]+$/, "")}${MOSS_ALPHA.trigger}`;
+  g["33"] = { class_type: "LoraLoaderModelOnly", inputs: { model: ["32", 0], lora_name: MOSS_ALPHA.lora, strength_model: 1 } };
+  g["6"].inputs.model = ["33", 0];
+  g["6"].inputs.sampler_name = "er_sde";
+  g["34"] = { class_type: "WorkstationRGBAVAELoader", inputs: { vae_name: MOSS_ALPHA.vae } };
+  g["7"].inputs.vae = ["34", 0];
+  g["8"].inputs.filename_prefix = "moss-image-alpha";
+}
+
+/** A transparent picture needs the engine's RGBA VAE node and the Alpha LoRA; say what to do if either is missing. */
+async function checkAlpha(graph: any) {
+  if (!(await hasNode("WorkstationRGBAVAELoader"))) throw new Error("Transparent pictures need the Workstation's RGBA VAE node: restart Prestige's services to copy it in");
+  const r = await http(`${COMFY}/object_info/LoraLoaderModelOnly`).catch(() => null);
+  const names: string[] = (await r?.json().catch(() => null))?.LoraLoaderModelOnly?.input?.required?.lora_name?.[0] ?? [];
+  if (names.length && !names.includes(graph["33"].inputs.lora_name)) throw new Error("Transparent pictures need the MOSS-Image Alpha LoRA: add the Workstation's moss pack again");
 }
 
 /** Make it manga: the picture at about 2 MP redrawn as an inked panel, printed by Manga Finish and framed by Manga Panel. */
@@ -3529,7 +3576,9 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
     songEditGraph(graph, opts.edit);
   }
   apply(m, graph, p, seed);
-  if (gm === "moss") mossGraph(graph, opts.layout ? layoutPrompt(prompt, p.w, p.h, opts.refLabel) : prompt);
+  // A transparent picture is one subject on nothing, so a layout's boxes don't apply to it.
+  const alpha = gm === "moss" && transparentOn() && !opts.refLabel;
+  if (gm === "moss") mossGraph(graph, opts.layout && !alpha ? layoutPrompt(prompt, p.w, p.h, opts.refLabel) : prompt, alpha);
   if (gm === "foley") {
     if (!opts.foley) throw new Error("no video to hear");
     foleyGraph(graph, opts.foley, seed);
@@ -3571,7 +3620,7 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
       (m.family === "upscale" && UPSCALE_STEPS[n.class_type]) ||
       n.class_type;
   if (m.family === "talk") talkLabels(nodes, p.shots!);
-  return { graph, nodes, seed, count: p.count, label: modeOf(gm).label, audio: opts.talk?.audio ?? opts.audio };
+  return { graph, nodes, seed, count: p.count, label: alpha ? "MOSS-Image · transparent" : modeOf(gm).label, audio: opts.talk?.audio ?? opts.audio };
 }
 
 /** Adds a render to the queue (throws when its workflow is missing). */
@@ -3782,6 +3831,7 @@ async function submit(j: QJob) {
     const made = madeHere(src);
     if (m.family === "wan" || m.family === "svi") await applyWanModels(graph, [SVI.high, SVI.low], settings()[m.family === "svi" ? "long" : "animate"], m.family === "svi" ? SVI.fp16 : undefined, made);
     if (graph["30"] || graph["35"]) await checkLora(graph, gm);
+    if (graph["34"]?.class_type === "WorkstationRGBAVAELoader") await checkAlpha(graph);
     if (gm === "moss" && !(await comfyKnows("CLIPLoader", "type", "moss_image"))) throw new Error("MOSS-Image needs ComfyUI 0.42 or newer: update ComfyUI in Comfy Desktop");
     if (gm === "person" && !(await hasNode("MatAnyone2Run"))) throw new Error("ComfyUI doesn't have MatAnyone2: add the Video matting pack, then restart the services");
     if (gm === "manga" && !(await hasNode("MangaFinish"))) throw new Error("ComfyUI doesn't have the Manga nodes yet: restart Prestige's services to copy them in");
@@ -3900,7 +3950,7 @@ async function finish(ok: boolean, why = "") {
 // ---------- used from chat ----------
 export type MediaKind = "image" | "video" | "audio";
 /** The workflow chat uses: the Studio's Image mode pick, LTX text-to-video, or an ACE-Step song. */
-const chatMode = (kind: MediaKind): GenMode => (kind === "audio" ? "song" : kind === "video" ? "video" : workflows[imageMode] ? imageMode : "fast");
+const chatMode = (kind: MediaKind): GenMode => (kind === "audio" ? "song" : kind === "video" ? "video" : pictureMode());
 
 /** The model chat images (or videos) are made with ("Qwen-Image-2.1 → LTX-2.5" for a video from a reference). */
 export async function modelLabel(kind: MediaKind, withRef = false) {
@@ -4110,7 +4160,7 @@ function phoneGm(c: PhoneCreate, src: Asset | null): GenMode {
   if (c.mode === "video") return src ? animatePick() : c.ref ? "refvideo" : "video";
   if (src) return "edit";
   if (c.ref) return refImageMode();
-  return workflows[imageMode] ? imageMode : "fast";
+  return pictureMode();
 }
 
 /** The render queue for phones: the last 20, newest last. */
@@ -4301,7 +4351,7 @@ export async function phoneStudio(action: string, a: any = {}): Promise<unknown>
         update(key, { seed: a.value === "last" ? (lastSeed(key) ?? null) : a.value == null || a.value === "" || !Number.isFinite(n) || n < 0 ? null : n });
       } else {
         const k = String(a.k);
-        if (!["aspect", "size", "quality", "count", "res", "seconds", "fps", "shots", "frames", "high", "low", "bpm", "key", "meter", "language", "lora", "fromPicture", "edits", "moss"].includes(k)) throw new Error(`unknown setting ${k}`);
+        if (!["aspect", "size", "quality", "count", "res", "seconds", "fps", "shots", "frames", "high", "low", "bpm", "key", "meter", "language", "lora", "fromPicture", "edits", "moss", "transparent"].includes(k)) throw new Error(`unknown setting ${k}`);
         update(k === "fromPicture" ? "video" : key, { [k]: fieldValue(k, String(a.value ?? "")) } as any);
       }
       return phoneInfo(a.create ?? { mode: "image" });

@@ -200,7 +200,7 @@ $PackInfo = [ordered]@{
     talk     = @{ GB = 17.4; Text = "Talking        InfiniteTalk on Wan 2.1 14B (ComfyUI, GGUF) - a face and a voice to a lip-synced video" }
     select   = @{ GB = 2.2;  Text = "Select         SAM 3.1 + BiRefNet (ComfyUI) - click or name to select, cut-outs, background removal" }
     upscale  = @{ GB = 12.3; Text = "Upscale        SeedVR2 7B + 3B (ComfyUI, int8) - sharpen pictures to 1080p or 4K, videos to 1080p" }
-    moss     = @{ GB = 14.2; Text = "MOSS-Image     MOSS-Image (ComfyUI 0.42+, int8, 8 steps) - a second picture model, best with text and layouts" }
+    moss     = @{ GB = 14.6; Text = "MOSS-Image     MOSS-Image (ComfyUI 0.42+, int8, 8 steps) - a second picture model, best with text and layouts" }
     kromoss  = @{ GB = 6.6;  Text = "Kromoss        Kromoss for MOSS-Image - more natural people (needs moss)" }
 }
 Step 3 "Choosing models"
@@ -561,6 +561,10 @@ if ($Packs -contains "moss") {
         Download (HF "Comfy-Org/MOSS-Image" $f) "$comfyModels\$folder\moss\$name"
     }
     Download (HF "lodestones/MOSS-Image-SFT-8-steps-dmd" "lora.safetensors") "$comfyModels\loras\moss\moss-image-sft-8-steps-dmd-lora.safetensors"
+    # Transparent pictures: paralaif's MOSS-Image Alpha LoRA (a proof of concept for non-commercial research and evaluation
+    # only) and trmz's RGBA FLUX.2 VAE (Apache-2.0) that decodes its latents with an alpha channel.
+    Download (HF "paralaif/MOSS-Image-Alpha-LoRA" "moss_alpha_v1.safetensors") "$comfyModels\loras\moss\moss-alpha-v1.safetensors"
+    Download (HF "trmz/flux2-klein-alpha" "vae/diffusion_pytorch_model.safetensors") "$comfyModels\vae\moss\flux2-klein-alpha-rgba-vae.safetensors"
 }
 if ($Packs -contains "kromoss") {
     Download (HF "lodestones/Kromoss" "diffusion_models/kromoss_int8_convrot.safetensors") "$comfyModels\diffusion_models\moss\kromoss_int8_convrot.safetensors"
