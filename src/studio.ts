@@ -47,7 +47,7 @@ import {
   type SettingsKey,
   type VideoSettings,
 } from "./gensettings";
-import { CONSENT, bindRefChoices, dragRender, hasFiles, hasRender, imageIn, loadReference, onRefPrefsChange, refChoicesHtml, refKeep, refPrefs, refPrompt, referenceFromBase64, renderIn, sceneOf, setRefPrefs, uploadReference, type RefKind, type Reference } from "./reference";
+import { CONSENT, bindRefChoices, dragRender, hasFiles, hasRender, imageIn, loadReference, mossRefPrompt, onRefPrefsChange, refChoicesHtml, refKeep, refPrefs, refPrompt, referenceFromBase64, renderIn, sceneOf, setRefPrefs, uploadReference, type RefKind, type Reference } from "./reference";
 import { characterById, characters, faceBlob, onCharactersChange } from "./characters";
 import { initInpaint, openInpaint, type SelectQuery } from "./inpaint";
 import { initLaser, openLaser } from "./laser";
@@ -952,6 +952,10 @@ function plan(gm: GenMode, src: Source | null = srcAsset, o?: Override, song?: P
       const px = (w * h) / MP;
       p = { w, h, steps, count, load: px * count, secs: m.secs * px * count * ratio };
     }
+    if (mossEdits(gm)) {
+      const ms = fast || gm === "reffast" ? MOSS_EDIT.fast : MOSS_EDIT.quality;
+      p = { ...p, steps: ms.steps, secs: ms.secs * Math.max(1, p.load) };
+    }
   } else if (m.family === "wan") {
     const s = settings().animate;
     const [w, h] = s.res === "auto" ? wanAuto(src?.width, src?.height) : parseRes(s.res);
@@ -1438,7 +1442,7 @@ function renderCreate() {
   // In Image mode the model chip switches between Qwen-Image-2.1 and its faster turbo (or Z-Image-Turbo);
   // when animating a picture, between one Wan 2.2 clip and a long Wan 2.2 SVI video.
   const animating = gm === "animate" || gm === "long";
-  const label = chain ? `${modeOf(first).label} → ${m.label}` : gm === "moss" && settings().image.moss === "kromoss" ? "Kromoss" : m.label;
+  const label = chain ? `${modeOf(first).label} → ${m.label}` : gm === "moss" && settings().image.moss === "kromoss" ? "Kromoss" : mossEdits(gm) ? "MOSS-Image Edit" : m.label;
   const chip = canPick(gm)
     ? `<button type="button" class="opt pick model" title="${animating ? "Switch between one clip and a long video" : "Switch image model"}"><b>${label}</b> ⇄</button>`
     : `<span class="opt"><b>${label}</b></span>`;
@@ -1690,7 +1694,8 @@ async function refFromRender(path: string) {
 
 function renderRefSlot(gm: GenMode, webcam: boolean) {
   const usable = !!(workflows.ref || workflows.reffast);
-  $("#ref-slot").hidden = webcam || !!srcAsset || !usable;
+  // While editing, the slot holds a second picture for the edit (image 2).
+  $("#ref-slot").hidden = webcam || (!!srcAsset && gm !== "edit") || !usable;
   $("#ref-add").hidden = !!ref;
   $("#ref-set").hidden = !ref;
   // Or one of the characters' faces.
@@ -1709,7 +1714,9 @@ function renderRefSlot(gm: GenMode, webcam: boolean) {
 
 /** What happens to the reference in this mode. */
 const refWhat = (gm: GenMode) =>
-  gm === "refvideo"
+  gm === "edit"
+    ? `Image 2 of your edit: say what to take from it ("put the hat from image 2 on her"), with ${mossEdits(gm) ? "MOSS-Image" : modeOf(gm).label}`
+    : gm === "refvideo"
     ? chained(gm)
       ? `Reference: ${modeOf(refImageMode()).label} puts it in the first frame, then ${modeOf(gm).label} animates it`
       : `Reference: ${modeOf(gm).label} animates this picture as it is`
@@ -1847,6 +1854,14 @@ function settingsFields(gm: GenMode, src: Source | null = srcAsset): Field[] {
   }
   const quality = "quality" in s ? s.quality : "standard";
   const fast = LIGHTNING_MODES.includes(gm) && settings().image.edits !== "quality";
+  if (MOSS_EDIT_MODES.includes(gm))
+    field(
+      "Edit with",
+      "editModel",
+      [["qwen", "Qwen-Image-2.1"], ["moss", "MOSS-Image · edit LoRA, up to 3 pictures"]],
+      settings().image.editModel ?? "qwen",
+      "For edits, Paint to change and Reference. MOSS-Image Fast is 8 steps, Quality 30; it needs the moss pack",
+    );
   if (LIGHTNING_MODES.includes(gm))
     field("Speed", "edits", [["fast", "Fast · Lightning, 4 steps"], ["quality", "Quality · more steps"]], fast ? "fast" : "quality", "Fast is about 4× quicker; Quality keeps a little more colour and fine detail");
   if (m.family === "ltx") field("Quality", "quality", [["draft", "Draft · half size, one pass"], ["standard", "Standard · upscaled 2×"]], quality === "draft" ? "draft" : "standard");
@@ -3193,7 +3208,8 @@ async function generate() {
   const src = gm === "animate" || gm === "long" || gm === "edit" ? srcAsset : gm === "ref" || gm === "reffast" || gm === "refvideo" ? ref : null;
   const lyrics = gm === "song" ? ($("#song-lyrics-text") as HTMLTextAreaElement).value : undefined;
   try {
-    enqueue(gm, prompt, src, { kind: refPrefs().kind, lyrics, layout: true });
+    const extra = gm === "edit" && ref ? [await uploadReference(ref)] : undefined;
+    enqueue(gm, prompt, src, { kind: refPrefs().kind, lyrics, layout: true, extra });
   } catch (e) {
     deps.toast(`Couldn't add the render: ${errMsg(e)}`, "warn");
   }
@@ -3281,6 +3297,7 @@ interface QueueOpts {
   regions?: boolean; // inpaint: the prompt already says what fills each box (a layout edit)
   place?: string; // inpaint: a reference in ComfyUI's input folder to put in the masked area, as image 2
   fast?: boolean; // Lightning whatever the Speed setting (Reference's Turbo pick)
+  extra?: string[]; // an edit: more pictures in ComfyUI's input folder, as images 2 and 3
 }
 
 /** ACE-Step's way of asking for no vocals. */
@@ -3364,6 +3381,73 @@ function mossGraph(g: any, prompt: string) {
   g["4"].inputs.text = prompt;
 }
 
+/* MOSS-Image edits (Edit with: MOSS-Image in the image settings): chinoll's Moss-Image-Edit LoRA (rank 64, in
+ * PedroMarinhoDev's ComfyUI key names) on the SFT model, through ComfyUI's own Text Encode MOSS-Image Edit node (ComfyUI
+ * #17296, newer than 0.42.5). It takes Edit (with up to two more pictures), Paint to change, a layout edit and Reference;
+ * a layout's reference is still placed by Qwen-Image (prepare). The LoRA's own settings are 30 steps at CFG 4 (Quality);
+ * Fast adds lodestones' 8-step DMD LoRA at CFG 1. On the RTX 3060 a 1024² edit took 13 s Fast and 69 s Quality (warm),
+ * peaking at 10.9 GB (11.7 GB with a second picture). With the picture at 512 px, as the LoRA's card suggests, the cabin
+ * came out smaller and moved, so the picture goes in at about 1 MP; further pictures at 1 MP bled into it (a red knit
+ * texture over the cabin), so they go in at 0.25 MP.
+ * MOSS-Image has no filter, so the uncensored rule needs nothing here. */
+const MOSS_EDIT = {
+  unet: "moss\\moss_image_sft_int8_convrot.safetensors",
+  clip: "moss\\qwen3.5_9b_w4a8_gptq.safetensors",
+  vae: "moss\\flux2-vae_small.safetensors",
+  lora: "moss\\moss-image-edit-lora-bf16.safetensors",
+  fastLora: "moss\\moss-image-sft-8-steps-dmd-lora.safetensors",
+  fast: { steps: 8, cfg: 1, secs: 13 },
+  quality: { steps: 30, cfg: 4, secs: 69 },
+  refs: 3,
+  moreMp: 0.25,
+};
+const MOSS_EDIT_MODES: GenMode[] = ["edit", "inpaint", "ref", "reffast"];
+const mossEdits = (gm: GenMode) => MOSS_EDIT_MODES.includes(gm) && settings().image.editModel === "moss";
+
+/** Turns a finished Qwen-Image edit, Paint to change or Reference graph into the same render on MOSS-Image: the same
+ *  pictures as references (each at about 1 MP; an inpaint's is the greyed copy at the size it's sampled at) and the
+ *  same prompt, the edit LoRA, and Fast or Quality steps. Qwen's LoRAs (Lightning, a taught face) are dropped. */
+function mossEditGraph(g: any, fast: boolean) {
+  const te = g["4"].inputs;
+  const pics = Object.keys(te)
+    .filter((k) => /^images\.image_\d+$/.test(k))
+    .sort()
+    .map((k) => te[k])
+    .slice(0, MOSS_EDIT.refs);
+  for (const id of ["35", "40"]) delete g[id];
+  g["1"] = { class_type: "UNETLoader", inputs: { unet_name: MOSS_EDIT.unet, weight_dtype: "default" } };
+  g["2"] = { class_type: "CLIPLoader", inputs: { clip_name: MOSS_EDIT.clip, type: "moss_image", device: "default" } };
+  g["3"] = { class_type: "VAELoader", inputs: { vae_name: MOSS_EDIT.vae } };
+  const k = g["6"].inputs;
+  const inpaint = Array.isArray(k.latent_image) && k.latent_image[0] === "23";
+  const refs = pics.map((pic, i): [string, number] => {
+    if (inpaint && i === 0) return ["21", 0];
+    g[`mref${i}`] = { class_type: "ImageScaleToTotalPixels", inputs: { image: pic, upscale_method: "lanczos", megapixels: i ? MOSS_EDIT.moreMp : 1, resolution_steps: 16 } };
+    return [`mref${i}`, 0];
+  });
+  const encode = (prompt: string) => ({
+    class_type: "TextEncodeMOSSImageEdit",
+    inputs: { clip: ["2", 0], vae: ["3", 0], prompt, edit_format: "Moss-Image-Edit", image_strength: 1, ...Object.fromEntries(refs.map((r, i) => [`images.image_${i}`, r])) },
+  });
+  g["4"] = encode(te.prompt);
+  g["4n"] = encode("");
+  g["medit"] = { class_type: "LoraLoaderModelOnly", inputs: { model: ["1", 0], lora_name: MOSS_EDIT.lora, strength_model: 1 } };
+  let model: [string, number] = ["medit", 0];
+  if (fast) {
+    g["mfast"] = { class_type: "LoraLoaderModelOnly", inputs: { model, lora_name: MOSS_EDIT.fastLora, strength_model: 1 } };
+    model = ["mfast", 0];
+  }
+  const s = fast ? MOSS_EDIT.fast : MOSS_EDIT.quality;
+  Object.assign(k, { model, positive: ["4", 0], negative: ["4n", 0], steps: s.steps, cfg: s.cfg, sampler_name: "euler", scheduler: "simple" });
+  // An edit is the size of its picture: an encoded copy gives the sampler that size (denoise 1 keeps none of it).
+  if (Array.isArray(k.latent_image) && k.latent_image[0] === "4") {
+    g["mlat"] = { class_type: "VAEEncode", inputs: { pixels: refs[0], vae: ["3", 0] } };
+    k.latent_image = ["mlat", 0];
+  }
+  if (g["5"]?.class_type === "EmptyLatentImage") g["5"].class_type = "EmptyFlux2LatentImage";
+  g["8"].inputs.filename_prefix = String(g["8"].inputs.filename_prefix).replace("qwen-image", "moss-image");
+}
+
 /** Make it manga: the picture at about 2 MP redrawn as an inked panel, printed by Manga Finish and framed by Manga Panel. */
 function mangaGraph(g: any) {
   g["10"] = { class_type: "ImageScaleToTotalPixels", inputs: { image: ["9", 0], upscale_method: "lanczos", megapixels: MANGA_MP, resolution_steps: 32 } };
@@ -3377,6 +3461,14 @@ function mangaGraph(g: any) {
   g["51"] = { class_type: "MangaPanel", inputs: { image: ["50", 0], frame: "original", crop_x: 0.5, crop_y: 0.4, border: 5, margin: 60, paper: "white", ink: 0.5 } };
   g["8"].inputs.images = ["51", 0];
   g["8"].inputs.filename_prefix = "qwen-image-manga";
+}
+
+/** An edit's other pictures (Studio's reference slot, or chat's further attachments) as images 2 and 3. */
+function extraPictures(g: any, names: string[]) {
+  names.slice(0, MOSS_EDIT.refs - 1).forEach((name, i) => {
+    g[`x${i + 2}`] = { class_type: "LoadImage", inputs: { image: name } };
+    g["4"].inputs[`images.image_${i + 2}`] = [`x${i + 2}`, 0];
+  });
 }
 
 /** Fast: the Lightning LoRA last in the model's chain (after a taught face or style, or the Restore LoRA),
@@ -3401,6 +3493,20 @@ async function comfyKnows(node: string, input: string, choice: string): Promise<
   const info = r?.ok ? await r.json().catch(() => null) : null;
   const opts = info?.[node]?.input?.required?.[input]?.[0];
   return !Array.isArray(opts) || opts.includes(choice);
+}
+
+/** A MOSS-Image edit needs ComfyUI's MOSS edit node and the edit LoRA; say what to do if either is missing. */
+async function checkMossEdit(graph: any) {
+  if (!(await hasNode("TextEncodeMOSSImageEdit")))
+    throw new Error("MOSS-Image edits need a ComfyUI newer than 0.42.5: update ComfyUI, or set Edit with to Qwen-Image in the image settings");
+  const r = await http(`${COMFY}/object_info/LoraLoaderModelOnly`).catch(() => null);
+  const names: string[] = (await r?.json().catch(() => null))?.LoraLoaderModelOnly?.input?.required?.lora_name?.[0] ?? [];
+  if (names.length && !names.includes(MOSS_EDIT.lora)) throw new Error("MOSS-Image edits need the MOSS edit LoRA: add the Workstation's moss pack again");
+  if (graph.mfast && names.length && !names.includes(MOSS_EDIT.fastLora)) {
+    graph["6"].inputs.model = ["medit", 0];
+    Object.assign(graph["6"].inputs, { steps: MOSS_EDIT.quality.steps, cfg: MOSS_EDIT.quality.cfg });
+    delete graph.mfast;
+  }
 }
 
 let lightningMissingSaid = false;
@@ -3518,7 +3624,10 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
     graph["40"] = { class_type: "LoraLoaderModelOnly", inputs: { model: ["1", 0], lora_name: lora.file, strength_model: 1 } };
     graph["6"].inputs.model = ["40", 0];
   }
-  if (m.promptNode) graph[m.promptNode].inputs[m.promptKey ?? "text"] = gm === "ref" || gm === "reffast" ? refPrompt(opts.kind ?? "auto", prompt) : prompt;
+  // A layout's reference is placed by Qwen-Image either way: MOSS-Image left its box empty (or the grey it was given).
+  const moss = mossEdits(gm) && !opts.place;
+  if (m.promptNode)
+    graph[m.promptNode].inputs[m.promptKey ?? "text"] = gm === "ref" || gm === "reffast" ? (moss ? mossRefPrompt : refPrompt)(opts.kind ?? "auto", prompt) : prompt;
   // Renders without generation settings keep their seed to themselves, rather than taking the Image settings' one.
   const seed = NO_SETTINGS.includes(m.family) ? Math.floor(Math.random() * 2 ** 32) : takeSeed(settingsKey(gm));
   const p = m.family === "talk" ? talkPlan(src, opts.talk?.seconds ?? 0) : plan(gm, src, opts.override, opts.song, opts.video);
@@ -3539,6 +3648,7 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
     inpaintGraph(graph, opts.mask, opts);
   }
   if (gm === "angle" || gm === "outfit") reshootGraph(graph, gm, opts.outfit);
+  if (gm === "edit") extraPictures(graph, opts.extra ?? []);
   if (gm === "restore") restoreGraph(graph, opts.restore ?? "photo");
   if (gm === "manga") mangaGraph(graph);
   if (gm === "person") {
@@ -3547,7 +3657,8 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
     graph["44"].inputs.filename_prefix = `video/${opts.frames}/frame`;
     graph["46"].inputs.filename_prefix = `video/${opts.frames.replace(/\.frames$/, "")}-matte`;
   }
-  if (lightningOn(gm) || opts.fast) lightningGraph(graph);
+  if (moss) mossEditGraph(graph, lightningOn(gm) || !!opts.fast);
+  else if (lightningOn(gm) || opts.fast) lightningGraph(graph);
   // An upscale's size: the shorter side becomes 1080 or 2160 (the longer one follows the shape).
   if (m.family === "upscale") {
     graph["3"].inputs["resize_type.shorter_size"] = opts.upscale ?? 2160;
@@ -3571,7 +3682,7 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
       (m.family === "upscale" && UPSCALE_STEPS[n.class_type]) ||
       n.class_type;
   if (m.family === "talk") talkLabels(nodes, p.shots!);
-  return { graph, nodes, seed, count: p.count, label: modeOf(gm).label, audio: opts.talk?.audio ?? opts.audio };
+  return { graph, nodes, seed, count: p.count, label: moss ? "MOSS-Image Edit" : modeOf(gm).label, audio: opts.talk?.audio ?? opts.audio };
 }
 
 /** Adds a render to the queue (throws when its workflow is missing). */
@@ -3782,6 +3893,7 @@ async function submit(j: QJob) {
     const made = madeHere(src);
     if (m.family === "wan" || m.family === "svi") await applyWanModels(graph, [SVI.high, SVI.low], settings()[m.family === "svi" ? "long" : "animate"], m.family === "svi" ? SVI.fp16 : undefined, made);
     if (graph["30"] || graph["35"]) await checkLora(graph, gm);
+    if (graph.medit) await checkMossEdit(graph);
     if (gm === "moss" && !(await comfyKnows("CLIPLoader", "type", "moss_image"))) throw new Error("MOSS-Image needs ComfyUI 0.42 or newer: update ComfyUI in Comfy Desktop");
     if (gm === "person" && !(await hasNode("MatAnyone2Run"))) throw new Error("ComfyUI doesn't have MatAnyone2: add the Video matting pack, then restart the services");
     if (gm === "manga" && !(await hasNode("MangaFinish"))) throw new Error("ComfyUI doesn't have the Manga nodes yet: restart Prestige's services to copy them in");
@@ -3932,15 +4044,17 @@ export async function renderMedia(
   return run(gm, prompt, r, gm === "refvideo" ? {} : { kind: refKind }, progress, { from: "chat" });
 }
 
-/** Chat's /edit: changes a picture by instruction with Qwen-Image-2.1 Edit (the whole picture, keeping its size). */
-export async function editMedia(prompt: string, r: Reference, progress: (pct: number, label: string) => void): Promise<Asset[]> {
+/** Chat's /edit: changes a picture by instruction (the whole picture, keeping its size), with Qwen-Image-2.1 Edit or
+ *  MOSS-Image (Edit with). `more`: up to two more attached pictures, as images 2 and 3. */
+export async function editMedia(prompt: string, r: Reference, progress: (pct: number, label: string) => void, more: Reference[] = []): Promise<Asset[]> {
   await ensureWorkflows();
   if (!workflows.edit) throw new Error(`workflows\\${MODES.edit.file} wasn't found`);
-  return run("edit", prompt, r, {}, progress, { from: "chat" });
+  const extra = await Promise.all(more.slice(0, MOSS_EDIT.refs - 1).map((x) => uploadReference(x)));
+  return run("edit", prompt, r, { extra }, progress, { from: "chat" });
 }
 
 /** The label for chat's edits. */
-export const editLabel = () => MODES.edit.label;
+export const editLabel = () => (mossEdits("edit") ? "MOSS-Image Edit" : MODES.edit.label);
 
 /** Chat's /3d: a textured 3D model of the picture with Pixal3D. Resolves with the saved .glb. */
 export async function renderModel(r: Reference, progress: (pct: number, label: string) => void): Promise<Asset[]> {
@@ -4301,7 +4415,7 @@ export async function phoneStudio(action: string, a: any = {}): Promise<unknown>
         update(key, { seed: a.value === "last" ? (lastSeed(key) ?? null) : a.value == null || a.value === "" || !Number.isFinite(n) || n < 0 ? null : n });
       } else {
         const k = String(a.k);
-        if (!["aspect", "size", "quality", "count", "res", "seconds", "fps", "shots", "frames", "high", "low", "bpm", "key", "meter", "language", "lora", "fromPicture", "edits", "moss"].includes(k)) throw new Error(`unknown setting ${k}`);
+        if (!["aspect", "size", "quality", "count", "res", "seconds", "fps", "shots", "frames", "high", "low", "bpm", "key", "meter", "language", "lora", "fromPicture", "edits", "moss", "editModel"].includes(k)) throw new Error(`unknown setting ${k}`);
         update(k === "fromPicture" ? "video" : key, { [k]: fieldValue(k, String(a.value ?? "")) } as any);
       }
       return phoneInfo(a.create ?? { mode: "image" });
