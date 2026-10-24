@@ -438,6 +438,22 @@ foreach ($n in @(@{ Name = "ComfyUI-GGUF"; Url = "https://github.com/leejet/Comf
     }
     Ok $n.Name
 }
+# SageAttention 2.2 for Prestige's Faster video (Workstation Sage Attention): triton-windows for the environment's
+# PyTorch (2.10 takes Triton 3.6, 2.11 3.7, 2.12 3.8) and woct0rdho's Windows wheel for its CUDA. Only where it runs:
+# an NVIDIA card of compute 8.0 or newer (RTX 30-series and up). Without it, Faster video simply does nothing.
+$cc = (& nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>$null | ForEach-Object { [double]$_ } | Measure-Object -Maximum).Maximum
+& $comfyPy -c "import sageattention" 2>$null
+if ($LASTEXITCODE -eq 0) { Skip "SageAttention already installed" }
+elseif ($cc -ge 8.0) {
+    $tv = & $comfyPy -c "import torch; print(torch.__version__)" 2>$null
+    if ($tv -match '^2\.(\d+)\.\d+\+cu(128|130)' -and [int]$Matches[1] -ge 10) {
+        $minor = [int]$Matches[1]; $cu = $Matches[2]
+        $venv = Split-Path (Split-Path $comfyPy)
+        & uv pip install -p $venv "triton-windows>=3.$($minor - 4),<3.$($minor - 3)" `
+            "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post6/sageattention-2.2.0+cu${cu}torch2.10.0andhigher.post6-cp310-abi3-win_amd64.whl" -q
+        if ($LASTEXITCODE) { Warn "couldn't install SageAttention; Faster video will do nothing" } else { Ok "SageAttention 2.2 (Faster video)" }
+    } else { Skip "SageAttention needs PyTorch 2.10+ with CUDA 12.8 or 13.0 (ComfyUI has $tv)" }
+} else { Skip "SageAttention needs an RTX 30-series card or newer" }
 
 # ---------- 9. models ----------
 Step 9 "Models"
