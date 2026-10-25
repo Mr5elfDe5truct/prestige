@@ -204,8 +204,8 @@ const MODES: Record<GenMode, Mode> = {
     promptKey: "prompt",
     seed: ["6", "seed"],
     latent: "5",
-    steps: { draft: 3, standard: 4, high: 6, max: 8 },
-    secs: 25,
+    steps: { draft: 3, standard: 4, high: 6, max: 8 }, // the GGUF's; the int8 Turbo always runs its 8-step schedule
+    secs: 13,
     fallback: ZIMAGE,
   },
   edit: {
@@ -571,7 +571,24 @@ const LIGHTNING_LOAD_SECS = 20;
 const LIGHTNING_MODES: GenMode[] = ["edit", "inpaint", "restore", "manga"];
 const lightningOn = (gm: GenMode) => (LIGHTNING_MODES.includes(gm) && settings().image.edits !== "quality") || gm === "reffast";
 /** The turbo model Reference's Turbo pick falls back to when the Lightning LoRA isn't installed. */
-const TURBO_UNET = "qwen_image_2.1_turbo_Q4_K_M.gguf";
+const TURBO_UNET = "qwen-image\\qwen_image_2.1_turbo_int8_convrot.safetensors";
+
+/* Qwen-Image-2.1 runs as Comfy-Org's int8 convrot files (the base model and Qwen's own 8-step Turbo), in
+ * models\comfy\diffusion_models\qwen-image. On the RTX 3060 a 20-step 1024² edit took 40 s against 102 s with the
+ * Q4_K_M GGUF (peak 10.9 GB against 6.6), and a Turbo picture 12 s against 21 s. abenzerps' uncensored LoRA goes on
+ * top of both: it is what their uncensored builds have merged in (their UC int8 file gave the same edit as the
+ * official int8 with the LoRA). The Turbo samples Qwen's saved 8-step schedule: at the Viggle turbo's 4 simple steps
+ * it came out dark with a garbled sign. Without the int8 files the GGUFs still run (qwenModels). */
+const QWEN_INT8 = {
+  base: "qwen-image\\qwen_image_2.1_int8_convrot.safetensors",
+  turbo: TURBO_UNET,
+  uncensored: "qwen-image\\qwen-image-2.1-uncensored-lora.safetensors",
+};
+const QWEN_GGUF: Record<string, string> = {
+  [QWEN_INT8.base]: "qwen-image-2.1-UC-Q4_K_M.gguf",
+  [QWEN_INT8.turbo]: "qwen_image_2.1_turbo_Q4_K_M.gguf",
+};
+const TURBO_SIGMAS = "1.0, 0.978453, 0.95418, 0.926626, 0.89508, 0.845148, 0.704534, 0.414568, 0.0";
 
 /* Restore photo: ausboss's Restore LoRA (step 1,500, rank 32) at 1.0, or 0.5 for a blurry photo (at 1.0 it stays true to
  * the blur), with the requests it was trained on. */
@@ -587,7 +604,7 @@ export const restorePrompt = (k: RestoreKind) => RESTORE_PROMPTS[k];
 /* Kromoss (lodestones' full fine-tune of MOSS-Image-Base) in place of the SFT model, with its own DMD2 8-step LoRA.
  * Next to the SFT one it drew people more naturally but misspelt a sign ("RCG TUDIOS" for "RG STUDIOS"), so MOSS-Image
  * stays the default. Both are in models\comfy\<folder>\moss. */
-const KROMOSS = { unet: "moss\kromoss_int8_convrot.safetensors", lora: "moss\kromoss-8-steps-dmd2-lora.safetensors" };
+const KROMOSS = { unet: "moss\\kromoss_int8_convrot.safetensors", lora: "moss\\kromoss-8-steps-dmd2-lora.safetensors" };
 
 /* Make it manga: the edit request from ashukae's QWEN-Manga workflow (Qwen-Image-2.1 decides what is paper, tone and
  * ink by meaning, not brightness), then Manga Finish with that workflow's settings and Manga Panel with no crop. */
@@ -3855,6 +3872,36 @@ async function uploadAudio(audio: Blob): Promise<string> {
   return invoke<string>("comfy_upload_bytes", bytes, { headers: { "x-name": `prestige-voice-${hex}.${ext}` } });
 }
 
+/** Qwen-Image-2.1's int8 model as installed: the uncensored LoRA put between the model and everything that uses it,
+ *  and the Turbo on its 8-step schedule. Without the int8 file, its GGUF in the GGUF loader (as before 0.57). */
+async function qwenModels(graph: any) {
+  const name = graph["1"]?.class_type === "UNETLoader" ? (graph["1"].inputs.unet_name as string) : "";
+  if (!QWEN_GGUF[name]) return;
+  const models = await diffusionModels();
+  if (models.length && !models.includes(name)) {
+    graph["1"] = { class_type: "UnetLoaderGGUF", inputs: { unet_name: QWEN_GGUF[name] } };
+    return;
+  }
+  const r = await http(`${COMFY}/object_info/LoraLoaderModelOnly`).catch(() => null);
+  const loras: string[] = (await r?.json().catch(() => null))?.LoraLoaderModelOnly?.input?.required?.lora_name?.[0] ?? [];
+  if (loras.includes(QWEN_INT8.uncensored)) {
+    for (const node of Object.values<any>(graph))
+      for (const [k, v] of Object.entries<any>(node.inputs ?? {})) if (Array.isArray(v) && v[0] === "1" && v[1] === 0) node.inputs[k] = ["qlora", 0];
+    graph.qlora = { class_type: "LoraLoaderModelOnly", inputs: { model: ["1", 0], lora_name: QWEN_INT8.uncensored, strength_model: 1 } };
+  }
+  const k = graph["6"];
+  if (name === QWEN_INT8.turbo && k?.class_type === "KSampler") {
+    const i = k.inputs;
+    graph.qsampler = { class_type: "KSamplerSelect", inputs: { sampler_name: "euler" } };
+    graph.qsigmas = { class_type: "ManualSigmas", inputs: { sigmas: TURBO_SIGMAS } };
+    graph["6"] = {
+      class_type: "SamplerCustom",
+      inputs: { model: i.model, add_noise: true, noise_seed: i.seed, cfg: 1, positive: i.positive, negative: i.negative,
+        sampler: ["qsampler", 0], sigmas: ["qsigmas", 0], latent_image: i.latent_image },
+    };
+  }
+}
+
 /** A song's ACE-Step model must be in ComfyUI's model folders; say which Workstation pack brings it if it isn't
  *  (the XL for High quality, the base model for stems). */
 async function checkAceModel(graph: any) {
@@ -3893,6 +3940,7 @@ async function submit(j: QJob) {
     const made = madeHere(src);
     if (m.family === "wan" || m.family === "svi") await applyWanModels(graph, [SVI.high, SVI.low], settings()[m.family === "svi" ? "long" : "animate"], m.family === "svi" ? SVI.fp16 : undefined, made);
     if (graph["30"] || graph["35"]) await checkLora(graph, gm);
+    await qwenModels(graph);
     if (graph.medit) await checkMossEdit(graph);
     if (gm === "moss" && !(await comfyKnows("CLIPLoader", "type", "moss_image"))) throw new Error("MOSS-Image needs ComfyUI 0.42 or newer: update ComfyUI in Comfy Desktop");
     if (gm === "person" && !(await hasNode("MatAnyone2Run"))) throw new Error("ComfyUI doesn't have MatAnyone2: add the Video matting pack, then restart the services");

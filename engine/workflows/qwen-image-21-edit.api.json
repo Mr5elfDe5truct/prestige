@@ -1,5 +1,5 @@
 {
-  "1": {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": "qwen-image-2.1-UC-Q4_K_M.gguf"}},
+  "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "qwen-image\\qwen_image_2.1_int8_convrot.safetensors", "weight_dtype": "default"}},
   "2": {"class_type": "CLIPLoaderGGUF", "inputs": {"clip_name": "Qwen3-VL-8B-Instruct-UD-Q4_K_XL.gguf", "type": "qwen_image"}},
   "3": {"class_type": "VAELoader", "inputs": {"vae_name": "qwen_image_2.1_vae_bf16.safetensors"}},
   "9": {"class_type": "LoadImage", "inputs": {"image": "edit-source.png"}},

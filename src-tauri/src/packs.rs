@@ -112,9 +112,12 @@ pub fn catalog(ollama_gb: f64) -> Vec<Pack> {
             v.push(Item::Ollama("qwen3.5:4b".into()));
             v
         }, vram: 7.5, ram: 0.0, card: "voice" },
-        Pack { id: "images", title: "Images", text: "Qwen-Image-2.1 (+ 4-step turbo and Lightning) and Z-Image-Turbo (ComfyUI): text to image and editing".into(), gb: 36.6, items: vec![
-            comfy("abenzerps/Qwen-Image-2.1-Uncensored-GGUF", "qwen-image-2.1-UC-Q4_K_M.gguf", "unet"),
-            comfy("Abiray/Qwen-Image-2.1-viggle-4-steps-turbo-GGUF", "qwen_image_2.1_turbo_Q4_K_M.gguf", "unet"),
+        // Qwen-Image-2.1 as Comfy-Org's int8 files (the base model and Qwen's 8-step Turbo) with abenzerps' uncensored
+        // LoRA on top (studio.ts qwenModels), in qwen-image\ folders; the older GGUFs still run where they're installed.
+        Pack { id: "images", title: "Images", text: "Qwen-Image-2.1 int8 (+ 8-step Turbo and Lightning) and Z-Image-Turbo (ComfyUI): text to image and editing".into(), gb: 41.9, items: vec![
+            Item::File { url: hf("Comfy-Org/Qwen-Image-2.1", "diffusion_models/qwen_image_2.1_int8_convrot.safetensors"), dest: r"models\comfy\diffusion_models\qwen-image\qwen_image_2.1_int8_convrot.safetensors".into(), alts: vec![] },
+            Item::File { url: hf("Comfy-Org/Qwen-Image-2.1", "diffusion_models/qwen_image_2.1_turbo_int8_convrot.safetensors"), dest: r"models\comfy\diffusion_models\qwen-image\qwen_image_2.1_turbo_int8_convrot.safetensors".into(), alts: vec![] },
+            Item::File { url: hf("abenzerps/Qwen-Image-2.1-Uncensored-Quantized", "qwen-image-2.1-uncensored-lora.safetensors"), dest: r"models\comfy\loras\qwen-image\qwen-image-2.1-uncensored-lora.safetensors".into(), alts: vec![] },
             comfy("unsloth/Qwen3-VL-8B-Instruct-GGUF", "Qwen3-VL-8B-Instruct-UD-Q4_K_XL.gguf", "text_encoders"),
             Item::File { url: hf("unsloth/Qwen3-VL-8B-Instruct-GGUF", "mmproj-F16.gguf"), dest: r"models\comfy\text_encoders\Qwen3-VL-8B-Instruct-mmproj-F16.gguf".into(), alts: vec![] },
             comfy("Comfy-Org/Qwen-Image-2.1", "vae/qwen_image_2.1_vae_bf16.safetensors", "vae"),
