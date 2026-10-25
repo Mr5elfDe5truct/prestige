@@ -891,6 +891,9 @@ dialog.characters[open] { display: flex; flex-direction: column; gap: 12px; }
 .talk-fields textarea:disabled, .talk-fields select:disabled { opacity: .45; }
 .talk-file-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .talk-top img.of-outfit { width: 96px; max-height: 128px; object-fit: contain; margin-bottom: 4px; }
+/* Swap a character: the video plays muted beside the picture that goes in. */
+.talk-top #sw-video { width: 220px; max-height: 220px; object-fit: contain; background: #000; border-radius: 10px; border: 1px solid var(--line); flex-shrink: 0; }
+@media (max-width: 560px) { .talk-top #sw-video { width: 100%; } }
 /* Translate (translate.ts): shown only with the Translate pack. */
 body:not(.translator) .translator-only { display: none; }
 .sheet.translate { width: min(720px, calc(100vw - 32px)); }

@@ -111,6 +111,7 @@ type GenMode =
   | "moss"
   | "person"
   | "foley"
+  | "swap"
   | "world";
 
 // How a workflow takes the generation settings: an image model with a latent size and batch, an edit
@@ -120,7 +121,8 @@ type GenMode =
 // queued), a picture cut out onto transparent ("cutout"), or SAM 3.1 tracking a subject through a video ("vidcut").
 // SeedVR2 sharpening a picture or a video to 1080p or 4K ("upscale"). LTX-2.3 making the sound for a silent video ("foley").
 // MatAnyone2 matting a person out of a video ("person"). Hy-Nomas exploring a world a segment at a time ("world").
-type Family = "image" | "edit" | "ltx" | "ltx1" | "wan" | "svi" | "song" | "songedit" | "model3d" | "talk" | "select" | "cutout" | "vidcut" | "upscale" | "foley" | "person" | "world";
+// SCAIL-2 swapping a person in a video for the character in a picture ("swap").
+type Family = "image" | "edit" | "ltx" | "ltx1" | "wan" | "svi" | "song" | "songedit" | "model3d" | "talk" | "select" | "cutout" | "vidcut" | "upscale" | "foley" | "person" | "world" | "swap";
 
 interface Mode {
   file: string;
@@ -135,6 +137,7 @@ interface Mode {
   note?: string;
   imageNode?: string; // LoadImage node for image-to-video, edits and reference images
   imageKey?: string; // that node's file input, "image" unless set ("file" for a LoadVideo)
+  imageClass?: string; // when set, that node is found by its class_type instead of imageNode's id
   fallback?: Mode; // used when this workflow file isn't there
   fast?: number; // with the Lightning LoRA (4 steps): seconds a megapixel, on top of LIGHTNING_LOAD_SECS
 }
@@ -170,6 +173,22 @@ const FOLEY_LOAD_SECS = 120;
 /** LTX-2.3's frames a window (1 + 8k) and the longest video Add sound takes (seconds at 24 fps). */
 const FOLEY_WINDOW = 89;
 const FOLEY_MAX_SECONDS = 15;
+
+/* Swap a character: Z.ai's SCAIL-2 (Wan 2.1 14B, Comfy-Org's int8 convrot, with its DPO LoRA and lightx2v's 480p
+ * step-distill LoRA at CFG 1) in Replacement mode, through ComfyUI's native nodes. SAM 3.1 tracks who's replaced
+ * (the biggest one named), BiRefNet cuts the character out of the picture (padded to the video's shape first). It
+ * makes 81 frames at a time; each segment after the first carries on from the last 5 frames of the one before (a
+ * 76-frame step), its colours matched to it.
+ * On an RTX 3060 12 GB a 5 s 768×512 clip (121 frames: a full segment and a 45-frame one) took 546 s at 4 steps, peaking
+ * at 10.9 GB of VRAM and 24.5 GB of system RAM: ~52 s a step for a full segment, plus ~95 s a segment for SAM 3.1
+ * (~35 s), decoding and getting the model back (ComfyUI reads all 16.7 GB again for each: 42 s from an SSD, 2 min 16 s
+ * from a hard drive, so the pack puts it in a folder of its own that can be a junction). A shorter segment's steps
+ * take less than its share of frames (attention grows faster than the frames). 6 steps with the model on a hard drive
+ * took 1,003 s. That was on a card of its own; through Prestige, with the Windows desktop on ComfyUI's card, the same
+ * 4-step swap took 701 s (10.5 GB peak), so secs below are scaled to that (and are for the SSD). */
+const SWAP = { part: 81, step: 76, overlap: 5, area: 832 * 480, loadSecs: 130, partSecs: 125, stepSecs: 69, maxSeconds: 20 };
+type SwapQuality = "draft" | "standard";
+const SWAP_STEPS: Record<SwapQuality, number> = { draft: 4, standard: 8 };
 
 /** What an upscale's shorter side becomes. */
 export type UpscaleSize = 1080 | 2160;
@@ -588,6 +607,20 @@ const MODES: Record<GenMode, Mode> = {
     imageNode: "10",
     imageKey: "video",
   },
+  // Swap a character: SCAIL-2 puts the character from a picture in place of a person in a video, moving as they did,
+  // in 81-frame segments (swapGraph); Prestige then puts the video's own sound back on (mux_swap). The video goes into
+  // LoadVideo, the picture into LoadImage (swapGraph finds both by class). secs is one segment at Draft.
+  swap: {
+    file: "scail2-swap.api.json",
+    label: "SCAIL-2",
+    family: "swap",
+    promptNode: "",
+    seed: ["", ""],
+    secs: SWAP.partSecs + SWAP.stepSecs * SWAP_STEPS.draft,
+    imageNode: "9",
+    imageClass: "LoadVideo",
+    imageKey: "file",
+  },
 };
 
 /* The LoRAs for New camera angle and Try on outfit (the reshoot pack), in ComfyUI's loras folder. Multiple-Angles v2 is
@@ -981,6 +1014,7 @@ function plan(gm: GenMode, src: Source | null = srcAsset, o?: Override, song?: P
   if (m.family === "vidcut" || m.family === "person") return { w: 0, h: 0, count: 1, load: 0, secs: m.secs * 8, warn: "" }; // per second of video (videoCutout, personCutout)
   if (m.family === "foley") return { w: 0, h: 0, count: 1, load: 0, secs: m.secs * 2, warn: "" }; // per window (addSound)
   if (m.family === "world") return { w: WORLD.w, h: WORLD.h, count: 1, load: 0, secs: m.secs, warn: "" }; // per segment (renderWorld)
+  if (m.family === "swap") return { w: 0, h: 0, count: 1, load: 0, secs: m.secs, warn: "" }; // per segment (swapSecs)
   if (m.family === "song") {
     // Measured (see SONG_FIXED_SECS): the same ~5.3 GB at every length, so only a small card gets a warning.
     // A songwriter's pick that's missing (undefined) keeps the saved setting rather than blanking it.
@@ -1280,6 +1314,11 @@ export function initStudio(d: Deps) {
     if (lo) lo.classList.contains("off") ? deps.toast(lo.title, "warn") : openLayoutFor(currentMode()).catch((err) => deps.toast(errMsg(err), "warn"));
     // The pictures selected in the gallery start the photo set.
     if (t.closest(".opt.teach")) openTrain(items.filter((a) => a.kind === "image" && selected.has(a.path)).map((a) => a.path));
+    // One video selected in the gallery is the one to swap in; otherwise one is picked from the PC.
+    if (t.closest(".opt.swap")) {
+      const vids = items.filter((a) => a.kind === "video" && selected.has(a.path));
+      swapCharacter(vids.length === 1 ? vids[0] : undefined);
+    }
   });
   onSettingsChange(() => renderCreate());
   onLayoutChange(() => renderCreate());
@@ -1525,8 +1564,10 @@ function renderCreate() {
       : use
         ? `<button type="button" class="opt pick layout" title="${LAYOUT_TEXT[use].title}">▦ Layout${n ? ` · ${n} box${n > 1 ? "es" : ""}` : ""}</button>`
         : "";
+  // Video mode can also swap a character into a video (a selected one in the gallery, or one from the PC).
+  const swap = mode === "video" && workflows.swap ? `<button type="button" class="opt pick swap" title="Put the character from a picture in place of a person in a video, moving as they did (SCAIL-2)">⇆ Swap a character</button>` : "";
   $("#gen-opts").innerHTML = wf
-    ? chip + summary(gm, shown).map((o) => `<span class="opt"><b>${o}</b></span>`).join("") + gear + teach + layout
+    ? chip + summary(gm, shown).map((o) => `<span class="opt"><b>${o}</b></span>`).join("") + gear + teach + layout + swap
     : `<span class="opt">workflows\\${esc(missing)} not found, so this mode is off</span>`;
   const warn = $("#gen-warn");
   warn.hidden = !wf || !p.warn;
@@ -2952,6 +2993,139 @@ async function addSound(a: Asset) {
   }
 }
 
+/** What ffprobe reads of a video (video_info). */
+interface VideoInfo {
+  width: number;
+  height: number;
+  fps: number;
+  frames: number;
+  seconds: number;
+  audio: boolean;
+}
+
+/** A swap's time on the RTX 3060: loading, then each segment's sampling and the rest, a short last one by its frames. */
+function swapSecs(frames: number, q: SwapQuality) {
+  let t = SWAP.loadSecs;
+  for (let start = 0; start === 0 || start + SWAP.overlap < frames; start += SWAP.step) {
+    const k = Math.min(SWAP.part, frames - start) / SWAP.part;
+    t += SWAP.partSecs * k + SWAP.stepSecs * SWAP_STEPS[q] * k ** 1.8;
+  }
+  return t;
+}
+
+/** Swap a character: the person in a video (a render, or one from the PC) replaced by the character in a picture (a
+ *  saved Character's face, or any picture picked, pasted or dropped), moving as they did, with the video's sound kept.
+ *  Saved as a new video in the gallery. */
+async function swapCharacter(a?: Asset) {
+  closeLightbox();
+  if (!a) {
+    const path = await invoke<string | null>("pick_video").catch(() => null);
+    if (!path) return;
+    a = { path, name: path.split(/[\\/]/).pop()!, kind: "video", mtime: 0, size: 0 };
+  }
+  const info = await invoke<VideoInfo>("video_info", { path: a.path }).catch((e) => {
+    deps.toast(`Couldn't read the video: ${errMsg(e)}`, "warn");
+    return null;
+  });
+  if (!info) return;
+  const dlg = $("#swap") as HTMLDialogElement;
+  const file = $("#sw-file") as HTMLInputElement;
+  const pic = $("#sw-pic") as HTMLImageElement;
+  const who = $("#sw-char") as HTMLSelectElement;
+  const quality = $("#sw-quality") as HTMLSelectElement;
+  const go = $("#sw-go") as HTMLButtonElement;
+  const video = $("#sw-video") as HTMLVideoElement;
+  video.src = convertFileSrc(a.path);
+  $("#sw-consent").textContent = `${CONSENT} Never make sexual content of anyone under 18.`;
+  // Who goes in: a saved Character's face, or a picture of anyone or anything.
+  const faces = characters().filter((c) => c.face);
+  who.innerHTML = `<option value="">A picture…</option>`;
+  for (const c of faces) {
+    const o = document.createElement("option");
+    o.value = c.id;
+    o.textContent = c.name;
+    who.appendChild(o);
+  }
+  let picture: Blob | null = null;
+  let url = "";
+  const frames = Math.min(info.frames, Math.floor(SWAP.maxSeconds * info.fps));
+  const parts = swapParts(frames);
+  const show = () => {
+    if (url) URL.revokeObjectURL(url);
+    url = picture ? URL.createObjectURL(picture) : "";
+    pic.hidden = !picture;
+    pic.src = url;
+    go.disabled = !picture;
+    const over = info.seconds > SWAP.maxSeconds + 0.05 ? ` Only the first ${SWAP.maxSeconds} s are swapped.` : "";
+    $("#sw-est").textContent = `Takes ${aboutTime(swapSecs(frames, quality.value as SwapQuality))} on an RTX 3060 (${parts} part${parts > 1 ? "s" : ""} of up to ${(SWAP.part / info.fps).toFixed(1)} s).${over}`;
+  };
+  const take = (b: Blob | null, name = "") => {
+    if (!b) return;
+    picture = b;
+    who.value = "";
+    $("#sw-name").textContent = name;
+    show();
+  };
+  who.onchange = () => {
+    const c = characterById(who.value);
+    picture = c?.face ? faceBlob(c) : null;
+    $("#sw-name").textContent = c ? `${c.name}'s face` : "";
+    show();
+  };
+  quality.onchange = show;
+  file.value = "";
+  file.onchange = () => take(file.files?.[0] ?? null, file.files?.[0]?.name);
+  $("#sw-pick").onclick = () => file.click();
+  // A picture dropped from Explorer, a browser or the gallery, or pasted, works too.
+  dlg.ondragover = (e) => e.preventDefault();
+  dlg.ondrop = async (e) => {
+    e.preventDefault();
+    const path = renderIn(e.dataTransfer);
+    if (path) take(await fetch(convertFileSrc(path)).then((r) => (r.ok ? r.blob() : null)).catch(() => null), path.split(/[\\/]/).pop());
+    else {
+      const f = imageIn(e.dataTransfer);
+      take(f, f?.name);
+    }
+  };
+  dlg.onpaste = (e) => {
+    const f = imageIn(e.clipboardData);
+    if (f) take(f, "a pasted picture");
+  };
+  ($("#sw-who") as HTMLInputElement).value = "person";
+  $("#sw-name").textContent = "";
+  show();
+  dlg.returnValue = "";
+  dlg.showModal();
+  await new Promise((r) => dlg.addEventListener("close", r, { once: true }));
+  if (url) URL.revokeObjectURL(url);
+  video.removeAttribute("src");
+  video.load();
+  const picked = picture as Blob | null;
+  if (dlg.returnValue !== "go" || !picked) return;
+  const q = quality.value as SwapQuality;
+  const target = ($("#sw-who") as HTMLInputElement).value.trim() || "person";
+  // The video's shape at about 832×480 (what SCAIL-2 and the distill LoRA were made at), in multiples of 32.
+  const ratio = info.width && info.height ? info.width / info.height : 16 / 9;
+  const w = Math.max(256, Math.round(Math.sqrt(SWAP.area * ratio) / 32) * 32);
+  const h = Math.max(256, Math.round(Math.sqrt(SWAP.area / ratio) / 32) * 32);
+  deps.toast(`Swapping the character in: ${aboutTime(swapSecs(frames, q))} on an RTX 3060. It opens when it's done.`);
+  try {
+    // As a reference: scaled to at most 2048 px and kept as a JPEG.
+    const r = await loadReference(picked);
+    URL.revokeObjectURL(r.url);
+    const ref = await uploadReference(r);
+    const job: SwapJob = { ref, who: target, steps: SWAP_STEPS[q], frames, w, h };
+    const out = await run("swap", target, a, { swap: job }, undefined, { from: "Swap a character", title: `${a.name}: ${target} swapped` });
+    const made = out.find((x) => x.kind === "video" && x.path !== a.path);
+    if (!made) throw new Error("no video came back");
+    const swapped = await invoke<string>("mux_swap", { root: deps.root(), video: made.path, source: a.path });
+    await refresh();
+    openRender(swapped);
+  } catch (e) {
+    if (errMsg(e) !== "stopped") deps.toast(`Couldn't swap the character: ${errMsg(e)}`, "warn");
+  }
+}
+
 /** A video's length in seconds, from its own metadata (8 when it can't be read). */
 function videoSeconds(path: string): Promise<number> {
   return new Promise((res) => {
@@ -3178,6 +3352,7 @@ function showMenu(e: MouseEvent, a: Asset) {
     ...(a.kind === "video" && workflows.person && workflows.select ? [{ label: "Cut out a person…", run: () => personCutout(a), key: "click, MatAnyone2" }] : []),
     ...(a.kind === "video" && workflows.vidcut ? [{ label: "Cut out a subject…", run: () => videoCutout(a), key: "green screen" }] : []),
     ...(a.kind === "video" && workflows.foley ? [{ label: "Add sound…", run: () => addSound(a), key: "Foley" }] : []),
+    ...(a.kind === "video" && workflows.swap ? [{ label: "Swap a character…", run: () => swapCharacter(a), key: "SCAIL-2" }] : []),
     ...upscaleItems(a),
     ...songEditItems(a),
     ...(image && (workflows.animate || workflows.long) ? [{ label: "Animate (image → video)…", run: () => startFrom(a, "video") }] : []),
@@ -3379,6 +3554,7 @@ interface QueueOpts {
   video?: Partial<VideoSettings>; // a video's length, size or quality over the saved settings (a Director shot)
   upscale?: UpscaleSize; // an upscale's shorter side
   foley?: { frames: number; w: number; h: number }; // Add sound: the frames at 24 fps and the size LTX hears them at
+  swap?: SwapJob; // Swap a character: the picture, who's replaced, the frames and the size
   edit?: SongEdit; // the song editor's job
   audio?: Blob; // a song from the PC to edit (a gallery song goes as the source's path)
   outfit?: string; // Try on outfit: the outfit picture in ComfyUI's input folder
@@ -3788,6 +3964,112 @@ function foleyGraph(g: any, f: NonNullable<QueueOpts["foley"]>, seed: number) {
   g["30"].inputs.audio = audio;
 }
 
+/** A Swap a character render: the uploaded picture, who's replaced, the source's frames to swap and the size. */
+interface SwapJob {
+  ref: string; // the character's picture in ComfyUI's input folder
+  who: string; // what SAM 3.1 looks for in the video ("person", "the man in the red jacket")
+  steps: number;
+  frames: number;
+  w: number;
+  h: number;
+}
+
+/** A node's id by its class_type (the first, or the first `pick` accepts). Workflows reuse ids for other nodes, so
+ *  they're found this way rather than by number. */
+function classNode(g: any, cls: string, pick?: (n: any) => boolean): string | undefined {
+  return Object.keys(g).find((k) => g[k].class_type === cls && (!pick || pick(g[k])));
+}
+
+/** How many 81-frame segments swap this many frames: the first makes 81, each after it 76 new ones. */
+export const swapParts = (frames: number) => (frames <= SWAP.part ? 1 : 1 + Math.ceil((frames - SWAP.part) / SWAP.step));
+
+/** Swap a character's graph: the workflow's segment nodes (marked "segment" in the file) repeated for every 81 frames
+ *  of the video, 76 frames apart; a segment after the first gets the one before it as previous_frames (SCAIL-2 keeps
+ *  its last 5), drops the 5 frames it repeats, and has its colours matched to the frame it carries on from, as
+ *  Comfy-Org's template does. The segments are joined and saved at the video's own frame rate. */
+function swapGraph(g: any, s: SwapJob, seed: number) {
+  const need = (id: string | undefined, what: string) => {
+    if (!id) throw new Error(`workflows\\${MODES.swap.file} has no ${what}`);
+    return id;
+  };
+  g[need(classNode(g, "LoadImage"), "LoadImage")].inputs.image = s.ref;
+  const sam = need(classNode(g, "CheckpointLoaderSimple"), "SAM 3.1 loader");
+  const who = need(classNode(g, "CLIPTextEncode", (n) => n.inputs.clip?.[0] === sam), "SAM 3.1 prompt");
+  g[who].inputs.text = s.who.trim() || "person";
+  g[need(classNode(g, "BasicScheduler"), "BasicScheduler")].inputs.steps = s.steps;
+  // The picture is padded to the video's shape: WanSCAILToVideo crops it to that shape, which cut a full-body
+  // portrait to a strip of its middle, and the character came out headless or drawn far too big.
+  Object.assign(g[need(classNode(g, "ResizeAndPadImage"), "ResizeAndPadImage")].inputs, { target_width: s.w, target_height: s.h });
+  const tpl: Record<string, any> = {};
+  for (const id of Object.keys(g).filter((k) => g[k]._meta?.title === "segment")) {
+    tpl[id] = g[id];
+    delete g[id];
+  }
+  const seg = (cls: string) => need(Object.keys(tpl).find((k) => tpl[k].class_type === cls), `segment ${cls}`);
+  const [cut, scale, scail, sampler, decode] = ["ImageFromBatch", "ImageScale", "WanSCAILToVideo", "SamplerCustom", "VAEDecode"].map(seg);
+  let out: [string, number] | null = null;
+  let prev: [string, number] | null = null;
+  for (let k = 0, start = 0; start === 0 || start + SWAP.overlap < s.frames; k++, start += SWAP.step) {
+    // The model takes 1 + 4n frames.
+    const n = Math.floor((Math.min(SWAP.part, s.frames - start) - 1) / 4) * 4 + 1;
+    if (k > 0 && n <= SWAP.overlap) break;
+    const id = (t: string) => `${t}~${k}`;
+    for (const [t, node] of Object.entries(tpl)) {
+      const inputs = Object.fromEntries(Object.entries<any>(node.inputs).map(([key, v]) => [key, Array.isArray(v) && tpl[v[0]] ? [id(v[0]), v[1]] : v]));
+      g[id(t)] = { class_type: node.class_type, inputs };
+    }
+    Object.assign(g[id(cut)].inputs, { batch_index: start, length: n });
+    Object.assign(g[id(scale)].inputs, { width: s.w, height: s.h });
+    Object.assign(g[id(scail)].inputs, { width: s.w, height: s.h, length: n, ...(prev ? { previous_frames: prev } : {}) });
+    g[id(sampler)].inputs.noise_seed = seed + k;
+    // The next segment carries on from this one's frames as they're kept (colour-matched after the first).
+    if (!out || !prev) out = prev = [id(decode), 0];
+    else {
+      g[id("new")] = { class_type: "ImageFromBatch", inputs: { image: [id(decode), 0], batch_index: SWAP.overlap, length: 4096 } };
+      g[id("last")] = { class_type: "ImageFromBatch", inputs: { image: prev, batch_index: 4095, length: 1 } };
+      g[id("match")] = { class_type: "ColorTransfer", inputs: { image_target: [id("new"), 0], image_ref: [id("last"), 0], method: "reinhard_lab", source_stats: "per_frame", strength: 1 } };
+      g[id("join")] = { class_type: "ImageBatch", inputs: { image1: out, image2: [id("match"), 0] } };
+      out = [id("join"), 0];
+      prev = [id("match"), 0];
+    }
+  }
+  g[need(classNode(g, "CreateVideo"), "CreateVideo")].inputs.images = out;
+}
+
+/** What a swap's progress line says, per segment: "Swapping part 2 of 3". */
+const SWAP_LABELS: Record<string, string> = {
+  SAM3_VideoTrack: "Finding who to replace",
+  RemoveBackground: "Cutting the character out of the picture",
+  CLIPVisionEncode: "Looking at the character",
+  WanSCAILToVideo: "Reading the movement",
+  ColorTransfer: "Matching the colours",
+  CreateVideo: "Making the video",
+  SaveVideo: "Saving the video",
+};
+function swapLabels(g: any, nodes: Record<string, string>) {
+  const parts = Object.keys(g).filter((k) => g[k].class_type === "SamplerCustom").length;
+  for (const [id, n] of Object.entries<any>(g)) {
+    const k = Number(id.split("~")[1] ?? 0);
+    const of = parts > 1 ? ` part ${k + 1} of ${parts}` : "";
+    if (n.class_type === "SamplerCustom") nodes[id] = `Swapping${of || " the character"}`;
+    if (n.class_type === "VAEDecode") nodes[id] = `Decoding${of || " the frames"}`;
+    if (n.class_type === "SAM3_VideoTrack" && id.includes("~")) nodes[id] = `Finding who to replace${of}`;
+  }
+}
+
+/** A swap needs ComfyUI's SCAIL-2 nodes and its model; say what to do if either is missing. */
+async function checkSwap(graph: any) {
+  if (!(await hasNode("WanSCAILToVideo"))) throw new Error("Swap a character needs a ComfyUI with SCAIL-2 (0.42 or newer): update ComfyUI in Comfy Desktop");
+  for (const [cls, input] of [["UNETLoader", "unet_name"], ["LoadBackgroundRemovalModel", "bg_removal_name"]]) {
+    const want = graph[classNode(graph, cls) ?? ""]?.inputs?.[input];
+    const r = await http(`${COMFY}/object_info/${cls}`).catch(() => null);
+    // A choice list is [names] on older nodes and ["COMBO", { options: names }] on newer ones.
+    const spec = (await r?.json().catch(() => null))?.[cls]?.input?.required?.[input];
+    const names: string[] = (Array.isArray(spec?.[0]) ? spec[0] : spec?.[1]?.options) ?? [];
+    if (want && names.length && !names.includes(want)) throw new Error(`${want} isn't installed: add the Swap a character pack in Packs`);
+  }
+}
+
 // ---------- the render queue ----------
 // Every render (Studio, chat, Paint to change) goes through here and they run one at a time. A render's settings,
 // seed and workflow are fixed when it's added, so changing the settings afterwards only affects new ones.
@@ -3819,7 +4101,7 @@ let current: QJob | null = null;
 let jobIds = 1;
 
 /** Renders whose workflow has no Studio settings (and so no seed setting of their own). */
-const NO_SETTINGS: Family[] = ["talk", "select", "cutout", "vidcut", "upscale", "songedit", "foley", "person", "world"];
+const NO_SETTINGS: Family[] = ["talk", "select", "cutout", "vidcut", "upscale", "songedit", "foley", "person", "world", "swap"];
 
 /** The modes that render with Qwen-Image-2.1, so a face or style taught with Fizgig can join them. */
 const QWEN_LORA_MODES: GenMode[] = ["image", "fast", "edit", "inpaint", "ref", "reffast"];
@@ -3872,6 +4154,10 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
     if (!opts.foley) throw new Error("no video to hear");
     foleyGraph(graph, opts.foley, seed);
   }
+  if (gm === "swap") {
+    if (!opts.swap) throw new Error("no character to swap in");
+    swapGraph(graph, opts.swap, seed);
+  }
   if (gm === "inpaint") {
     if (!opts.mask) throw new Error("nothing is painted");
     inpaintGraph(graph, opts.mask, opts);
@@ -3910,8 +4196,10 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
       (m.family === "talk" && TALK_STEPS[n.class_type]) ||
       ((m.family === "cutout" || m.family === "vidcut") && CUT_STEPS[n.class_type]) ||
       (m.family === "upscale" && UPSCALE_STEPS[n.class_type]) ||
+      (m.family === "swap" && SWAP_LABELS[n.class_type]) ||
       n.class_type;
   if (m.family === "talk") talkLabels(nodes, p.shots!);
+  if (m.family === "swap") swapLabels(graph, nodes);
   return { graph, nodes, seed, count: p.count, label: alpha ? "MOSS-Image · transparent" : moss ? "MOSS-Image Edit" : modeOf(gm).label, audio: opts.talk?.audio ?? opts.audio };
 }
 
@@ -4140,8 +4428,9 @@ async function submit(j: QJob) {
     await deps.freeGpu();
     await invoke("comfy_listen", { clientId });
     if (src && m.imageNode) {
-      setJob(1, "Uploading the image to ComfyUI…");
-      graph[m.imageNode].inputs[m.imageKey ?? "image"] = "path" in src ? await invoke<string>("comfy_upload", { path: src.path }) : await uploadReference(src);
+      setJob(1, `Uploading the ${"kind" in src && src.kind === "video" ? "video" : "image"} to ComfyUI…`);
+      const id = (m.imageClass && classNode(graph, m.imageClass)) || m.imageNode;
+      graph[id].inputs[m.imageKey ?? "image"] = "path" in src ? await invoke<string>("comfy_upload", { path: src.path }) : await uploadReference(src);
     }
     if (j.audio) {
       const song = m.family === "songedit";
@@ -4159,6 +4448,7 @@ async function submit(j: QJob) {
     if (graph["34"]?.class_type === "WorkstationRGBAVAELoader") await checkAlpha(graph);
     if (gm === "moss" && !(await comfyKnows("CLIPLoader", "type", "moss_image"))) throw new Error("MOSS-Image needs ComfyUI 0.42 or newer: update ComfyUI in Comfy Desktop");
     if (gm === "person" && !(await hasNode("MatAnyone2Run"))) throw new Error("ComfyUI doesn't have MatAnyone2: add the Video matting pack, then restart the services");
+    if (gm === "swap") await checkSwap(graph);
     if (gm === "world" && !(await hasNode("HyNomasGenerateWorld"))) throw new Error("ComfyUI doesn't have the Hy-Nomas nodes: add the Explore a world pack, then restart the services");
     if (REDRAW_MP[gm] && !(await hasNode("AUSBOSS_NODES_TiledUpscale"))) throw new Error("Redraw needs the ComfyUI-AusBoss nodes: get the Reshoot pack again in Packs, then restart the services");
     if (gm === "manga" && !(await hasNode("MangaFinish"))) throw new Error("ComfyUI doesn't have the Manga nodes yet: restart Prestige's services to copy them in");
@@ -4216,9 +4506,10 @@ function onComfy(msg: any) {
       else setJob(jobPct, `${job.nodes[d.node] ?? d.node} · ${elapsed}`);
       break;
     case "executed":
-      // The files a save node wrote, so the finished render can be found by name.
+      // The files a save node wrote, so the finished render can be found by name. A LoadVideo reports the video it
+      // read (type "input"), which can have the same name as the gallery video it came from.
       for (const list of Object.values<any>(d.output ?? {}))
-        if (Array.isArray(list)) for (const f of list) if (f?.filename && f.type !== "temp") job.outputs.push(f.filename);
+        if (Array.isArray(list)) for (const f of list) if (f?.filename && f.type !== "temp" && f.type !== "input") job.outputs.push(f.filename);
       break;
     case "execution_success":
       finish(true);
