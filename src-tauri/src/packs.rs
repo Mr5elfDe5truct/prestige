@@ -208,6 +208,16 @@ pub fn catalog(ollama_gb: f64) -> Vec<Pack> {
             moss("lodestones/Kromoss", "diffusion_models/kromoss_int8_convrot.safetensors", "diffusion_models", None),
             moss("lodestones/Kromoss", "8-steps-dmd2-lora.safetensors", "loras", Some("kromoss-8-steps-dmd2-lora.safetensors")),
         ], vram: 8.5, ram: 0.0, card: "comfyui" },
+        // Tencent's Hy-Nomas world model for /world (Explore a world): its int8 DiT (Apache-2.0), the PixelUMM decoder and
+        // encoder (NVIDIA One-Way Noncommercial License: research and evaluation only) and Qwen-Image's Qwen2.5-VL text
+        // encoder, through PedroMarinhoDev's ComfyUI-Hy-Nomas nodes (GPL-3.0, no Python dependencies). Each 5 s segment
+        // keeps ~2.5 GB of history in system RAM.
+        Pack { id: "world", title: "Explore a world", text: "Hy-Nomas world model (ComfyUI, decoder non-commercial licence): /world explores a world 5 s at a time, steered by text or camera keys; restart the services after".into(), gb: 26.7, items: vec![
+            Item::ComfyNode { name: "ComfyUI-Hy-Nomas".into(), url: "https://github.com/PedroMarinhoDev/ComfyUI-Hy-Nomas.git".into(), steps: vec![] },
+            Item::File { url: hf("PedroMarinhoDev/Hy-Nomas-ComfyUI", "hy_nomas_distil_int8.safetensors"), dest: r"models\comfy\diffusion_models\hy-nomas\hy_nomas_distil_int8.safetensors".into(), alts: vec![] },
+            Item::File { url: hf("PedroMarinhoDev/Hy-Nomas-ComfyUI", "hy_nomas_pixelumm_fp8.safetensors"), dest: r"models\comfy\vae\hy-nomas\hy_nomas_pixelumm_fp8.safetensors".into(), alts: vec![] },
+            Item::File { url: hf("Comfy-Org/Qwen-Image_ComfyUI", "split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors"), dest: r"models\comfy\text_encoders\hy-nomas\qwen_2.5_vl_7b_fp8_scaled.safetensors".into(), alts: vec![] },
+        ], vram: 11.5, ram: 32.0, card: "comfyui" },
         // MatAnyone2 (CVPR 2026) through spiritform's ComfyUI nodes: a person's alpha matte through a video from a
         // first-frame mask. Its model is under the NTU S-Lab License 1.0 (non-commercial use only). Its package doesn't
         // build with hatchling 1.27+ (a file it force-includes twice), so it's built against an older one.

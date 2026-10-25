@@ -57,6 +57,7 @@ import { checkOcr, ocrReady, readText } from "./ocr";
 import { checkTranslate, openTranslate, translateReady } from "./translate";
 import { initTrain, openTrain, trainedLoras, type TrainedLora } from "./train";
 import { STOCK, applyWanModels, diffusionModels } from "./uncensored";
+import type { WorldState } from "./world";
 import { INSTRUMENTAL_PARTS, STEMS, askSongEdit, editSecs, stemSecs, type EditTask, type SongEdit, type SongMusic, type SongSource } from "./songedit";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
@@ -109,7 +110,8 @@ type GenMode =
   | "redraw8"
   | "moss"
   | "person"
-  | "foley";
+  | "foley"
+  | "world";
 
 // How a workflow takes the generation settings: an image model with a latent size and batch, an edit
 // (size follows the picture), LTX with a 2× upscale pass ("ltx") or without ("ltx1"), Wan's two samplers,
@@ -117,8 +119,8 @@ type GenMode =
 // InfiniteTalk making a picture speak a voice recording ("talk"), SAM 3.1 selecting something in a picture ("select", not
 // queued), a picture cut out onto transparent ("cutout"), or SAM 3.1 tracking a subject through a video ("vidcut").
 // SeedVR2 sharpening a picture or a video to 1080p or 4K ("upscale"). LTX-2.3 making the sound for a silent video ("foley").
-// MatAnyone2 matting a person out of a video ("person").
-type Family = "image" | "edit" | "ltx" | "ltx1" | "wan" | "svi" | "song" | "songedit" | "model3d" | "talk" | "select" | "cutout" | "vidcut" | "upscale" | "foley" | "person";
+// MatAnyone2 matting a person out of a video ("person"). Hy-Nomas exploring a world a segment at a time ("world").
+type Family = "image" | "edit" | "ltx" | "ltx1" | "wan" | "svi" | "song" | "songedit" | "model3d" | "talk" | "select" | "cutout" | "vidcut" | "upscale" | "foley" | "person" | "world";
 
 interface Mode {
   file: string;
@@ -184,6 +186,14 @@ const ZIMAGE: Mode = {
   steps: { draft: 6, standard: 8, high: 12, max: 16 },
   secs: 40,
 };
+/* Explore a world: Tencent's Hy-Nomas (Apache-2.0 DiT, int8) through PedroMarinhoDev's ComfyUI-Hy-Nomas nodes (GPL-3.0),
+ * in segments the chat model writes (world.ts). Its PixelUMM decoder is NVIDIA's, under the One-Way Noncommercial
+ * License (research and evaluation only), which the pack and chat say. On the RTX 3060 at 832×480 a 5 s segment
+ * sampled in 25-42 s (8 steps). The decoder runs at window overlap 1: Tencent's 5 took a 4-segment, 20 s world from
+ * 428 s to 1,735 s, with no difference to see (FP8 runs no faster than dequantized on Ampere). A 3-segment world took
+ * 305 s, one from a picture with a segment after it 137 s, peaking at 11.5 GB. secs is one segment with its share of
+ * the decode. */
+const WORLD = { w: 832, h: 480, steps: 8, secs: 110 };
 /** Redraw upscale (Qwen-Image-2.1 with the Restore LoRA, a tile at a time); secs and fast are per megapixel made. */
 const REDRAW_MODE: Mode = {
   file: "qwen-image-21-edit.api.json",
@@ -560,6 +570,14 @@ const MODES: Record<GenMode, Mode> = {
   // Add sound: LTX-2.3 dev with Lightricks' Foley LoRA hears the video (frozen, its own frames) and makes its sound
   // effects, 89 frames (3.7 s) at a time (foleyGraph); Prestige then puts the sound on the original video (mux_foley).
   // secs is one window.
+  world: {
+    file: "hy-nomas-world.api.json",
+    label: "Hy-Nomas",
+    family: "world",
+    promptNode: "",
+    seed: ["6", "seed"],
+    secs: WORLD.secs,
+  },
   foley: {
     file: "ltx23-foley-v2a.api.json",
     label: "LTX-2.3 Foley",
@@ -962,6 +980,7 @@ function plan(gm: GenMode, src: Source | null = srcAsset, o?: Override, song?: P
   if (m.family === "model3d" || m.family === "select" || m.family === "cutout" || m.family === "upscale" || m.family === "songedit") return { w: 0, h: 0, count: 1, load: 0, secs: m.secs, warn: "" };
   if (m.family === "vidcut" || m.family === "person") return { w: 0, h: 0, count: 1, load: 0, secs: m.secs * 8, warn: "" }; // per second of video (videoCutout, personCutout)
   if (m.family === "foley") return { w: 0, h: 0, count: 1, load: 0, secs: m.secs * 2, warn: "" }; // per window (addSound)
+  if (m.family === "world") return { w: WORLD.w, h: WORLD.h, count: 1, load: 0, secs: m.secs, warn: "" }; // per segment (renderWorld)
   if (m.family === "song") {
     // Measured (see SONG_FIXED_SECS): the same ~5.3 GB at every length, so only a small card gets a warning.
     // A songwriter's pick that's missing (undefined) keeps the saved setting rather than blanking it.
@@ -3369,6 +3388,7 @@ interface QueueOpts {
   regions?: boolean; // inpaint: the prompt already says what fills each box (a layout edit)
   place?: string; // inpaint: a reference in ComfyUI's input folder to put in the masked area, as image 2
   fast?: boolean; // Lightning whatever the Speed setting (Reference's Turbo pick)
+  world?: WorldState; // Explore a world: the world so far, rendered whole
   extra?: string[]; // an edit: more pictures in ComfyUI's input folder, as images 2 and 3
 }
 
@@ -3685,6 +3705,47 @@ async function checkLora(graph: any, gm: GenMode) {
   if (want && !names.includes(want)) throw new Error(`${want} isn't installed: add the Reshoot pack in Packs`);
 }
 
+/** Explore a world: per segment a World Prompt holding the world up to it (so ComfyUI can reuse the segments a
+ *  continued world already has), the Segment's conditioning and empty latent with the world so far as history, an
+ *  8-step sample, and Extend World's cache pass; then the whole world decoded to one video. A picture it starts from
+ *  is segment 0 (Start From Image); the camera keys steer a segment instead of a written camera. */
+function worldGraph(g: any, w: WorldState) {
+  const upTo = (i: number) => JSON.stringify({ ...w.json, segments: w.json.segments.slice(0, i + 1) });
+  let world: [string, number] | null = null;
+  let first = 0;
+  if (w.start) {
+    // Start From Image wants segment 0 (the picture) and the first that moves; segment 1 doesn't change later.
+    g["w0p"] = { class_type: "HyNomasWorldPrompt", inputs: { world_json: upTo(1) } };
+    g["w0i"] = { class_type: "LoadImage", inputs: { image: w.start } };
+    g["w0"] = {
+      class_type: "HyNomasStartFromImage",
+      inputs: { model: ["1", 0], clip: ["2", 0], encoder: ["4", 0], script: ["w0p", 0], image: ["w0i", 0], width: WORLD.w, height: WORLD.h, still_frames: 3, seed: w.seed },
+    };
+    world = ["w0", 0];
+    first = 1;
+  } else delete g["4"];
+  let script: [string, number] = ["w0p", 0];
+  for (let i = first; i < w.json.segments.length; i++) {
+    const id = (s: string) => `w${i}${s}`;
+    g[id("p")] = { class_type: "HyNomasWorldPrompt", inputs: { world_json: upTo(i) } };
+    script = [id("p"), 0];
+    const seg: any = { clip: ["2", 0], script, segment_index: i, width: WORLD.w, height: WORLD.h };
+    if (world) seg.world = world;
+    if (w.camera[i]) {
+      g[id("c")] = { class_type: "HyNomasCameraKeys", inputs: { timeline: w.camera[i], translation_scale: 1, rotation_scale: 2.5 } };
+      seg.camera = [id("c"), 0];
+    }
+    g[id("s")] = { class_type: "HyNomasSegment", inputs: seg };
+    g[id("k")] = {
+      class_type: "KSampler",
+      inputs: { model: ["1", 0], positive: [id("s"), 0], negative: [id("s"), 1], latent_image: [id("s"), 2], seed: w.seed + i, steps: WORLD.steps, cfg: 1, sampler_name: "euler", scheduler: "simple", denoise: 1 },
+    };
+    g[id("x")] = { class_type: "HyNomasExtendWorld", inputs: { model: ["1", 0], positive: [id("s"), 0], samples: [id("k"), 0], seed: w.seed + i } };
+    world = [id("x"), 0];
+  }
+  Object.assign(g["6"].inputs, { world, script, seed: w.seed, start_image: w.start ? "one frame" : "none" });
+}
+
 /** Add sound's graph: the video's frames at 24 fps, frozen (a noise mask of 0), and sound made for each 89-frame
  *  window in turn, the windows joined end to end into one track. The positive prompt ends with Lightricks' "no speech,
  *  no music" so effects aren't drowned out. */
@@ -3752,7 +3813,7 @@ let current: QJob | null = null;
 let jobIds = 1;
 
 /** Renders whose workflow has no Studio settings (and so no seed setting of their own). */
-const NO_SETTINGS: Family[] = ["talk", "select", "cutout", "vidcut", "upscale", "songedit", "foley", "person"];
+const NO_SETTINGS: Family[] = ["talk", "select", "cutout", "vidcut", "upscale", "songedit", "foley", "person", "world"];
 
 /** The modes that render with Qwen-Image-2.1, so a face or style taught with Fizgig can join them. */
 const QWEN_LORA_MODES: GenMode[] = ["image", "fast", "edit", "inpaint", "ref", "reffast"];
@@ -3797,6 +3858,10 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
   // A transparent picture is one subject on nothing, so a layout's boxes don't apply to it.
   const alpha = gm === "moss" && transparentOn() && !opts.refLabel;
   if (gm === "moss") mossGraph(graph, opts.layout && !alpha ? layoutPrompt(prompt, p.w, p.h, opts.refLabel) : prompt, alpha);
+  if (gm === "world") {
+    if (!opts.world) throw new Error("no world to render");
+    worldGraph(graph, opts.world);
+  }
   if (gm === "foley") {
     if (!opts.foley) throw new Error("no video to hear");
     foleyGraph(graph, opts.foley, seed);
@@ -4088,6 +4153,7 @@ async function submit(j: QJob) {
     if (graph["34"]?.class_type === "WorkstationRGBAVAELoader") await checkAlpha(graph);
     if (gm === "moss" && !(await comfyKnows("CLIPLoader", "type", "moss_image"))) throw new Error("MOSS-Image needs ComfyUI 0.42 or newer: update ComfyUI in Comfy Desktop");
     if (gm === "person" && !(await hasNode("MatAnyone2Run"))) throw new Error("ComfyUI doesn't have MatAnyone2: add the Video matting pack, then restart the services");
+    if (gm === "world" && !(await hasNode("HyNomasGenerateWorld"))) throw new Error("ComfyUI doesn't have the Hy-Nomas nodes: add the Explore a world pack, then restart the services");
     if (REDRAW_MP[gm] && !(await hasNode("AUSBOSS_NODES_TiledUpscale"))) throw new Error("Redraw needs the ComfyUI-AusBoss nodes: get the Reshoot pack again in Packs, then restart the services");
     if (gm === "manga" && !(await hasNode("MangaFinish"))) throw new Error("ComfyUI doesn't have the Manga nodes yet: restart Prestige's services to copy them in");
     if (j.cancelled) throw new Error("stopped");
@@ -4235,6 +4301,16 @@ export async function renderMedia(
     if (!workflowOf(need)) throw new Error(`workflows\\${modeOf(need).file} wasn't found`);
   if (chained(gm)) return refVideo(prompt, r, refKind, progress, "chat");
   return run(gm, prompt, r, gm === "refvideo" ? {} : { kind: refKind }, progress, { from: "chat" });
+}
+
+/** Chat's /world: renders the world so far (a segment more than last time; ComfyUI reuses the earlier ones while they
+ *  are still in its cache) and resolves with the video of all of it. */
+export async function renderWorld(w: WorldState, prompt: string, progress: (pct: number, label: string) => void, start?: Reference): Promise<Asset[]> {
+  await ensureWorkflows();
+  if (!workflows.world) throw new Error(`workflows\\${MODES.world.file} wasn't found (add the Explore a world pack)`);
+  if (start && !w.start) w.start = await uploadReference(start);
+  const n = w.json.segments.length;
+  return run("world", prompt, null, { world: w }, progress, { from: "chat", note: `${n} segment${n > 1 ? "s" : ""}, about ${Math.round((WORLD.secs * n) / 60) || 1} min · `, title: prompt });
 }
 
 /** Chat's /edit: changes a picture by instruction (the whole picture, keeping its size), with Qwen-Image-2.1 Edit or

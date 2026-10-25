@@ -202,6 +202,7 @@ $PackInfo = [ordered]@{
     upscale  = @{ GB = 12.3; Text = "Upscale        SeedVR2 7B + 3B (ComfyUI, int8) - sharpen pictures to 1080p or 4K, videos to 1080p" }
     moss     = @{ GB = 14.9; Text = "MOSS-Image     MOSS-Image (ComfyUI 0.42+, int8, 8 steps) - a second picture model for text, layouts and edits" }
     kromoss  = @{ GB = 6.6;  Text = "Kromoss        Kromoss for MOSS-Image - more natural people (needs moss)" }
+    world    = @{ GB = 26.7; Text = "World          Hy-Nomas world model (ComfyUI) - explore a world a segment at a time; decoder non-commercial" }
 }
 Step 3 "Choosing models"
 if (-not $Packs) {
@@ -586,6 +587,19 @@ if ($Packs -contains "moss") {
     # only) and trmz's RGBA FLUX.2 VAE (Apache-2.0) that decodes its latents with an alpha channel.
     Download (HF "paralaif/MOSS-Image-Alpha-LoRA" "moss_alpha_v1.safetensors") "$comfyModels\loras\moss\moss-alpha-v1.safetensors"
     Download (HF "trmz/flux2-klein-alpha" "vae/diffusion_pytorch_model.safetensors") "$comfyModels\vae\moss\flux2-klein-alpha-rgba-vae.safetensors"
+}
+if ($Packs -contains "world") {
+    # Tencent's Hy-Nomas world model (DiT Apache-2.0, int8) for Prestige's /world, through PedroMarinhoDev's
+    # ComfyUI-Hy-Nomas nodes (GPL-3.0, nothing to pip install). Its PixelUMM decoder (which also holds the encoder for
+    # starting from a picture) is under NVIDIA's One-Way Noncommercial License: research and evaluation only. The text
+    # encoder is Qwen-Image's Qwen2.5-VL 7B.
+    $dir = Join-Path $nodes "ComfyUI-Hy-Nomas"
+    if (Test-Path $dir) { Skip "ComfyUI-Hy-Nomas already there" } else { git clone --depth 1 https://github.com/PedroMarinhoDev/ComfyUI-Hy-Nomas $dir -q; Ok "ComfyUI-Hy-Nomas" }
+    foreach ($f in @(@("PedroMarinhoDev/Hy-Nomas-ComfyUI", "hy_nomas_distil_int8.safetensors", "diffusion_models"),
+                     @("PedroMarinhoDev/Hy-Nomas-ComfyUI", "hy_nomas_pixelumm_fp8.safetensors", "vae"),
+                     @("Comfy-Org/Qwen-Image_ComfyUI", "split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors", "text_encoders"))) {
+        Download (HF $f[0] $f[1]) (Join-Path $comfyModels "$($f[2])\hy-nomas\$(Split-Path $f[1] -Leaf)")
+    }
 }
 if ($Packs -contains "kromoss") {
     Download (HF "lodestones/Kromoss" "diffusion_models/kromoss_int8_convrot.safetensors") "$comfyModels\diffusion_models\moss\kromoss_int8_convrot.safetensors"
