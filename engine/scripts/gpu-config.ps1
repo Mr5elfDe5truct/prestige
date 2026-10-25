@@ -166,9 +166,16 @@ function Set-ServiceGpus($Plan, $Service) {
 }
 
 # The runtime copy of bin\llama-models.ini for this plan (the tuned values stay as they are on a 12 GB card).
+# With --fit over several cards, a shared "device =" (one that pins every model to the first card) is dropped so
+# --fit pools them: on two RTX 3060s that took Qwen3.6 35B from 27.7 to 52.8 tok/s, GLM-4.7 Flash from 19.8 to 72.5
+# and Hy-Memory from 18.9 to 87.0. A model's own device line (the 27B's two-card split) stays.
 function Convert-LlamaIni($Text, $Plan) {
     if (-not $Plan -or -not ($Plan.LlamaFit -or $Plan.TensorSplit)) { return $Text }
+    $pool = $Plan.LlamaFit -and @($Plan.Services.llama).Count -gt 1
+    $section = ""
     $lines = foreach ($l in ($Text -split "`r?`n")) {
+        if ($l -match '^\s*\[([^\]]+)\]') { $section = $Matches[1] }
+        if ($pool -and $section -eq "*" -and $l -match '^\s*device\s*=') { continue }
         if ($Plan.LlamaFit) {
             if ($l -match '^\s*(n-gpu-layers|ngl|n-cpu-moe|cpu-moe)\s*=') { continue }
             # Small cards: cap the context so --fit spends the VRAM on layers rather than cache.

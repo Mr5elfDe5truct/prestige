@@ -351,12 +351,22 @@ pub fn plan_json(plan: Option<&Plan>) -> Value {
 }
 
 /// The runtime copy of bin\llama-models.ini for this plan (the tuned values stay as they are on one 12 GB card).
+/// With --fit over several cards, a shared `device =` (one pinning every model to the first card) is dropped so --fit
+/// pools them: on two RTX 3060s that took Qwen3.6 35B from 27.7 to 52.8 tok/s. A model's own device line stays.
 pub fn convert_llama_ini(text: &str, plan: Option<&Plan>) -> String {
     let Some(p) = plan.filter(|p| p.llama_fit || p.tensor_split.is_some()) else { return text.to_string() };
     let key = |l: &str| l.split_once('=').map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string()));
+    let pool = p.llama_fit && p.services.get("llama").is_some_and(|c| c.len() > 1);
+    let mut shared = false;
     let mut out: Vec<String> = Vec::new();
     for l in text.split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l)) {
         let mut line = l.to_string();
+        if l.trim_start().starts_with('[') {
+            shared = l.trim_start().starts_with("[*]");
+        }
+        if pool && shared && key(l).is_some_and(|(k, _)| k == "device") {
+            continue;
+        }
         if p.llama_fit {
             if let Some((k, v)) = key(l) {
                 if ["n-gpu-layers", "ngl", "n-cpu-moe", "cpu-moe"].contains(&k.as_str()) {
@@ -939,6 +949,10 @@ color-matcher ; python_version >= '3.9'
         let p = gpu_plan(&cards(), &json!({ "mode": "pool", "tensorSplit": "3,1" }), "").unwrap();
         assert!(!p.llama_fit);
         assert_eq!(convert_llama_ini("[*]\nngl = 99\n", Some(&p)), "[*]\r\ntensor-split = 3,1\r\nngl = 99\r\n");
+        // Pooled by --fit: the shared device line goes, a model's own stays.
+        let p = gpu_plan(&cards(), &json!({ "mode": "pool" }), "").unwrap();
+        let ini = "[*]\r\ndevice = CUDA0\r\n\r\n[two]\r\ndevice = CUDA0,CUDA1";
+        assert_eq!(convert_llama_ini(ini, Some(&p)), "[*]\r\n\r\n[two]\r\ndevice = CUDA0,CUDA1");
     }
 
     #[test]
