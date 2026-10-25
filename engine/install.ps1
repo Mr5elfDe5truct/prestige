@@ -190,7 +190,7 @@ $PackInfo = [ordered]@{
     main     = @{ GB = 22.1; Text = "Main           Qwen3.6 35B Heretic (llama.cpp) - best quality; needs 32 GB RAM" }
     deep     = @{ GB = 10.9; Text = "Deep           Qwen3.8 27B Uncensored (llama.cpp) - strongest reasoning, ~30 tok/s on 12 GB" }
     voice    = @{ GB = 18.1; Text = "Voice          Whisper turbo + VoxCPM2 voices and cloning + Qwen3.5 2B/4B for Live calls (GPU, 8 GB+)" }
-    images   = @{ GB = 36.6; Text = "Images         Qwen-Image-2.1 (+ 4-step turbo and Lightning) and Z-Image-Turbo (ComfyUI) - text to image and editing" }
+    images   = @{ GB = 41.9; Text = "Images         Qwen-Image-2.1 int8 (+ 8-step Turbo and Lightning) and Z-Image-Turbo (ComfyUI) - text to image and editing" }
     video    = @{ GB = 60.3; Text = "Video          LTX-2.5 + Wan 2.2 (ComfyUI) - text/image to video with sound" }
     computer = @{ GB = 6.9;  Text = "Computer use   UI-TARS 1.5 7B (llama.cpp) - drives the mouse and keyboard; asks about Nex-N2.5-mini (+21.6 GB)" }
     music    = @{ GB = 14.8; Text = "Music          ACE-Step 1.5 turbo + base (ComfyUI) - songs with vocals, the song editor and stems" }
@@ -395,9 +395,9 @@ $comfy = Join-Path $Root "apps\ComfyUI"
 if ($desk -and -not $NoComfyDesktop -and -not (Test-Path "$comfy\main.py")) {
     Skip "using your Comfy Desktop install ($($desk.Name))"
     $nodes = "$($desk.FullName)\ComfyUI\custom_nodes"; $comfyPy = "$($desk.FullName)\ComfyUI\.venv\Scripts\python.exe"
-    # Qwen-Image-2.1 and LTX-2.5 need ComfyUI 0.37 or newer.
+    # Qwen-Image-2.1's int8 files and LTX-2.5 need ComfyUI 0.38 or newer (tested on 0.42.5).
     $ver = (Select-String -Path "$($desk.FullName)\ComfyUI\comfyui_version.py" -Pattern '(\d+)\.(\d+)\.\d+' -ErrorAction SilentlyContinue).Matches
-    if ($ver -and [version]$ver[0].Value -lt [version]"0.37.0") {
+    if ($ver -and [version]$ver[0].Value -lt [version]"0.38.0") {
         Warn "Comfy Desktop has ComfyUI $($ver[0].Value); update it in Comfy Desktop for Qwen-Image-2.1 and LTX-2.5"
     } elseif ($ver -and $Packs -contains "moss" -and [version]$ver[0].Value -lt [version]"0.42.0") {
         Warn "Comfy Desktop has ComfyUI $($ver[0].Value); MOSS-Image needs 0.42 or newer, so update it in Comfy Desktop"
@@ -575,9 +575,13 @@ if ($Packs -contains "upscale") {
     }
 }
 if ($Packs -contains "images") {
-    # Qwen-Image-2.1: Q4_K_M DiT (uncensored build), Qwen3-VL-8B text encoder (GGUF plus its vision mmproj) and VAE.
-    Download (HF "abenzerps/Qwen-Image-2.1-Uncensored-GGUF" "qwen-image-2.1-UC-Q4_K_M.gguf") "$comfyModels\unet\qwen-image-2.1-UC-Q4_K_M.gguf"
-    Download (HF "Abiray/Qwen-Image-2.1-viggle-4-steps-turbo-GGUF" "qwen_image_2.1_turbo_Q4_K_M.gguf") "$comfyModels\unet\qwen_image_2.1_turbo_Q4_K_M.gguf"
+    # Qwen-Image-2.1: Comfy-Org's int8 convrot DiT and Qwen's 8-step Turbo (2.5x the Q4_K_M GGUFs' speed on an RTX 3060),
+    # abenzerps' uncensored LoRA that Prestige puts on both, the Qwen3-VL-8B text encoder (GGUF plus its vision mmproj)
+    # and the VAE. Prestige still runs the older GGUFs (qwen-image-2.1-UC-Q4_K_M, the Viggle turbo) where they're installed instead.
+    foreach ($f in "qwen_image_2.1_int8_convrot.safetensors", "qwen_image_2.1_turbo_int8_convrot.safetensors") {
+        Download (HF "Comfy-Org/Qwen-Image-2.1" "diffusion_models/$f") "$comfyModels\diffusion_models\qwen-image\$f"
+    }
+    Download (HF "abenzerps/Qwen-Image-2.1-Uncensored-Quantized" "qwen-image-2.1-uncensored-lora.safetensors") "$comfyModels\loras\qwen-image\qwen-image-2.1-uncensored-lora.safetensors"
     Download (HF "unsloth/Qwen3-VL-8B-Instruct-GGUF" "Qwen3-VL-8B-Instruct-UD-Q4_K_XL.gguf") "$comfyModels\text_encoders\Qwen3-VL-8B-Instruct-UD-Q4_K_XL.gguf"
     Download (HF "unsloth/Qwen3-VL-8B-Instruct-GGUF" "mmproj-F16.gguf") "$comfyModels\text_encoders\Qwen3-VL-8B-Instruct-mmproj-F16.gguf"
     Download (HF "Comfy-Org/Qwen-Image-2.1" "vae/qwen_image_2.1_vae_bf16.safetensors") "$comfyModels\vae\qwen_image_2.1_vae_bf16.safetensors"
