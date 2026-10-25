@@ -176,15 +176,17 @@ const FOLEY_MAX_SECONDS = 15;
 
 /* Swap a character: Z.ai's SCAIL-2 (Wan 2.1 14B, Comfy-Org's int8 convrot, with its DPO LoRA and lightx2v's 480p
  * step-distill LoRA at CFG 1) in Replacement mode, through ComfyUI's native nodes. SAM 3.1 tracks who's replaced
- * (the biggest one named), BiRefNet cuts the character out of the picture. It makes 81 frames at a time; each segment
- * after the first carries on from the last 5 frames of the one before (a 76-frame step), its colours matched to it.
+ * (the biggest one named), BiRefNet cuts the character out of the picture (padded to the video's shape first). It
+ * makes 81 frames at a time; each segment after the first carries on from the last 5 frames of the one before (a
+ * 76-frame step), its colours matched to it.
  * On an RTX 3060 12 GB a 5 s 768×512 clip (121 frames: a full segment and a 45-frame one) took 546 s at 4 steps, peaking
  * at 10.9 GB of VRAM and 24.5 GB of system RAM: ~52 s a step for a full segment, plus ~95 s a segment for SAM 3.1
  * (~35 s), decoding and getting the model back (ComfyUI reads all 16.7 GB again for each: 42 s from an SSD, 2 min 16 s
  * from a hard drive, so the pack puts it in a folder of its own that can be a junction). A shorter segment's steps
  * take less than its share of frames (attention grows faster than the frames). 6 steps with the model on a hard drive
- * took 1,003 s. secs below are for the SSD. */
-const SWAP = { part: 81, step: 76, overlap: 5, area: 832 * 480, loadSecs: 100, partSecs: 95, stepSecs: 52, maxSeconds: 20 };
+ * took 1,003 s. That was on a card of its own; through Prestige, with the Windows desktop on ComfyUI's card, the same
+ * 4-step swap took 701 s (10.5 GB peak), so secs below are scaled to that (and are for the SSD). */
+const SWAP = { part: 81, step: 76, overlap: 5, area: 832 * 480, loadSecs: 130, partSecs: 125, stepSecs: 69, maxSeconds: 20 };
 type SwapQuality = "draft" | "standard";
 const SWAP_STEPS: Record<SwapQuality, number> = { draft: 4, standard: 8 };
 
@@ -3079,7 +3081,7 @@ async function swapCharacter(a?: Asset) {
   dlg.ondrop = async (e) => {
     e.preventDefault();
     const path = renderIn(e.dataTransfer);
-    if (path) take(await fetch(convertFileSrc(path)).then((r) => r.blob()).catch(() => null), path.split(/[\\/]/).pop());
+    if (path) take(await fetch(convertFileSrc(path)).then((r) => (r.ok ? r.blob() : null)).catch(() => null), path.split(/[\\/]/).pop());
     else {
       const f = imageIn(e.dataTransfer);
       take(f, f?.name);
@@ -3106,7 +3108,7 @@ async function swapCharacter(a?: Asset) {
   const ratio = info.width && info.height ? info.width / info.height : 16 / 9;
   const w = Math.max(256, Math.round(Math.sqrt(SWAP.area * ratio) / 32) * 32);
   const h = Math.max(256, Math.round(Math.sqrt(SWAP.area / ratio) / 32) * 32);
-  deps.toast(`Swapping the character in: about ${aboutTime(swapSecs(frames, q))} on an RTX 3060. It opens when it's done.`);
+  deps.toast(`Swapping the character in: ${aboutTime(swapSecs(frames, q))} on an RTX 3060. It opens when it's done.`);
   try {
     // As a reference: scaled to at most 2048 px and kept as a JPEG.
     const r = await loadReference(picked);
@@ -3114,7 +3116,7 @@ async function swapCharacter(a?: Asset) {
     const ref = await uploadReference(r);
     const job: SwapJob = { ref, who: target, steps: SWAP_STEPS[q], frames, w, h };
     const out = await run("swap", target, a, { swap: job }, undefined, { from: "Swap a character", title: `${a.name}: ${target} swapped` });
-    const made = out.find((x) => x.kind === "video");
+    const made = out.find((x) => x.kind === "video" && x.path !== a.path);
     if (!made) throw new Error("no video came back");
     const swapped = await invoke<string>("mux_swap", { root: deps.root(), video: made.path, source: a.path });
     await refresh();
@@ -3995,6 +3997,9 @@ function swapGraph(g: any, s: SwapJob, seed: number) {
   const who = need(classNode(g, "CLIPTextEncode", (n) => n.inputs.clip?.[0] === sam), "SAM 3.1 prompt");
   g[who].inputs.text = s.who.trim() || "person";
   g[need(classNode(g, "BasicScheduler"), "BasicScheduler")].inputs.steps = s.steps;
+  // The picture is padded to the video's shape: WanSCAILToVideo crops it to that shape, which cut a full-body
+  // portrait to a strip of its middle, and the character came out headless or drawn far too big.
+  Object.assign(g[need(classNode(g, "ResizeAndPadImage"), "ResizeAndPadImage")].inputs, { target_width: s.w, target_height: s.h });
   const tpl: Record<string, any> = {};
   for (const id of Object.keys(g).filter((k) => g[k]._meta?.title === "segment")) {
     tpl[id] = g[id];
@@ -4058,7 +4063,9 @@ async function checkSwap(graph: any) {
   for (const [cls, input] of [["UNETLoader", "unet_name"], ["LoadBackgroundRemovalModel", "bg_removal_name"]]) {
     const want = graph[classNode(graph, cls) ?? ""]?.inputs?.[input];
     const r = await http(`${COMFY}/object_info/${cls}`).catch(() => null);
-    const names: string[] = (await r?.json().catch(() => null))?.[cls]?.input?.required?.[input]?.[0] ?? [];
+    // A choice list is [names] on older nodes and ["COMBO", { options: names }] on newer ones.
+    const spec = (await r?.json().catch(() => null))?.[cls]?.input?.required?.[input];
+    const names: string[] = (Array.isArray(spec?.[0]) ? spec[0] : spec?.[1]?.options) ?? [];
     if (want && names.length && !names.includes(want)) throw new Error(`${want} isn't installed: add the Swap a character pack in Packs`);
   }
 }
@@ -4499,9 +4506,10 @@ function onComfy(msg: any) {
       else setJob(jobPct, `${job.nodes[d.node] ?? d.node} · ${elapsed}`);
       break;
     case "executed":
-      // The files a save node wrote, so the finished render can be found by name.
+      // The files a save node wrote, so the finished render can be found by name. A LoadVideo reports the video it
+      // read (type "input"), which can have the same name as the gallery video it came from.
       for (const list of Object.values<any>(d.output ?? {}))
-        if (Array.isArray(list)) for (const f of list) if (f?.filename && f.type !== "temp") job.outputs.push(f.filename);
+        if (Array.isArray(list)) for (const f of list) if (f?.filename && f.type !== "temp" && f.type !== "input") job.outputs.push(f.filename);
       break;
     case "execution_success":
       finish(true);

@@ -381,12 +381,18 @@ pub async fn mux_swap(root: Option<String>, video: String, source: String) -> Re
             return Ok(video);
         }
         let tmp = v.with_extension("sound.mp4");
-        let status = hidden(&mut Command::new("ffmpeg"))
-            .args(["-v", "error", "-y", "-i"])
-            .arg(&v)
-            .arg("-i")
-            .arg(&src)
-            .args(["-map", "0:v:0", "-map", "1:a:0", "-map_metadata", "0", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart"])
+        // The sound is cut to the video's length (a swap can stop short of the source); -shortest with the picture
+        // copied dropped the last frames.
+        let secs = probe(&["-show_entries", "format=duration"], &v);
+        let mut ffmpeg = Command::new("ffmpeg");
+        let cmd = hidden(&mut ffmpeg);
+        cmd.args(["-v", "error", "-y", "-i"]).arg(&v).arg("-i").arg(&src);
+        if secs.parse::<f64>().is_ok() {
+            cmd.args(["-t", &secs]);
+        }
+        let status = cmd
+            // use_metadata_tags keeps ComfyUI's "prompt" tag, which the gallery reads the model and seed from.
+            .args(["-map", "0:v:0", "-map", "1:a:0", "-map_metadata", "0", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart+use_metadata_tags"])
             .arg(&tmp)
             .status()
             .map_err(|e| format!("ffmpeg: {e}"))?;
