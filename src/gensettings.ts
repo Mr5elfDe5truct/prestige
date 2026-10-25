@@ -17,7 +17,10 @@ export interface ImageSettings {
   lora?: string | null; // a face or style taught with Fizgig (train.ts): its file in ComfyUI's loras folder
   edits?: EditSpeed; // edits, Paint to change and Restore photo: Lightning's 4 steps, or the Quality steps
   moss?: MossModel; // MOSS-Image's model: the SFT release or lodestones' Kromoss fine-tune
+  editModel?: EditModel; // what edits, Paint to change and Reference run on
 }
+/** Qwen-Image-2.1, or MOSS-Image with the Moss-Image-Edit LoRA (studio.ts mossEditGraph). */
+export type EditModel = "qwen" | "moss";
 /** MOSS-Image (OpenMOSS's SFT, best with text and layouts) or Kromoss (a fine-tune of its base, more natural people). */
 export type MossModel = "sft" | "kromoss";
 /** Fast: Qwen-Image-2.1 with lightx2v's Lightning LoRA, 4 steps at CFG 1. Quality: the Quality setting's steps. */
@@ -61,7 +64,7 @@ export interface GenSettings {
 export type SettingsKey = keyof GenSettings;
 
 export const DEFAULTS: GenSettings = {
-  image: { aspect: "1:1", size: "standard", quality: "standard", count: 1, seed: null, lora: null, edits: "fast", moss: "sft" },
+  image: { aspect: "1:1", size: "standard", quality: "standard", count: 1, seed: null, lora: null, edits: "fast", moss: "sft", editModel: "qwen" },
   video: { res: "768x512", seconds: 4, fps: 24, quality: "standard", seed: null, fromPicture: "wan", sage: "on" },
   animate: { res: "auto", seconds: 5, fps: 16, quality: "standard", seed: null },
   long: { size: 640, frames: 49, shots: 4, quality: "standard", seed: null, high: null, low: null },
@@ -220,6 +223,7 @@ function load(): GenSettings {
       count: (v) => v >= 1,
       edits: (v) => v === "fast" || v === "quality",
       moss: (v) => v === "sft" || v === "kromoss",
+      editModel: (v) => v === "qwen" || v === "moss",
     }),
     video: sane(DEFAULTS.video, s.video, { quality: isQuality, seconds: (v) => v > 0, fps: (v) => v > 0, fromPicture: (v) => v === "wan" || v === "ltx", sage: (v) => v === "on" || v === "off" }),
     animate: sane(DEFAULTS.animate, s.animate, { quality: isQuality, seconds: (v) => v > 0 }),

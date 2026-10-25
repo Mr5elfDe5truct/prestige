@@ -145,10 +145,10 @@ chat keeps going while a render runs. Small cards get smaller models and context
 | Live calls (Prestige) | Qwen3.5 4B with Kokoro voices, Qwen3.5 2B beside VoxCPM2 (vision, no thinking, 16k context) | Ollama | 3.4 / 2.7 GB | ~55 / ~60 tok/s; 3.3 / 2.4 GB VRAM |
 | Reading your files (Prestige Knowledge) | Qwen3-Embedding 0.6B | Ollama | 0.6 GB | ~1 GB VRAM while it reads |
 | Computer use | UI-TARS-1.5-7B Q5_K_M | llama.cpp | ~5.5 GB | on demand |
-| Images | Qwen-Image-2.1 Q4_K_M (uncensored), 20 steps, Qwen3-VL-8B text encoder | ComfyUI + GGUF | ~11.6 GB | ~80 s at 1024² (~110 s cold); peak 6–8 GB VRAM |
-| Images, fast | Qwen-Image-2.1 Viggle 4-step turbo Q4_K_M | ComfyUI + GGUF | +4.2 GB | ~25 s at 1024² |
-| Image editing | Qwen-Image-2.1 (same files) | ComfyUI + GGUF | — | ~2 min at 1024²; peak 8.3 GB VRAM |
-| Reference image → new scene | Qwen-Image-2.1 or its turbo (same files) | ComfyUI + GGUF | — | ~2 min at 1024² (~2.2 min cold) |
+| Images | Qwen-Image-2.1 int8 convrot (Comfy-Org) with abenzerps' uncensored LoRA, 20 steps, Qwen3-VL-8B text encoder (GGUF); the older Q4_K_M GGUF still runs where it's installed | ComfyUI (native) | ~14 GB | ~30 s at 1024² warm on the RTX 3060 (GGUF: ~80 s); peak ~10.9 GB VRAM |
+| Images, fast | Qwen-Image-2.1-Turbo int8 (Qwen's 8-step schedule), same LoRA | ComfyUI (native) | +6.8 GB | ~12 s at 1024² warm (Viggle turbo GGUF: ~21 s); peak 8.5 GB |
+| Image editing | Qwen-Image-2.1 (same files) | ComfyUI (native) | — | 1024² edit: 40 s at 20 steps, 12 s Fast (Lightning, 4 steps) warm; GGUF 102 s and 27 s; peak 10.9 GB VRAM |
+| Reference image → new scene | Qwen-Image-2.1 or its turbo (same files) | ComfyUI (native) | — | ~2 min at 1024² (~2.2 min cold) |
 | Image → video + audio | LTX-2.5 (same files), the picture as the first frame | ComfyUI + GGUF | — | ~4–11 min for 4 s at 768×512 (longer when the models load from disk; +2–3.5 min when Qwen-Image makes the first frame) |
 | Images (alternative) | Z-Image-Turbo | ComfyUI | 21 GB | ~35–40 s at 1024² |
 | Text → video + audio | LTX-2.5 22B distilled Q4_K_M, two-stage with the x2 latent upscaler | ComfyUI + GGUF | ~34 GB | ~3.5 min for 4 s at 768×512 from an NVMe drive (~9.5 min from an HDD); 5 s ~3.8 min, 10 s ~5.4 min, 1280×704 10 s ~10 min, all within 12 GB (part of the model streams from RAM) |
@@ -210,7 +210,7 @@ It installs into `%USERPROFILE%\RG Studios\Workstation` (change it with `-Root`)
 | `main` | Qwen3.6 35B-A3B Heretic + vision (llama.cpp, needs 32 GB RAM) | 22 GB |
 | `deep` | Qwen3.8 27B Uncensored + vision (llama.cpp), the strongest reasoner, fully on a 12 GB GPU | 11 GB |
 | `voice` | Whisper large-v3-turbo speech-to-text and VoxCPM2 voices on the GPU (needs 8 GB+ VRAM), plus Qwen3.5 2B and 4B for Prestige's Live calls; without it, Open WebUI's CPU Whisper `base` is used | 18 GB |
-| `images` | Qwen-Image-2.1 text-to-image, editing and reference images, its 4-step turbo (ComfyUI GGUF), and Z-Image-Turbo | 37 GB |
+| `images` | Qwen-Image-2.1 text-to-image, editing and reference images, its 8-step Turbo (int8), and Z-Image-Turbo | 42 GB |
 | `video` | Wan 2.2 image-to-video and LTX-2.5 text- and image-to-video (ComfyUI GGUF) | 60 GB |
 | `computer` | UI-TARS 1.5 7B (llama.cpp); it then asks about Nex-N2.5-mini (+21.6 GB, 32 GB RAM; or `-Nex`), the model Prestige's Do it for me prefers | 7 GB |
 | `music` | ACE-Step 1.5 turbo (ComfyUI) for Prestige's songs: Studio's Music tab, `/song` in chat and the song editor; the base model for its stems | 14.8 GB |
