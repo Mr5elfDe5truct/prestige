@@ -105,6 +105,8 @@ type GenMode =
   | "outfit"
   | "restore"
   | "manga"
+  | "redraw4"
+  | "redraw8"
   | "moss"
   | "person"
   | "foley";
@@ -181,6 +183,20 @@ const ZIMAGE: Mode = {
   latent: "6",
   steps: { draft: 6, standard: 8, high: 12, max: 16 },
   secs: 40,
+};
+/** Redraw upscale (Qwen-Image-2.1 with the Restore LoRA, a tile at a time); secs and fast are per megapixel made. */
+const REDRAW_MODE: Mode = {
+  file: "qwen-image-21-edit.api.json",
+  label: "Qwen-Image-2.1 Redraw",
+  family: "edit",
+  promptNode: "4",
+  promptKey: "prompt",
+  seed: ["6", "seed"],
+  steps: { draft: 16, standard: 25, high: 30, max: 40 },
+  secs: 71,
+  fast: 25,
+  note: "redraw upscale",
+  imageNode: "9",
 };
 const MODES: Record<GenMode, Mode> = {
   image: {
@@ -520,6 +536,11 @@ const MODES: Record<GenMode, Mode> = {
     note: "restore photo",
     imageNode: "9",
   },
+  // Redraw at 4 or 8 MP: the edit graph with the Restore LoRA, run on the tiles AusBoss's Tiled Upscale cuts the
+  // picture into (redrawGraph). secs and fast are per megapixel of the result. On the RTX 3060 a 1 MP picture took
+  // 286 s to 4 MP and 567 s to 8 MP at 25 steps, and 60 s and 228 s Fast (Lightning), peaking at 11.5 GB.
+  redraw4: REDRAW_MODE,
+  redraw8: REDRAW_MODE,
   // Make it manga: the edit graph redraws the picture as an inked black-and-white panel at about 2 MP, then
   // ashukae's Manga Finish prints it with a real screentone and Manga Panel frames it (mangaGraph). On the RTX 3060 a
   // 1024² picture took 204 s to sample at 20 steps and 44 s with Lightning, peaking at 9.1 and 10.3 GB.
@@ -568,7 +589,7 @@ const RESHOOT_LORAS: Partial<Record<GenMode, { file: string; strength: number }>
 const LIGHTNING = { file: "qwen-image-2.1-lightning-4step.safetensors", steps: 4 };
 const LIGHTNING_LOAD_SECS = 20;
 /** The modes the Speed setting (Fast or Quality) applies to. Reference's own Turbo pick runs Lightning too. */
-const LIGHTNING_MODES: GenMode[] = ["edit", "inpaint", "restore", "manga"];
+const LIGHTNING_MODES: GenMode[] = ["edit", "inpaint", "restore", "manga", "redraw4", "redraw8"];
 const lightningOn = (gm: GenMode) => (LIGHTNING_MODES.includes(gm) && settings().image.edits !== "quality") || gm === "reffast";
 /** The turbo model Reference's Turbo pick falls back to when the Lightning LoRA isn't installed. */
 const TURBO_UNET = "qwen_image_2.1_turbo_Q4_K_M.gguf";
@@ -944,8 +965,8 @@ function plan(gm: GenMode, src: Source | null = srcAsset, o?: Override, song?: P
     const ratio = steps / m.steps!.standard!;
     if (m.family === "edit") {
       // Restore photo redraws the picture at about 2 MP, whatever its size.
-      const px = gm === "restore" ? RESTORE.mp : gm === "manga" ? MANGA_MP : src?.width && src.height ? (src.width * src.height) / MP : 1;
-      p = { w: 0, h: 0, steps, count: 1, load: px, secs: fast ? LIGHTNING_LOAD_SECS + m.fast! * px : m.secs * px * ratio };
+      const px = gm === "restore" ? RESTORE.mp : gm === "manga" ? MANGA_MP : REDRAW_MP[gm] ? redrawMp(gm, src) : src?.width && src.height ? (src.width * src.height) / MP : 1;
+      p = { w: 0, h: 0, steps, count: 1, load: REDRAW_MP[gm] ? REDRAW.tileMp : px, secs: fast ? LIGHTNING_LOAD_SECS + m.fast! * px : m.secs * px * ratio };
     } else {
       const [w, h] = o ? [o.w, o.h] : imageDims(s.aspect, s.size);
       const count = o ? o.count : s.count;
@@ -2392,6 +2413,12 @@ function upscaleItems(a: Asset): MenuItem[] {
     if (short < 1080) out.push({ label: "Upscale to 1080p", run: () => upscale(a, 1080), key: "SeedVR2" });
     if (short < 2160) out.push({ label: "Upscale to 4K", run: () => upscale(a, 2160), key: "SeedVR2" });
   }
+  // Redraw: Qwen-Image redraws the picture in tiles at 4 or 8 MP (new detail, where SeedVR2 sharpens what's there).
+  const mp = a.width && a.height ? (a.width * a.height) / MP : 0;
+  if (a.kind === "image" && workflows.redraw4 && mp) {
+    if (mp < 3.5) out.push({ label: "Redraw at 4 MP", run: () => redraw(a, "redraw4"), key: "Qwen-Image" });
+    if (mp < 7) out.push({ label: "Redraw at 8 MP", run: () => redraw(a, "redraw8"), key: "Qwen-Image" });
+  }
   if (a.kind === "video" && workflows.upvideo && short < 1080) out.push({ label: "Upscale to 1080p", run: () => upscale(a, 1080), key: "SeedVR2" });
   return out;
 }
@@ -2412,6 +2439,20 @@ async function upscale(a: Asset, size: UpscaleSize) {
     if (out[0]) openRender(out[0].path);
   } catch (e) {
     if (errMsg(e) !== "stopped") deps.toast(`Couldn't upscale it: ${errMsg(e)}`, "warn");
+  }
+}
+
+/** Redraw upscale: Qwen-Image redraws the picture a tile at a time at 4 or 8 MP. It goes into the gallery next to the
+ *  original and opens when it's done. */
+async function redraw(a: Asset, gm: "redraw4" | "redraw8") {
+  closeLightbox();
+  const p = plan(gm, a);
+  deps.toast(`Redrawing at ${REDRAW_MP[gm]} MP: ${aboutTime(p.secs)}. It opens when it's done.`);
+  try {
+    const out = await run(gm, a.prompt || a.name, a, {}, undefined, { from: "Upscale", title: `${a.name} redrawn at ${REDRAW_MP[gm]} MP` });
+    if (out[0]) openRender(out[0].path);
+  } catch (e) {
+    if (errMsg(e) !== "stopped") deps.toast(`Couldn't redraw it: ${errMsg(e)}`, "warn");
   }
 }
 
@@ -3364,6 +3405,34 @@ function mossGraph(g: any, prompt: string) {
   g["4"].inputs.text = prompt;
 }
 
+/* Redraw upscale: AusBoss's Tiled Upscale (ComfyUI-AusBoss, MIT) enlarges the picture to 4 or 8 MP and cuts it into
+ * tiles of up to 2 MP; Qwen-Image-2.1 with ausboss's Restore LoRA redraws each tile at its own size (resolution 0) from
+ * the restore request, and Tiled Upscale Stitch blends them back, each tile's colours matched to the same tile of the
+ * picture. A picture is redrawn at no more than 8 times its own megapixels and enlarged plainly from there, as the
+ * node's max_growth does, so a small picture isn't invented past its detail. */
+const REDRAW_MP: Partial<Record<GenMode, number>> = { redraw4: 4, redraw8: 8 };
+const REDRAW = { tileMp: 2, overlap: 128, growth: 8 };
+/** The megapixels a redraw makes of this picture. */
+const redrawMp = (gm: GenMode, src: Source | null) => {
+  const own = src?.width && src.height ? (src.width * src.height) / MP : 1;
+  return Math.min(REDRAW_MP[gm] ?? 4, own * REDRAW.growth);
+};
+
+function redrawGraph(g: any, mp: number) {
+  g["u1"] = {
+    class_type: "AUSBOSS_NODES_TiledUpscale",
+    inputs: { image: ["9", 0], megapixels: mp, tile_megapixels: REDRAW.tileMp, overlap: REDRAW.overlap, multiple: 32, max_growth: REDRAW.growth },
+  };
+  g["4"].inputs["images.image_1"] = ["u1", 0];
+  g["4"].inputs.resolution = 0;
+  g["4"].inputs.prompt = restorePrompt("photo");
+  g["30"] = { class_type: "LoraLoaderModelOnly", inputs: { model: ["1", 0], lora_name: RESTORE.file, strength_model: 1 } };
+  g["6"].inputs.model = ["30", 0];
+  g["u2"] = { class_type: "AUSBOSS_NODES_TiledUpscaleStitch", inputs: { tiles: ["7", 0], stitcher: ["u1", 1], keep_colors: 1 } };
+  g["8"].inputs.images = ["u2", 0];
+  g["8"].inputs.filename_prefix = `qwen-image-redraw-${mp >= 8 ? 8 : 4}mp`;
+}
+
 /** Make it manga: the picture at about 2 MP redrawn as an inked panel, printed by Manga Finish and framed by Manga Panel. */
 function mangaGraph(g: any) {
   g["10"] = { class_type: "ImageScaleToTotalPixels", inputs: { image: ["9", 0], upscale_method: "lanczos", megapixels: MANGA_MP, resolution_steps: 32 } };
@@ -3540,6 +3609,7 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
   }
   if (gm === "angle" || gm === "outfit") reshootGraph(graph, gm, opts.outfit);
   if (gm === "restore") restoreGraph(graph, opts.restore ?? "photo");
+  if (REDRAW_MP[gm]) redrawGraph(graph, REDRAW_MP[gm]!);
   if (gm === "manga") mangaGraph(graph);
   if (gm === "person") {
     if (!opts.mask || !opts.frames) throw new Error("nobody is picked");
@@ -3784,6 +3854,7 @@ async function submit(j: QJob) {
     if (graph["30"] || graph["35"]) await checkLora(graph, gm);
     if (gm === "moss" && !(await comfyKnows("CLIPLoader", "type", "moss_image"))) throw new Error("MOSS-Image needs ComfyUI 0.42 or newer: update ComfyUI in Comfy Desktop");
     if (gm === "person" && !(await hasNode("MatAnyone2Run"))) throw new Error("ComfyUI doesn't have MatAnyone2: add the Video matting pack, then restart the services");
+    if (REDRAW_MP[gm] && !(await hasNode("AUSBOSS_NODES_TiledUpscale"))) throw new Error("Redraw needs the ComfyUI-AusBoss nodes: run the Workstation's install.ps1 again (or add ausboss/ComfyUI-AusBoss in ComfyUI Manager)");
     if (gm === "manga" && !(await hasNode("MangaFinish"))) throw new Error("ComfyUI doesn't have the Manga nodes yet: restart Prestige's services to copy them in");
     if (j.cancelled) throw new Error("stopped");
     const r = await http(`${COMFY}/prompt`, {
@@ -4140,6 +4211,9 @@ function actsFor(a: Asset): string[] {
     if (workflows.ref || workflows.reffast) out.push("reference");
     if (workflows.upimage && short < 1080) out.push("up1080");
     if (workflows.upimage && short < 2160) out.push("up4k");
+    const mp = a.width && a.height ? (a.width * a.height) / MP : 0;
+    if (workflows.redraw4 && mp && mp < 3.5) out.push("redraw4");
+    if (workflows.redraw4 && mp && mp < 7) out.push("redraw8");
     if (workflows.model3d) out.push("model3d");
     if (workflows.cutout) out.push("removebg");
     if (workflows.talk) out.push("talk");
@@ -4251,6 +4325,10 @@ async function phoneAct(path: string, what: string, text: string) {
   const a = await findItem(path);
   const queued = (j: QJob) => ({ ok: true, queued: j.id, queue: phoneQueue() });
   switch (what) {
+    case "redraw4":
+    case "redraw8":
+      if (!workflows[what]) throw new Error("Redraw needs the Qwen-Image edit workflow (the Workstation's images pack).");
+      return queued(enqueue(what, a.prompt || a.name, a, {}, { from: "phone", title: `${a.name} redrawn at ${REDRAW_MP[what]} MP` }));
     case "up1080":
     case "up4k": {
       const size: UpscaleSize = what === "up4k" ? 2160 : 1080;

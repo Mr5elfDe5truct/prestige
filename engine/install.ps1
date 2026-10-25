@@ -418,10 +418,12 @@ if ($desk -and -not $NoComfyDesktop -and -not (Test-Path "$comfy\main.py")) {
     } else { Skip "ComfyUI environment already set up" }
     $nodes = "$comfy\custom_nodes"; $comfyPy = "$comfyEnv\Scripts\python.exe"
 }
-# Custom nodes the workflows use: GGUF model loaders and KJNodes (VAELoaderKJ).
-# leejet's ComfyUI-GGUF is city96's plus Qwen-Image-2.1 and the Qwen3-VL text encoder's mmproj.
+# Custom nodes the workflows use: GGUF model loaders, KJNodes (VAELoaderKJ) and ausboss's ComfyUI-AusBoss (MIT; Tiled
+# Upscale for Prestige's Redraw at 4 / 8 MP). leejet's ComfyUI-GGUF is city96's plus Qwen-Image-2.1 and the Qwen3-VL
+# text encoder's mmproj.
 foreach ($n in @(@{ Name = "ComfyUI-GGUF"; Url = "https://github.com/leejet/ComfyUI-GGUF.git" },
-                 @{ Name = "ComfyUI-KJNodes"; Url = "https://github.com/kijai/ComfyUI-KJNodes.git" })) {
+                 @{ Name = "ComfyUI-KJNodes"; Url = "https://github.com/kijai/ComfyUI-KJNodes.git" },
+                 @{ Name = "ComfyUI-AusBoss"; Url = "https://github.com/ausboss/ComfyUI-AusBoss.git" })) {
     $dir = Join-Path $nodes $n.Name
     if ((Test-Path "$dir\.git") -and ((git -C $dir remote get-url origin) -match "city96")) {
         git -C $dir remote set-url origin $n.Url
