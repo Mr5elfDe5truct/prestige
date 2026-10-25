@@ -229,6 +229,20 @@ pub fn catalog(ollama_gb: f64) -> Vec<Pack> {
             ] },
             Item::File { url: "https://github.com/pq-yang/MatAnyone2/releases/download/v1.0.0/matanyone2.pth".into(), dest: r"models\comfy\matanyone2\matanyone2.pth".into(), alts: vec![] },
         ], vram: 2.5, ram: 0.0, card: "comfyui" },
+        // Z.ai's SCAIL-2 (Apache-2.0) for Swap a character, as Comfy-Org's int8 convrot with its DPO LoRA and lightx2v's
+        // 480p step-distill LoRA, through ComfyUI's native nodes; SAM 3.1 finds who's replaced, BiRefNet cuts the
+        // character out of its picture. The Wan 2.1 text encoder, VAE and CLIP vision are the Talking pack's.
+        Pack { id: "swap", title: "Swap a character", text: "SCAIL-2 on Wan 2.1 14B (ComfyUI 0.42+, int8): put the character from a picture in place of a person in a video, moving as they did".into(), gb: 27.2, items: vec![
+            // In its own folder, so it can be a junction to a faster drive (a segment reads all 16.7 GB again).
+            Item::File { url: hf("Comfy-Org/SCAIL-2", "diffusion_models/wan2.1_14B_SCAIL_2_int8_convrot.safetensors"), dest: r"models\comfy\diffusion_models\scail2\wan2.1_14B_SCAIL_2_int8_convrot.safetensors".into(), alts: vec![] },
+            comfy_same("Comfy-Org/SCAIL-2", "loras/wan2.1_SCAIL_2_DPO_lora_bf16.safetensors"),
+            comfy("Kijai/WanVideo_comfy", "Lightx2v/lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors", "loras"),
+            comfy(wan21, "split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors", "text_encoders"),
+            comfy(wan21, "split_files/vae/wan_2.1_vae.safetensors", "vae"),
+            comfy(wan21, "split_files/clip_vision/clip_vision_h.safetensors", "clip_vision"),
+            comfy_same("Comfy-Org/sam3.1", "checkpoints/sam3.1_multiplex_fp16.safetensors"),
+            comfy_same("Comfy-Org/BiRefNet", "background_removal/birefnet.safetensors"),
+        ], vram: 11.5, ram: 24.0, card: "comfyui" },
         // ausboss's ComfyUI-AusBoss (MIT, no Python dependencies) brings Tiled Upscale for Redraw at 4 / 8 MP.
         Pack { id: "reshoot", title: "Reshoot", text: "Multiple-Angles, Outfit Swap and Restore LoRAs for Qwen-Image-2.1, and ausboss's tiled upscale nodes (ComfyUI): a new camera angle, try on an outfit, restore a photo, redraw at 4 or 8 MP (needs Images; restart the services after)".into(), gb: 0.7, items: vec![
             Item::File { url: hf("akhaliq/Qwen-Image-2.1-Multiple-Angles-LoRA", "checkpoints_v2/angles_v2_full_qwen21_multiple_angles_v2_qwen21_multiple_angles_v2_000001500.safetensors"), dest: r"models\comfy\loras\qwen-image-2.1-multiple-angles-v2.safetensors".into(), alts: vec![] },

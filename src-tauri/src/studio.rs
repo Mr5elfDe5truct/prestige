@@ -362,6 +362,79 @@ pub async fn mux_foley(root: Option<String>, video: String, audio: String) -> Re
     .map_err(|e| e.to_string())?
 }
 
+/// Swap a character: the source video's sound put back on the swapped video ComfyUI saved (SCAIL-2 makes pictures
+/// only), in place, its picture and metadata copied as they are. A source without sound leaves it as it was.
+#[tauri::command]
+pub async fn mux_swap(root: Option<String>, video: String, source: String) -> Result<String, String> {
+    let out_dir = output_dir(root);
+    tauri::async_runtime::spawn_blocking(move || {
+        let v = PathBuf::from(&video);
+        let src = PathBuf::from(&source);
+        // Only a render is rewritten; the source is only read.
+        if !v.starts_with(&out_dir) || !v.is_file() {
+            return Err(format!("{} isn't a render", v.display()));
+        }
+        if !src.is_file() {
+            return Err(format!("{} isn't there", src.display()));
+        }
+        if probe(&["-select_streams", "a:0", "-show_entries", "stream=index"], &src).is_empty() {
+            return Ok(video);
+        }
+        let tmp = v.with_extension("sound.mp4");
+        let status = hidden(&mut Command::new("ffmpeg"))
+            .args(["-v", "error", "-y", "-i"])
+            .arg(&v)
+            .arg("-i")
+            .arg(&src)
+            .args(["-map", "0:v:0", "-map", "1:a:0", "-map_metadata", "0", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart"])
+            .arg(&tmp)
+            .status()
+            .map_err(|e| format!("ffmpeg: {e}"))?;
+        if !status.success() || !tmp.exists() {
+            let _ = fs::remove_file(&tmp);
+            return Err("ffmpeg couldn't put the sound back on the video".into());
+        }
+        fs::rename(&tmp, &v).map_err(|e| e.to_string())?;
+        Ok(video)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// A video's size, frame rate, frame count and length, read by ffprobe (Swap a character plans its segments by them).
+#[tauri::command]
+pub async fn video_info(path: String) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let p = PathBuf::from(&path);
+        if !p.is_file() {
+            return Err(format!("{} isn't there", p.display()));
+        }
+        let s = probe(&["-select_streams", "v:0", "-show_entries", "stream=width,height,r_frame_rate,nb_frames"], &p);
+        let f: Vec<&str> = s.lines().next().unwrap_or("").split(',').collect();
+        let num = |i: usize| f.get(i).and_then(|x| x.trim().parse::<f64>().ok());
+        let (w, h) = (num(0).ok_or("ffprobe couldn't read the video")?, num(1).unwrap_or(0.0));
+        let fps = f.get(2).and_then(|r| {
+            let (a, b) = r.split_once('/').unwrap_or((r, "1"));
+            Some(a.trim().parse::<f64>().ok()? / b.trim().parse::<f64>().ok().filter(|b| *b > 0.0)?)
+        }).unwrap_or(24.0);
+        let secs = probe(&["-show_entries", "format=duration"], &p).trim().parse::<f64>().unwrap_or(0.0);
+        let frames = num(3).filter(|n| *n > 0.0).unwrap_or((secs * fps).round());
+        let audio = !probe(&["-select_streams", "a:0", "-show_entries", "stream=index"], &p).is_empty();
+        Ok(serde_json::json!({ "width": w, "height": h, "fps": fps, "frames": frames, "seconds": secs, "audio": audio }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// A video from the PC (Swap a character from Studio's Video tab). None if cancelled.
+#[tauri::command]
+pub async fn pick_video(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let dialog = app.dialog().file().add_filter("Videos", VIDEO_EXT).set_title("The video to swap a character in");
+    let picked = tauri::async_runtime::spawn_blocking(move || dialog.blocking_pick_file()).await.map_err(|e| e.to_string())?;
+    Ok(picked.and_then(|p| p.into_path().ok()).map(|p| p.to_string_lossy().into_owned()))
+}
+
 /// A video's first frame as a PNG, to pick what to cut out of it (Cut out a person), in a .frames folder of ComfyUI's
 /// output folder, which the gallery leaves out.
 #[tauri::command]
