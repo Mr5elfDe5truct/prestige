@@ -3692,7 +3692,7 @@ async function checkLora(graph: any, gm: GenMode) {
   const r = await http(`${COMFY}/object_info/LoraLoaderModelOnly`).catch(() => null);
   const names: string[] = (await r?.json().catch(() => null))?.LoraLoaderModelOnly?.input?.required?.lora_name?.[0] ?? [];
   if (!names.length) return;
-  const fast = graph["35"];
+  const fast = loraNode(graph, "35");
   if (fast && !names.includes(fast.inputs.lora_name)) {
     graph["6"].inputs.model = fast.inputs.model;
     delete graph["35"];
@@ -3701,8 +3701,14 @@ async function checkLora(graph: any, gm: GenMode) {
     if (!lightningMissingSaid) deps.toast("Fast edits need the Lightning LoRA: add the Images pack in Packs. Until then they run at Quality.");
     lightningMissingSaid = true;
   }
-  const want = graph["30"]?.inputs?.lora_name as string | undefined;
+  const want = loraNode(graph, "30")?.inputs?.lora_name as string | undefined;
   if (want && !names.includes(want)) throw new Error(`${want} isn't installed: add the Reshoot pack in Packs`);
+}
+
+/** A graph's node by id when it's a LoRA loader. Other graphs use the same ids for other nodes: in every LTX graph
+ *  35 decodes the sound, and taking it for the Lightning LoRA deleted it, so ComfyUI refused the render. */
+function loraNode(graph: any, id: string): any {
+  return graph[id]?.class_type === "LoraLoaderModelOnly" ? graph[id] : undefined;
 }
 
 /** Explore a world: per segment a World Prompt holding the world up to it (so ComfyUI can reuse the segments a
@@ -4146,7 +4152,7 @@ async function submit(j: QJob) {
     // Uncensored models for what Prestige makes; a photo brought in from outside keeps the standard ones.
     const made = madeHere(src);
     if (m.family === "wan" || m.family === "svi") await applyWanModels(graph, [SVI.high, SVI.low], settings()[m.family === "svi" ? "long" : "animate"], m.family === "svi" ? SVI.fp16 : undefined, made);
-    if (graph["30"] || graph["35"]) await checkLora(graph, gm);
+    if (loraNode(graph, "30") || loraNode(graph, "35")) await checkLora(graph, gm);
     await qwenModels(graph);
     if (graph.medit) await checkMossEdit(graph);
     if (SAGE_FAMILIES.includes(m.family) && settings().video.sage !== "off" && (await hasNode("WorkstationSageAttention"))) sageGraph(graph);
