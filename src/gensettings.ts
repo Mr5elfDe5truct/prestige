@@ -34,6 +34,7 @@ export interface VideoSettings {
   high?: string | null; // Animate: the high- and low-noise models (null = auto, uncensored if installed; "stock")
   low?: string | null;
   fromPicture?: "wan" | "ltx"; // Video: a video from a picture runs on Wan 2.2 (default) or LTX-2.5
+  sage?: "on" | "off"; // SageAttention on Wan 2.2 (Animate, long video) where it can run; kept with Video's settings
 }
 export interface LongSettings {
   size: number; // the longest side while rendering; the saved video is upscaled 2×
@@ -64,7 +65,7 @@ export type SettingsKey = keyof GenSettings;
 
 export const DEFAULTS: GenSettings = {
   image: { aspect: "1:1", size: "standard", quality: "standard", count: 1, seed: null, lora: null, edits: "fast", moss: "sft", editModel: "qwen" },
-  video: { res: "768x512", seconds: 4, fps: 24, quality: "standard", seed: null },
+  video: { res: "768x512", seconds: 4, fps: 24, quality: "standard", seed: null, fromPicture: "wan", sage: "on" },
   animate: { res: "auto", seconds: 5, fps: 16, quality: "standard", seed: null },
   long: { size: 640, frames: 49, shots: 4, quality: "standard", seed: null, high: null, low: null },
   music: { seconds: 120, bpm: 120, key: "C major", meter: "4", language: "en", quality: "standard", seed: null },
@@ -224,7 +225,7 @@ function load(): GenSettings {
       moss: (v) => v === "sft" || v === "kromoss",
       editModel: (v) => v === "qwen" || v === "moss",
     }),
-    video: sane(DEFAULTS.video, s.video, { quality: isQuality, seconds: (v) => v > 0, fps: (v) => v > 0 }),
+    video: sane(DEFAULTS.video, s.video, { quality: isQuality, seconds: (v) => v > 0, fps: (v) => v > 0, fromPicture: (v) => v === "wan" || v === "ltx", sage: (v) => v === "on" || v === "off" }),
     animate: sane(DEFAULTS.animate, s.animate, { quality: isQuality, seconds: (v) => v > 0 }),
     long: sane(DEFAULTS.long, s.long, { quality: isQuality, size: (v) => v > 0, frames: (v) => v > 0, shots: (v) => v >= 1 }),
     music: sane(DEFAULTS.music, s.music, {

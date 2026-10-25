@@ -1853,6 +1853,8 @@ function settingsFields(gm: GenMode, src: Source | null = srcAsset): Field[] {
     field("Length", "seconds", WAN_SECONDS.map((n) => [n, `${n} seconds`]), v.seconds, `${wanFrames(v.seconds)} frames at 16 fps, Wan's own rate`);
   }
   if (m.family === "wan" || m.family === "svi") wanPicks(field, settings()[m.family === "svi" ? "long" : "animate"]);
+  if (SAGE_FAMILIES.includes(m.family))
+    field("Faster video", "sage", [["on", "On · SageAttention"], ["off", "Off"]], settings().video.sage ?? "on", SAGE_HINT);
   if (m.family === "svi") {
     const v = settings().long;
     const dims = (n: number) => sviDims(n, src?.width, src?.height).join(" × ");
@@ -1936,7 +1938,7 @@ function settingsForm(el: HTMLElement, gm: GenMode, withWarn: boolean) {
   $$<HTMLSelectElement>("select", el).forEach((sel) =>
     sel.addEventListener("change", () => {
       const k = sel.dataset.k!;
-      update(k === "fromPicture" ? "video" : key, { [k]: fieldValue(k, sel.value) } as any);
+      update(k === "fromPicture" || k === "sage" ? "video" : key, { [k]: fieldValue(k, sel.value) } as any);
     }),
   );
   const seedIn = $<HTMLInputElement>("input[data-k=seed]", el);
@@ -3504,6 +3506,27 @@ async function hasNode(name: string): Promise<boolean> {
   return name in ((await r.json().catch(() => ({}))) ?? {});
 }
 
+/* Faster video: SageAttention 2.2 (int8 attention kernels, through triton-windows) on Wan 2.2, by the engine's
+ * Workstation Sage Attention node after each diffusion-model loader. The node passes the model through unchanged where
+ * the kernels can't run (not installed, or a card older than Ampere, like the RTX 2060), so this is safe to leave on.
+ * On the RTX 3060 a Wan 2.2 step went from 72-77 s to 55-61 s, and a 4-shot long video at 640 px from 1,769 s to
+ * 1,525 s. Not LTX-2.5: its steps took 7.9 s with and without (KJNodes' LTX-2 patch too), and most of its time isn't
+ * sampling. TeaCache and EasyCache were left out: at 4 and 8 distilled steps EasyCache skipped none on LTX, and TeaCache
+ * saved 28 s of 368 on a Wan clip. */
+const SAGE_FAMILIES: Family[] = ["wan", "svi"];
+const SAGE_HINT = "SageAttention for Wan 2.2 on RTX 30-series and newer cards (a long video ~14% quicker); it does nothing where it can't run";
+const MODEL_LOADERS = ["UNETLoader", "UnetLoaderGGUF"];
+
+/** Puts Workstation Sage Attention between each diffusion-model loader and everything that uses its model. */
+function sageGraph(g: any) {
+  for (const id of Object.keys(g).filter((k) => MODEL_LOADERS.includes(g[k].class_type))) {
+    const sage = `sage${id}`;
+    for (const node of Object.values<any>(g))
+      for (const [k, v] of Object.entries<any>(node.inputs ?? {})) if (Array.isArray(v) && v[0] === id && v[1] === 0) node.inputs[k] = [sage, 0];
+    g[sage] = { class_type: "WorkstationSageAttention", inputs: { model: [id, 0], enabled: true } };
+  }
+}
+
 /** Whether one of a ComfyUI node's choices is there (a model type a newer ComfyUI added). Unreachable counts as yes. */
 async function comfyKnows(node: string, input: string, choice: string): Promise<boolean> {
   const r = await http(`${COMFY}/object_info/${node}`).catch(() => null);
@@ -3942,6 +3965,7 @@ async function submit(j: QJob) {
     if (graph["30"] || graph["35"]) await checkLora(graph, gm);
     await qwenModels(graph);
     if (graph.medit) await checkMossEdit(graph);
+    if (SAGE_FAMILIES.includes(m.family) && settings().video.sage !== "off" && (await hasNode("WorkstationSageAttention"))) sageGraph(graph);
     if (gm === "moss" && !(await comfyKnows("CLIPLoader", "type", "moss_image"))) throw new Error("MOSS-Image needs ComfyUI 0.42 or newer: update ComfyUI in Comfy Desktop");
     if (gm === "person" && !(await hasNode("MatAnyone2Run"))) throw new Error("ComfyUI doesn't have MatAnyone2: add the Video matting pack, then restart the services");
     if (gm === "manga" && !(await hasNode("MangaFinish"))) throw new Error("ComfyUI doesn't have the Manga nodes yet: restart Prestige's services to copy them in");
@@ -4463,8 +4487,8 @@ export async function phoneStudio(action: string, a: any = {}): Promise<unknown>
         update(key, { seed: a.value === "last" ? (lastSeed(key) ?? null) : a.value == null || a.value === "" || !Number.isFinite(n) || n < 0 ? null : n });
       } else {
         const k = String(a.k);
-        if (!["aspect", "size", "quality", "count", "res", "seconds", "fps", "shots", "frames", "high", "low", "bpm", "key", "meter", "language", "lora", "fromPicture", "edits", "moss", "editModel"].includes(k)) throw new Error(`unknown setting ${k}`);
-        update(k === "fromPicture" ? "video" : key, { [k]: fieldValue(k, String(a.value ?? "")) } as any);
+        if (!["aspect", "size", "quality", "count", "res", "seconds", "fps", "shots", "frames", "high", "low", "bpm", "key", "meter", "language", "lora", "fromPicture", "edits", "moss", "editModel", "sage"].includes(k)) throw new Error(`unknown setting ${k}`);
+        update(k === "fromPicture" || k === "sage" ? "video" : key, { [k]: fieldValue(k, String(a.value ?? "")) } as any);
       }
       return phoneInfo(a.create ?? { mode: "image" });
     }
