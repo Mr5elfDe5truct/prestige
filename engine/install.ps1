@@ -200,7 +200,7 @@ $PackInfo = [ordered]@{
     talk     = @{ GB = 17.4; Text = "Talking        InfiniteTalk on Wan 2.1 14B (ComfyUI, GGUF) - a face and a voice to a lip-synced video" }
     select   = @{ GB = 2.2;  Text = "Select         SAM 3.1 + BiRefNet (ComfyUI) - click or name to select, cut-outs, background removal" }
     upscale  = @{ GB = 12.3; Text = "Upscale        SeedVR2 7B + 3B (ComfyUI, int8) - sharpen pictures to 1080p or 4K, videos to 1080p" }
-    moss     = @{ GB = 14.2; Text = "MOSS-Image     MOSS-Image (ComfyUI 0.42+, int8, 8 steps) - a second picture model, best with text and layouts" }
+    moss     = @{ GB = 14.5; Text = "MOSS-Image     MOSS-Image (ComfyUI 0.42+, int8, 8 steps) - a second picture model for text, layouts and edits" }
     kromoss  = @{ GB = 6.6;  Text = "Kromoss        Kromoss for MOSS-Image - more natural people (needs moss)" }
 }
 Step 3 "Choosing models"
@@ -561,6 +561,9 @@ if ($Packs -contains "moss") {
         Download (HF "Comfy-Org/MOSS-Image" $f) "$comfyModels\$folder\moss\$name"
     }
     Download (HF "lodestones/MOSS-Image-SFT-8-steps-dmd" "lora.safetensors") "$comfyModels\loras\moss\moss-image-sft-8-steps-dmd-lora.safetensors"
+    # chinoll's Moss-Image-Edit LoRA (GPL-3.0, rank 64) in ComfyUI's key names, for Prestige's MOSS-Image edits
+    # (Edit with: MOSS-Image). Its node, Text Encode MOSS-Image Edit, is in ComfyUI newer than 0.42.5.
+    Download (HF "PedroMarinhoDev/Moss-Image-Edit-ComfyUI" "moss_image_edit_lora_bf16.safetensors") "$comfyModels\loras\moss\moss-image-edit-lora-bf16.safetensors"
 }
 if ($Packs -contains "kromoss") {
     Download (HF "lodestones/Kromoss" "diffusion_models/kromoss_int8_convrot.safetensors") "$comfyModels\diffusion_models\moss\kromoss_int8_convrot.safetensors"
