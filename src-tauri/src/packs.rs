@@ -209,10 +209,12 @@ pub fn catalog(ollama_gb: f64) -> Vec<Pack> {
             ] },
             Item::File { url: "https://github.com/pq-yang/MatAnyone2/releases/download/v1.0.0/matanyone2.pth".into(), dest: r"models\comfy\matanyone2\matanyone2.pth".into(), alts: vec![] },
         ], vram: 2.5, ram: 0.0, card: "comfyui" },
-        Pack { id: "reshoot", title: "Reshoot", text: "Multiple-Angles, Outfit Swap and Restore LoRAs for Qwen-Image-2.1 (ComfyUI): a new camera angle, try on an outfit, restore a photo (needs Images)".into(), gb: 0.7, items: vec![
+        // ausboss's ComfyUI-AusBoss (MIT, no Python dependencies) brings Tiled Upscale for Redraw at 4 / 8 MP.
+        Pack { id: "reshoot", title: "Reshoot", text: "Multiple-Angles, Outfit Swap and Restore LoRAs for Qwen-Image-2.1, and ausboss's tiled upscale nodes (ComfyUI): a new camera angle, try on an outfit, restore a photo, redraw at 4 or 8 MP (needs Images; restart the services after)".into(), gb: 0.7, items: vec![
             Item::File { url: hf("akhaliq/Qwen-Image-2.1-Multiple-Angles-LoRA", "checkpoints_v2/angles_v2_full_qwen21_multiple_angles_v2_qwen21_multiple_angles_v2_000001500.safetensors"), dest: r"models\comfy\loras\qwen-image-2.1-multiple-angles-v2.safetensors".into(), alts: vec![] },
             comfy("ausboss/Qwen-Image-2.1-Outfit-Swap-Consistency-LoRA", "qwen-image-2.1-outfit-swap.safetensors", "loras"),
             comfy("ausboss/Qwen-Image-2.1-Restore-LoRA", "qwen-image-2.1-restore.safetensors", "loras"),
+            Item::ComfyNode { name: "ComfyUI-AusBoss".into(), url: "https://github.com/ausboss/ComfyUI-AusBoss.git".into(), steps: vec![] },
         ], vram: 10.0, ram: 0.0, card: "comfyui" },
         Pack { id: "search", title: "Search", text: "EmbeddingGemma 2 (llama.cpp): search renders, songs, chats and files by meaning (needs llama.cpp b11452 or newer)".into(), gb: 0.9, items: vec![
             gguf("ggml-org/embeddinggemma-2-GGUF", crate::search::MODEL, crate::search::MODEL),

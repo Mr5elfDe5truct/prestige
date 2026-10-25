@@ -3854,7 +3854,7 @@ async function submit(j: QJob) {
     if (graph["30"] || graph["35"]) await checkLora(graph, gm);
     if (gm === "moss" && !(await comfyKnows("CLIPLoader", "type", "moss_image"))) throw new Error("MOSS-Image needs ComfyUI 0.42 or newer: update ComfyUI in Comfy Desktop");
     if (gm === "person" && !(await hasNode("MatAnyone2Run"))) throw new Error("ComfyUI doesn't have MatAnyone2: add the Video matting pack, then restart the services");
-    if (REDRAW_MP[gm] && !(await hasNode("AUSBOSS_NODES_TiledUpscale"))) throw new Error("Redraw needs the ComfyUI-AusBoss nodes: run the Workstation's install.ps1 again (or add ausboss/ComfyUI-AusBoss in ComfyUI Manager)");
+    if (REDRAW_MP[gm] && !(await hasNode("AUSBOSS_NODES_TiledUpscale"))) throw new Error("Redraw needs the ComfyUI-AusBoss nodes: get the Reshoot pack again in Packs, then restart the services");
     if (gm === "manga" && !(await hasNode("MangaFinish"))) throw new Error("ComfyUI doesn't have the Manga nodes yet: restart Prestige's services to copy them in");
     if (j.cancelled) throw new Error("stopped");
     const r = await http(`${COMFY}/prompt`, {
