@@ -18,6 +18,7 @@ export interface ImageSettings {
   edits?: EditSpeed; // edits, Paint to change and Restore photo: Lightning's 4 steps, or the Quality steps
   moss?: MossModel; // MOSS-Image's model: the SFT release or lodestones' Kromoss fine-tune
   editModel?: EditModel; // what edits, Paint to change and Reference run on
+  transparent?: "off" | "on"; // a new picture on a transparent background (MOSS-Image with its Alpha LoRA)
 }
 /** Qwen-Image-2.1, or MOSS-Image with the Moss-Image-Edit LoRA (studio.ts mossEditGraph). */
 export type EditModel = "qwen" | "moss";
@@ -64,7 +65,7 @@ export interface GenSettings {
 export type SettingsKey = keyof GenSettings;
 
 export const DEFAULTS: GenSettings = {
-  image: { aspect: "1:1", size: "standard", quality: "standard", count: 1, seed: null, lora: null, edits: "fast", moss: "sft", editModel: "qwen" },
+  image: { aspect: "1:1", size: "standard", quality: "standard", count: 1, seed: null, lora: null, edits: "fast", moss: "sft", editModel: "qwen", transparent: "off" },
   video: { res: "768x512", seconds: 4, fps: 24, quality: "standard", seed: null, fromPicture: "wan", sage: "on" },
   animate: { res: "auto", seconds: 5, fps: 16, quality: "standard", seed: null },
   long: { size: 640, frames: 49, shots: 4, quality: "standard", seed: null, high: null, low: null },
@@ -224,6 +225,7 @@ function load(): GenSettings {
       edits: (v) => v === "fast" || v === "quality",
       moss: (v) => v === "sft" || v === "kromoss",
       editModel: (v) => v === "qwen" || v === "moss",
+      transparent: (v) => v === "off" || v === "on",
     }),
     video: sane(DEFAULTS.video, s.video, { quality: isQuality, seconds: (v) => v > 0, fps: (v) => v > 0, fromPicture: (v) => v === "wan" || v === "ltx", sage: (v) => v === "on" || v === "off" }),
     animate: sane(DEFAULTS.animate, s.animate, { quality: isQuality, seconds: (v) => v > 0 }),
