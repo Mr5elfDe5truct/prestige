@@ -188,12 +188,17 @@ pub fn catalog(ollama_gb: f64) -> Vec<Pack> {
             comfy_same("Comfy-Org/SeedVR2", "diffusion_models/seedvr2_3b_int8_convrot.safetensors"),
             comfy_same("Comfy-Org/SeedVR2", "vae/seedvr2_ema_vae_fp16.safetensors"),
         ], vram: 10.0, ram: 0.0, card: "comfyui" },
-        // MOSS-Image, in a moss\ folder of each model folder (its files can be a junction to another drive).
-        Pack { id: "moss", title: "MOSS-Image", text: "MOSS-Image (ComfyUI 0.42+, int8, 8 steps): a second picture model, best with text and layouts".into(), gb: 14.2, items: [
+        // MOSS-Image, in a moss\ folder of each model folder (its files can be a junction to another drive). The Alpha
+        // LoRA (transparent pictures) is non-commercial research use only; trmz's RGBA VAE is Apache-2.0.
+        Pack { id: "moss", title: "MOSS-Image", text: "MOSS-Image (ComfyUI 0.42+, int8, 8 steps): a second picture model, best with text and layouts; transparent pictures (Alpha LoRA, non-commercial licence)".into(), gb: 14.6, items: [
             ("Comfy-Org/MOSS-Image", "diffusion_models/moss_image_sft_int8_convrot.safetensors", "diffusion_models"),
             ("Comfy-Org/MOSS-Image", "text_encoders/qwen3.5_9b_w4a8_gptq.safetensors", "text_encoders"),
             ("Comfy-Org/MOSS-Image", "vae/flux2-vae_small.safetensors", "vae"),
-        ].iter().map(|(r, p, d)| moss(r, p, d, None)).chain([moss("lodestones/MOSS-Image-SFT-8-steps-dmd", "lora.safetensors", "loras", Some("moss-image-sft-8-steps-dmd-lora.safetensors"))]).collect(), vram: 8.5, ram: 0.0, card: "comfyui" },
+        ].iter().map(|(r, p, d)| moss(r, p, d, None)).chain([
+            moss("lodestones/MOSS-Image-SFT-8-steps-dmd", "lora.safetensors", "loras", Some("moss-image-sft-8-steps-dmd-lora.safetensors")),
+            moss("paralaif/MOSS-Image-Alpha-LoRA", "moss_alpha_v1.safetensors", "loras", Some("moss-alpha-v1.safetensors")),
+            moss("trmz/flux2-klein-alpha", "vae/diffusion_pytorch_model.safetensors", "vae", Some("flux2-klein-alpha-rgba-vae.safetensors")),
+        ]).collect(), vram: 8.5, ram: 0.0, card: "comfyui" },
         Pack { id: "kromoss", title: "Kromoss", text: "Kromoss for MOSS-Image (ComfyUI): more natural people; pick it in MOSS-Image's settings (needs MOSS-Image)".into(), gb: 6.6, items: vec![
             moss("lodestones/Kromoss", "diffusion_models/kromoss_int8_convrot.safetensors", "diffusion_models", None),
             moss("lodestones/Kromoss", "8-steps-dmd2-lora.safetensors", "loras", Some("kromoss-8-steps-dmd2-lora.safetensors")),
