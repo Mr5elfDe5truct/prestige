@@ -112,9 +112,12 @@ pub fn catalog(ollama_gb: f64) -> Vec<Pack> {
             v.push(Item::Ollama("qwen3.5:4b".into()));
             v
         }, vram: 7.5, ram: 0.0, card: "voice" },
-        Pack { id: "images", title: "Images", text: "Qwen-Image-2.1 (+ 4-step turbo and Lightning) and Z-Image-Turbo (ComfyUI): text to image and editing".into(), gb: 36.6, items: vec![
-            comfy("abenzerps/Qwen-Image-2.1-Uncensored-GGUF", "qwen-image-2.1-UC-Q4_K_M.gguf", "unet"),
-            comfy("Abiray/Qwen-Image-2.1-viggle-4-steps-turbo-GGUF", "qwen_image_2.1_turbo_Q4_K_M.gguf", "unet"),
+        // Qwen-Image-2.1 as Comfy-Org's int8 files (the base model and Qwen's 8-step Turbo) with abenzerps' uncensored
+        // LoRA on top (studio.ts qwenModels), in qwen-image\ folders; the older GGUFs still run where they're installed.
+        Pack { id: "images", title: "Images", text: "Qwen-Image-2.1 int8 (+ 8-step Turbo and Lightning) and Z-Image-Turbo (ComfyUI): text to image and editing".into(), gb: 41.9, items: vec![
+            Item::File { url: hf("Comfy-Org/Qwen-Image-2.1", "diffusion_models/qwen_image_2.1_int8_convrot.safetensors"), dest: r"models\comfy\diffusion_models\qwen-image\qwen_image_2.1_int8_convrot.safetensors".into(), alts: vec![] },
+            Item::File { url: hf("Comfy-Org/Qwen-Image-2.1", "diffusion_models/qwen_image_2.1_turbo_int8_convrot.safetensors"), dest: r"models\comfy\diffusion_models\qwen-image\qwen_image_2.1_turbo_int8_convrot.safetensors".into(), alts: vec![] },
+            Item::File { url: hf("abenzerps/Qwen-Image-2.1-Uncensored-Quantized", "qwen-image-2.1-uncensored-lora.safetensors"), dest: r"models\comfy\loras\qwen-image\qwen-image-2.1-uncensored-lora.safetensors".into(), alts: vec![] },
             comfy("unsloth/Qwen3-VL-8B-Instruct-GGUF", "Qwen3-VL-8B-Instruct-UD-Q4_K_XL.gguf", "text_encoders"),
             Item::File { url: hf("unsloth/Qwen3-VL-8B-Instruct-GGUF", "mmproj-F16.gguf"), dest: r"models\comfy\text_encoders\Qwen3-VL-8B-Instruct-mmproj-F16.gguf".into(), alts: vec![] },
             comfy("Comfy-Org/Qwen-Image-2.1", "vae/qwen_image_2.1_vae_bf16.safetensors", "vae"),
@@ -188,16 +191,33 @@ pub fn catalog(ollama_gb: f64) -> Vec<Pack> {
             comfy_same("Comfy-Org/SeedVR2", "diffusion_models/seedvr2_3b_int8_convrot.safetensors"),
             comfy_same("Comfy-Org/SeedVR2", "vae/seedvr2_ema_vae_fp16.safetensors"),
         ], vram: 10.0, ram: 0.0, card: "comfyui" },
-        // MOSS-Image, in a moss\ folder of each model folder (its files can be a junction to another drive).
-        Pack { id: "moss", title: "MOSS-Image", text: "MOSS-Image (ComfyUI 0.42+, int8, 8 steps): a second picture model, best with text and layouts".into(), gb: 14.2, items: [
+        // MOSS-Image, in a moss\ folder of each model folder (its files can be a junction to another drive). The Alpha
+        // LoRA (transparent pictures) is non-commercial research use only; trmz's RGBA VAE is Apache-2.0.
+        Pack { id: "moss", title: "MOSS-Image", text: "MOSS-Image (ComfyUI 0.42+, int8, 8 steps): a second picture model, best with text and layouts, its edit LoRA, and transparent pictures (Alpha LoRA, non-commercial licence)".into(), gb: 14.9, items: [
             ("Comfy-Org/MOSS-Image", "diffusion_models/moss_image_sft_int8_convrot.safetensors", "diffusion_models"),
             ("Comfy-Org/MOSS-Image", "text_encoders/qwen3.5_9b_w4a8_gptq.safetensors", "text_encoders"),
             ("Comfy-Org/MOSS-Image", "vae/flux2-vae_small.safetensors", "vae"),
-        ].iter().map(|(r, p, d)| moss(r, p, d, None)).chain([moss("lodestones/MOSS-Image-SFT-8-steps-dmd", "lora.safetensors", "loras", Some("moss-image-sft-8-steps-dmd-lora.safetensors"))]).collect(), vram: 8.5, ram: 0.0, card: "comfyui" },
+        ].iter().map(|(r, p, d)| moss(r, p, d, None)).chain([
+            moss("lodestones/MOSS-Image-SFT-8-steps-dmd", "lora.safetensors", "loras", Some("moss-image-sft-8-steps-dmd-lora.safetensors")),
+            // chinoll's Moss-Image-Edit LoRA (GPL-3.0) in ComfyUI's key names, for edits on MOSS-Image (Edit with).
+            moss("PedroMarinhoDev/Moss-Image-Edit-ComfyUI", "moss_image_edit_lora_bf16.safetensors", "loras", Some("moss-image-edit-lora-bf16.safetensors")),
+            moss("paralaif/MOSS-Image-Alpha-LoRA", "moss_alpha_v1.safetensors", "loras", Some("moss-alpha-v1.safetensors")),
+            moss("trmz/flux2-klein-alpha", "vae/diffusion_pytorch_model.safetensors", "vae", Some("flux2-klein-alpha-rgba-vae.safetensors")),
+        ]).collect(), vram: 8.5, ram: 0.0, card: "comfyui" },
         Pack { id: "kromoss", title: "Kromoss", text: "Kromoss for MOSS-Image (ComfyUI): more natural people; pick it in MOSS-Image's settings (needs MOSS-Image)".into(), gb: 6.6, items: vec![
             moss("lodestones/Kromoss", "diffusion_models/kromoss_int8_convrot.safetensors", "diffusion_models", None),
             moss("lodestones/Kromoss", "8-steps-dmd2-lora.safetensors", "loras", Some("kromoss-8-steps-dmd2-lora.safetensors")),
         ], vram: 8.5, ram: 0.0, card: "comfyui" },
+        // Tencent's Hy-Nomas world model for /world (Explore a world): its int8 DiT (Apache-2.0), the PixelUMM decoder and
+        // encoder (NVIDIA One-Way Noncommercial License: research and evaluation only) and Qwen-Image's Qwen2.5-VL text
+        // encoder, through PedroMarinhoDev's ComfyUI-Hy-Nomas nodes (GPL-3.0, no Python dependencies). Each 5 s segment
+        // keeps ~2.5 GB of history in system RAM.
+        Pack { id: "world", title: "Explore a world", text: "Hy-Nomas world model (ComfyUI, decoder non-commercial licence): /world explores a world 5 s at a time, steered by text or camera keys; restart the services after".into(), gb: 26.7, items: vec![
+            Item::ComfyNode { name: "ComfyUI-Hy-Nomas".into(), url: "https://github.com/PedroMarinhoDev/ComfyUI-Hy-Nomas.git".into(), steps: vec![] },
+            Item::File { url: hf("PedroMarinhoDev/Hy-Nomas-ComfyUI", "hy_nomas_distil_int8.safetensors"), dest: r"models\comfy\diffusion_models\hy-nomas\hy_nomas_distil_int8.safetensors".into(), alts: vec![] },
+            Item::File { url: hf("PedroMarinhoDev/Hy-Nomas-ComfyUI", "hy_nomas_pixelumm_fp8.safetensors"), dest: r"models\comfy\vae\hy-nomas\hy_nomas_pixelumm_fp8.safetensors".into(), alts: vec![] },
+            Item::File { url: hf("Comfy-Org/Qwen-Image_ComfyUI", "split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors"), dest: r"models\comfy\text_encoders\hy-nomas\qwen_2.5_vl_7b_fp8_scaled.safetensors".into(), alts: vec![] },
+        ], vram: 11.5, ram: 32.0, card: "comfyui" },
         // MatAnyone2 (CVPR 2026) through spiritform's ComfyUI nodes: a person's alpha matte through a video from a
         // first-frame mask. Its model is under the NTU S-Lab License 1.0 (non-commercial use only). Its package doesn't
         // build with hatchling 1.27+ (a file it force-includes twice), so it's built against an older one.
@@ -209,10 +229,12 @@ pub fn catalog(ollama_gb: f64) -> Vec<Pack> {
             ] },
             Item::File { url: "https://github.com/pq-yang/MatAnyone2/releases/download/v1.0.0/matanyone2.pth".into(), dest: r"models\comfy\matanyone2\matanyone2.pth".into(), alts: vec![] },
         ], vram: 2.5, ram: 0.0, card: "comfyui" },
-        Pack { id: "reshoot", title: "Reshoot", text: "Multiple-Angles, Outfit Swap and Restore LoRAs for Qwen-Image-2.1 (ComfyUI): a new camera angle, try on an outfit, restore a photo (needs Images)".into(), gb: 0.7, items: vec![
+        // ausboss's ComfyUI-AusBoss (MIT, no Python dependencies) brings Tiled Upscale for Redraw at 4 / 8 MP.
+        Pack { id: "reshoot", title: "Reshoot", text: "Multiple-Angles, Outfit Swap and Restore LoRAs for Qwen-Image-2.1, and ausboss's tiled upscale nodes (ComfyUI): a new camera angle, try on an outfit, restore a photo, redraw at 4 or 8 MP (needs Images; restart the services after)".into(), gb: 0.7, items: vec![
             Item::File { url: hf("akhaliq/Qwen-Image-2.1-Multiple-Angles-LoRA", "checkpoints_v2/angles_v2_full_qwen21_multiple_angles_v2_qwen21_multiple_angles_v2_000001500.safetensors"), dest: r"models\comfy\loras\qwen-image-2.1-multiple-angles-v2.safetensors".into(), alts: vec![] },
             comfy("ausboss/Qwen-Image-2.1-Outfit-Swap-Consistency-LoRA", "qwen-image-2.1-outfit-swap.safetensors", "loras"),
             comfy("ausboss/Qwen-Image-2.1-Restore-LoRA", "qwen-image-2.1-restore.safetensors", "loras"),
+            Item::ComfyNode { name: "ComfyUI-AusBoss".into(), url: "https://github.com/ausboss/ComfyUI-AusBoss.git".into(), steps: vec![] },
         ], vram: 10.0, ram: 0.0, card: "comfyui" },
         Pack { id: "search", title: "Search", text: "EmbeddingGemma 2 (llama.cpp): search renders, songs, chats and files by meaning (needs llama.cpp b11452 or newer)".into(), gb: 0.9, items: vec![
             gguf("ggml-org/embeddinggemma-2-GGUF", crate::search::MODEL, crate::search::MODEL),

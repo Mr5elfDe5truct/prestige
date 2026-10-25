@@ -1,0 +1,9 @@
+{
+  "1": {"class_type": "HyNomasLoadDiT", "inputs": {"dit_name": "hy-nomas\\hy_nomas_distil_int8.safetensors", "matmul": "int8"}},
+  "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": "hy-nomas\\qwen_2.5_vl_7b_fp8_scaled.safetensors", "type": "qwen_image", "device": "default"}},
+  "3": {"class_type": "HyNomasLoadDecoder", "inputs": {"decoder_name": "hy-nomas\\hy_nomas_pixelumm_fp8.safetensors", "matmul": "fp8"}},
+  "4": {"class_type": "HyNomasLoadEncoder", "inputs": {"encoder_name": "hy-nomas\\hy_nomas_pixelumm_fp8.safetensors"}},
+  "6": {"class_type": "HyNomasDecode", "inputs": {"decoder": ["3", 0], "seed": 42, "window_overlap": 1, "start_image": "one frame"}},
+  "7": {"class_type": "CreateVideo", "inputs": {"images": ["6", 0], "fps": 24}},
+  "8": {"class_type": "SaveVideo", "inputs": {"video": ["7", 0], "filename_prefix": "video/hy-nomas-world", "format": "auto", "codec": "auto"}}
+}

@@ -28,7 +28,7 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { initSystem, onGpus, phoneSystem, showSystem, unloadAll } from "./system";
 import { ollamaCtx, onPlanChange, readGpus, refreshPlan, shortName, type Gpu } from "./gpus";
 import {
-  allowRenders, cancelRender, isRender, chatSettings, editLabel, editMedia, initStudio, modelLabel, openRender, renderMedia, renderMenu, renderModel, renderSong, renderTalk,
+  allowRenders, cancelRender, isRender, chatSettings, editLabel, editMedia, renderWorld, initStudio, modelLabel, openRender, renderMedia, renderMenu, renderModel, renderSong, renderTalk,
   faceThumb, frameLabel, onQueueChange, phoneQueue, phoneStudio, renderFrame, renderShot, showStudio, songSeconds, talkSecs, videoQuality, type MediaKind,
 } from "./studio";
 import { LASER_CMD, laserPrompt, openLaser } from "./laser";
@@ -36,6 +36,7 @@ import { DIRECTOR_ASK, DIRECTOR_CMD, PLAN_SECS, SHOT_SECONDS, SONG_SECS, askedSe
 import { STORYBOARD_CMD, boardFromPlan, hasBoard, initStoryboard, openStoryboard, type BoardRender } from "./storyboard";
 import { askSpeech, speakLine } from "./talking";
 import { SONG_CMD, writeSong } from "./songwriter";
+import { WORLD_CMD, WORLD_MAX_SEGMENTS, WORLD_NEXT, nextSegment, splitCamera, writeWorld, type WorldState } from "./world";
 import { DRAMA_CMD, parseScript, scriptSeconds, scriptText, taggedText, writeDrama, type Line, type Script } from "./drama";
 import { aboutTime, onSettingsChange } from "./gensettings";
 import { CONSENT, bindRefChoices, dragRender, hasFiles, hasRender, imageIn, imageToBase64, onRefPrefsChange, refChoicesHtml, referenceFromBase64, renderIn, type Reference } from "./reference";
@@ -138,7 +139,7 @@ interface StoredMessage {
   // An image (or several, or a video) made from chat. "more" holds the other images of a batch.
   // reply: the model made it with a tool, so its content is the reply to show under it (not a note for later turns).
   // A song (kind "audio") has its title; prompt is its style. A "model" is a .glb (/3d).
-  render?: { path: string; prompt: string; seconds?: number; more?: string[]; kind?: MediaKind | "model"; reply?: boolean; title?: string };
+  render?: { path: string; prompt: string; seconds?: number; more?: string[]; kind?: MediaKind | "model"; reply?: boolean; title?: string; world?: WorldState };
   react?: string; // an emote reaction: yours on a reply, Prestige's on your message
   sources?: Source[]; // passages from Knowledge this reply was given (shown under it, cited in it)
 }
@@ -1168,14 +1169,14 @@ function setBusyUi(on: boolean) {
 }
 
 /** Makes images with the Studio's image model (Qwen-Image-2.1 or its turbo), or a video with LTX, and shows them in the chat. */
-async function makeMedia(text: string, kind: MediaKind, prompt: string, hooks?: ReplyHooks, refB64?: string, refKind?: RefKind, edit = false) {
+async function makeMedia(text: string, kind: MediaKind, prompt: string, hooks?: ReplyHooks, refB64?: string, refKind?: RefKind, edit = false, moreB64: string[] = []) {
   const what = kind === "video" ? "video" : "image";
   if (!inTauri) {
     toast(`${kind === "video" ? "Videos" : "Images"} are made in the desktop app.`);
     return hooks?.onDone?.(false);
   }
   if (chat.messages.length === 0) chat.title = text.replace(/\s+/g, " ").slice(0, 60);
-  chat.messages.push({ role: "user", content: text, images: refB64 ? [refB64] : undefined });
+  chat.messages.push({ role: "user", content: text, images: refB64 ? [refB64, ...moreB64] : undefined });
   renderChat();
   const label = edit ? editLabel() : await modelLabel(kind, !!refB64);
   const reply: StoredMessage = { role: "assistant", content: "", model: label };
@@ -1203,8 +1204,10 @@ async function makeMedia(text: string, kind: MediaKind, prompt: string, hooks?: 
       }
     };
     // /edit changes the picture itself; otherwise it's a new picture (with the reference's subject in it, if any).
-    const got = edit && ref ? await editMedia(prompt, ref, progress) : await renderMedia(kind, prompt, progress, ref, refKind);
+    const extras = edit ? await Promise.all(moreB64.map((b) => referenceFromBase64(b))) : [];
+    const got = edit && ref ? await editMedia(prompt, ref, progress, extras) : await renderMedia(kind, prompt, progress, ref, refKind);
     if (ref) URL.revokeObjectURL(ref.url);
+    for (const x of extras) URL.revokeObjectURL(x.url);
     const [a, ...more] = got;
     reply.render = { path: a.path, prompt, seconds: Math.round((Date.now() - t0) / 1000), kind, ...(more.length ? { more: more.map((x) => x.path) } : {}) };
     // What chat models see in later turns.
@@ -1233,6 +1236,90 @@ async function makeMedia(text: string, kind: MediaKind, prompt: string, hooks?: 
       .finally(() => phoneReplyEnd(replyChat));
     if (hooks) {
       hooks.onDelta?.(reply.render ? `Here's your ${what}.` : `I couldn't make that ${what}.`);
+      hooks.onDone?.(!!reply.render);
+    }
+  }
+}
+
+/** /world: the chat model writes a Hy-Nomas world (or the next segment of this chat's last one) and it's rendered, the
+ *  whole world so far as one video. An attached picture starts a new world. The world rides on the reply, so "/world
+ *  then …" can carry it on. */
+async function makeWorld(text: string, request: string, hooks?: ReplyHooks, picture?: string) {
+  if (!inTauri) {
+    toast("Worlds are made in the desktop app.");
+    return hooks?.onDone?.(false);
+  }
+  const next = WORLD_NEXT.test(request);
+  const prev = next ? [...chat.messages].reverse().find((m) => m.render?.world)?.render?.world : undefined;
+  if (next && !prev) {
+    toast("There's no world in this chat yet: start one with /world and what it is, e.g. /world a fox in a misty forest");
+    return hooks?.onDone?.(false);
+  }
+  if (prev && prev.json.segments.length >= WORLD_MAX_SEGMENTS) {
+    toast(`This world has ${WORLD_MAX_SEGMENTS} segments, as many as fit in system RAM: start a new one with /world`);
+    return hooks?.onDone?.(false);
+  }
+  if (!current) {
+    toast("No chat model is available to write the world (start the services first).");
+    return hooks?.onDone?.(false);
+  }
+  if (chat.messages.length === 0) chat.title = text.replace(/\s+/g, " ").slice(0, 60);
+  chat.messages.push({ role: "user", content: text, images: picture ? [picture] : undefined });
+  renderChat();
+  const label = "Hy-Nomas";
+  const reply: StoredMessage = { role: "assistant", content: "", model: label };
+  const bubble = addAiBubble(label);
+  const body = $(".msg-body", bubble);
+  const replyChat = chat.id;
+  phoneReplyStart(label, text);
+  body.innerHTML = `<div class="render-progress"><div class="progress"><i></i></div><span class="status-line">Writing the world…</span></div>`;
+  scrollDown(true);
+  busy = new AbortController();
+  busy.signal.addEventListener("abort", () => cancelRender(), { once: true });
+  setBusyUi(true);
+  const t0 = Date.now();
+  try {
+    const { text: words, camera } = splitCamera(request.replace(WORLD_NEXT, ""));
+    let state: WorldState;
+    if (prev) state = { ...prev, json: await nextSegment(current, prev.json, words, camera, busy.signal), camera: [...prev.camera, camera] };
+    else {
+      const json = await writeWorld(current, words, busy.signal, picture);
+      state = { json, camera: [null], seed: Math.floor(Math.random() * 2 ** 31) };
+      // A picture is segment 0, held still: the user's words become the first segment that moves.
+      if (picture) state = { ...state, json: await nextSegment(current, json, words, camera, busy.signal), camera: [null, camera] };
+    }
+    const ref = picture && !prev ? await referenceFromBase64(picture) : undefined;
+    const got = await renderWorld(state, words || request, (pct, l) => {
+      ($(".progress", body) as HTMLElement | null)?.style.setProperty("--v", String(pct));
+      const s = $(".status-line", body);
+      if (s) s.textContent = l;
+    }, ref);
+    if (ref) URL.revokeObjectURL(ref.url);
+    const a = got[0];
+    reply.render = { path: a.path, prompt: words || request, seconds: Math.round((Date.now() - t0) / 1000), kind: "video", world: state };
+    const n = state.json.segments.length;
+    reply.content = `(I made ${n > 1 ? `the world so far, ${n} segments,` : "a world"} with Hy-Nomas for: "${words || request}". Saved as ${a.name}. "/world then …" continues it.)`;
+    renderFigure(bubble, reply.render);
+  } catch (e) {
+    if (busy?.signal.aborted) reply.content = "*(stopped)*";
+    else {
+      reply.error = true;
+      reply.content = `Couldn't make the world: ${errMsg(e)}`;
+      bubble.classList.add("error");
+    }
+    body.innerHTML = md(reply.content);
+  } finally {
+    chat.messages.push(reply);
+    bubble.dataset.i = String(chat.messages.length - 1);
+    if (!reply.error) reactButton(bubble, reply);
+    busy = null;
+    setBusyUi(false);
+    scrollDown();
+    persist()
+      .catch((e) => toast(`Couldn't save this chat: ${e}`, "warn"))
+      .finally(() => phoneReplyEnd(replyChat));
+    if (hooks) {
+      hooks.onDelta?.(reply.render ? "Here's your world." : "I couldn't make that world.");
       hooks.onDone?.(!!reply.render);
     }
   }
@@ -2203,6 +2290,18 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     renderAttachments();
     return make3d(text, src, opts.hooks);
   }
+  if (!live && !opts.images && WORLD_CMD.test(text)) {
+    const request = text.replace(WORLD_CMD, "").trim();
+    if (!request && !attachments[0]) {
+      toast("Say what the world is after /world (e.g. /world a fox walking through a misty forest), or /world then what happens next");
+      opts.hooks?.onDone?.(false);
+      return;
+    }
+    const picture = WORLD_NEXT.test(request) ? undefined : attachments[0];
+    attachments = [];
+    renderAttachments();
+    return makeWorld(text, request, opts.hooks, picture);
+  }
   if (!live && !opts.images && EDIT_CMD.test(text)) {
     const instruction = text.replace(EDIT_CMD, "").trim();
     const src = await pictureToUse();
@@ -2211,9 +2310,11 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
       opts.hooks?.onDone?.(false);
       return;
     }
+    // Further attached pictures go along as images 2 and 3 ("put the hat from image 2 on her").
+    const more = attachments.slice(1, 3);
     attachments = [];
     renderAttachments();
-    return makeMedia(text, "image", instruction, opts.hooks, src, undefined, true);
+    return makeMedia(text, "image", instruction, opts.hooks, src, undefined, true, more);
   }
   if (!live && RESEARCH_CMD.test(text)) {
     const question = text.replace(RESEARCH_CMD, "").trim();
