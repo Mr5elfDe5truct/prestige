@@ -474,7 +474,7 @@ pub async fn pick_background(app: AppHandle) -> Result<Option<String>, String> {
     Ok(picked.and_then(|p| p.into_path().ok()).map(|p| p.to_string_lossy().into_owned()))
 }
 
-fn probe(args: &[&str], file: &Path) -> String {
+pub(crate) fn probe(args: &[&str], file: &Path) -> String {
     hidden(&mut Command::new("ffprobe"))
         .args(["-v", "error"])
         .args(args)

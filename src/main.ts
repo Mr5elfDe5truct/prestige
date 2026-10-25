@@ -34,6 +34,7 @@ import {
 import { LASER_CMD, laserPrompt, openLaser } from "./laser";
 import { DIRECTOR_ASK, DIRECTOR_CMD, PLAN_SECS, SHOT_SECONDS, SONG_SECS, askedSeconds, directorSecs, lyricsSrt, planVideo } from "./director";
 import { STORYBOARD_CMD, boardFromPlan, hasBoard, initStoryboard, openStoryboard, type BoardRender } from "./storyboard";
+import { filmMode, initFilm } from "./film";
 import { askSpeech, speakLine } from "./talking";
 import { SONG_CMD, writeSong } from "./songwriter";
 import { WORLD_CMD, WORLD_MAX_SEGMENTS, WORLD_NEXT, nextSegment, splitCamera, writeWorld, type WorldState } from "./world";
@@ -3570,6 +3571,19 @@ async function main() {
       makeStoryboard(`/storyboard ${idea}`, idea);
     },
     hasStoryboard: hasBoard,
+    film: filmMode,
+  });
+  initFilm({
+    toast,
+    root: () => settings.stackRoot ?? null,
+    model: () => current ?? undefined,
+    voice: () => settings.voice || DEFAULT_VOICE,
+    // The viewer is part of Studio's page, under the film's sheet: the sheet closes (the film is kept) to show it.
+    openRender: (path) => {
+      ($("#film") as HTMLDialogElement).close();
+      go("studio");
+      openRender(path);
+    },
   });
   initStoryboard({
     toast,

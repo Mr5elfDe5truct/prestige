@@ -16,6 +16,7 @@ mod toolstore;
 mod vram;
 mod transcribe;
 mod director;
+mod film;
 mod engine;
 mod laser;
 mod search;
@@ -520,6 +521,15 @@ fn store_set(app: AppHandle, name: String, value: serde_json::Value) -> Result<(
     fs::rename(&tmp, &path).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn store_delete(app: AppHandle, name: String) -> Result<(), String> {
+    let path = store_path(&app, &name)?;
+    if path.exists() {
+        fs::remove_file(&path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 pub(crate) fn read_settings(app: &AppHandle) -> serde_json::Value {
     data_dir(app, "")
         .ok()
@@ -601,6 +611,7 @@ pub fn run() {
             save_settings,
             store_get,
             store_set,
+            store_delete,
             sys_memory,
             file_sizes,
             search::search_index,
@@ -673,6 +684,10 @@ pub fn run() {
             toolstore::tools_open_link,
             transcribe::transcribe_file,
             director::director_assemble,
+            film::film_write,
+            film::film_remove,
+            film::film_pick,
+            film::film_export,
             laser::laser_save,
             transcribe::transcribe_bytes,
             transcribe::pick_media,

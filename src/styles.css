@@ -1123,6 +1123,76 @@ body[data-style="molded"] .sb-shot { border-radius: 16px; }
 @media (max-width: 760px) { .sb-top { grid-template-columns: 1fr; } }
 .director-steps li.done::after { content: " ✓"; color: var(--ok); }
 
+/* Film: a film's cast, plan, shots with their takes, and its timeline (film.ts). */
+.sheet.film { width: min(1320px, calc(100vw - 32px)); height: calc(100vh - 32px); max-height: none; flex-direction: column; }
+.sheet.film[open] { display: flex; }
+.sheet.film select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font: 13px var(--body); padding: 7px 9px; text-transform: none; letter-spacing: 0; }
+.fm-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.fm-head .grow, .fm-row .grow, .fm-acts .grow { flex: 1; }
+.sheet .fm-name { font: 600 16px var(--display); min-width: 180px; flex: 0 1 320px; }
+.fm-tabs button { font-size: 12.5px; padding: 6px 14px; }
+.fm-page { flex: 1; min-height: 0; overflow: auto; padding: 4px 4px 8px 0; }
+.fm-page[hidden] { display: none; }
+.fm-status { margin: 8px 0 0; padding-top: 8px; border-top: 1px solid var(--line); font: 11.5px var(--mono); }
+.fm-row { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+.fm-row label { margin-top: 10px; }
+.sheet .fm-acts { align-items: flex-end; }
+.fm-acts label:not(.check) { margin-top: 0; }
+.fm-cast { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; margin-top: 12px; }
+.fm-member { flex-direction: row; align-items: flex-start; }
+.fm-face { flex: none; width: 110px; aspect-ratio: 3 / 4; border-radius: 8px; overflow: hidden; background: var(--bg); display: grid; place-items: center; }
+.fm-face img { width: 100%; height: 100%; object-fit: cover; }
+.fm-face span { padding: 8px; font-size: 11px; color: var(--muted); text-align: center; }
+.fm-member-fields { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.fm-member-fields label:first-child { margin-top: 0; }
+.fm-member-fields .credit { margin-top: 8px; }
+.fm-song { margin-top: 6px; padding: 4px 12px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.fm-song audio { height: 32px; }
+.fm-shots { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+.fm-shot .sb-head select { padding: 3px 6px; font-size: 12px; }
+.fm-shot.flash { outline: 2px solid var(--gold); outline-offset: 2px; }
+.fm-video { width: 100%; height: 100%; display: block; background: #000; }
+.fm-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.fm-chip { border: 1px solid var(--line); background: none; color: var(--muted); border-radius: 999px; padding: 2px 10px; font-size: 11.5px; }
+.fm-chip.on { color: var(--fg); border-color: var(--gold); background: color-mix(in srgb, var(--gold) 16%, transparent); }
+.fm-lines { display: flex; flex-direction: column; gap: 4px; }
+.fm-line { display: grid; grid-template-columns: minmax(70px, 30%) 1fr auto; gap: 4px; align-items: center; }
+.sheet .fm-line select, .sheet .fm-line input { padding: 5px 7px; font: 12px var(--body); min-width: 0; }
+.fm-line .icon-btn { width: 24px; height: 24px; font-size: 13px; }
+.fm-addline { align-self: flex-start; font-size: 12px; }
+.fm-warn { color: var(--gold); }
+.fm-takes { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 2px; }
+.fm-take { position: relative; flex: none; width: 54px; aspect-ratio: 3 / 2; padding: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--bg); }
+.fm-take.on { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold); }
+.fm-take img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fm-take span { position: absolute; right: 2px; bottom: 1px; font: 10px var(--mono); color: #fff; text-shadow: 0 0 3px #000; }
+.fm-acts-row { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.fm-acts-row .btn { padding: 5px 10px; font-size: 12px; }
+.fm-acts-row .btn:disabled { opacity: .45; }
+.fm-zoom { flex-direction: row !important; align-items: center; }
+.fm-tracks { margin-top: 12px; overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); padding: 6px 0; }
+.fm-track { display: flex; align-items: center; min-height: 26px; }
+.fm-track:first-child { min-height: 64px; }
+.fm-label { position: sticky; left: 0; z-index: 2; flex: none; width: 92px; padding: 0 10px; font: 10.5px var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); background: var(--panel-2); align-self: stretch; display: flex; align-items: center; }
+.fm-lane { position: relative; flex: none; height: 100%; min-height: inherit; }
+.fm-clip { position: absolute; top: 4px; bottom: 4px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--bg); cursor: grab; display: flex; align-items: flex-end; }
+.fm-clip img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .75; pointer-events: none; }
+.fm-clip span { position: relative; padding: 1px 6px; font: 10.5px var(--mono); color: #fff; text-shadow: 0 0 3px #000; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fm-clip.title { background: #000; align-items: center; justify-content: center; }
+.fm-clip.fade { border-left: 3px solid var(--gold); }
+.fm-clip.on { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold); z-index: 1; }
+.fm-bar, .fm-line-bar { position: absolute; top: 4px; bottom: 4px; border-radius: 4px; font: 10px var(--mono); padding: 0 5px; white-space: nowrap; overflow: hidden; color: var(--fg); }
+.fm-bar { background: color-mix(in srgb, var(--red) calc(var(--v, 1) * 55%), transparent); border: 1px solid color-mix(in srgb, var(--red) 40%, transparent); }
+.fm-bar.music { background: color-mix(in srgb, var(--gold) calc(var(--v, 1) * 40%), transparent); border-color: color-mix(in srgb, var(--gold) 45%, transparent); }
+.fm-line-bar { background: color-mix(in srgb, var(--ok) 35%, transparent); border: 1px solid color-mix(in srgb, var(--ok) 55%, transparent); }
+.fm-line-bar.unvoiced { background: none; border-style: dashed; color: var(--muted); }
+.fm-inspect { margin-top: 10px; min-height: 48px; }
+.fm-inspect .fm-row { align-items: flex-end; }
+.sheet .fm-inspect input[type="number"] { width: 84px; }
+.fm-preview { display: block; margin-top: 10px; max-height: 32vh; max-width: 100%; border-radius: 8px; background: #000; }
+.fm-mix { margin-top: 6px; }
+body[data-style="molded"] .fm-clip, body[data-style="molded"] .fm-tracks { border-radius: 14px; }
+
 /* The song editor: a waveform to pick the part to redo or where to carry on from, and the song's words and style. */
 .sheet.songedit { width: min(720px, calc(100vw - 32px)); }
 .se-tabs { margin: 4px 0 12px; }

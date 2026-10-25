@@ -194,6 +194,7 @@
             <button data-mode="video" role="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2" /><path d="M16 10l5-3v10l-5-3z" /></svg>Video</button>
             <button data-mode="music" role="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 18V5l11-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="17" cy="16" r="3" /></svg>Music</button>
             <button data-mode="storyboard" role="tab" title="A music video planned shot by shot, with a frame for each, to change before it's rendered"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="4" width="8" height="7" rx="1" /><rect x="14" y="4" width="8" height="7" rx="1" /><rect x="2" y="14" width="8" height="7" rx="1" /><rect x="14" y="14" width="8" height="7" rx="1" /></svg>Storyboard</button>
+            <button data-mode="film" role="tab" title="A short film or a music video: cast it, plan it, shoot each shot and cut it together on a timeline"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M7 3v18M17 3v18M3 8h4M3 12h4M3 16h4M17 8h4M17 12h4M17 16h4" /></svg>Film</button>
             <button data-mode="webcam" role="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7h4l2-3h6l2 3h4v12H3z" /><circle cx="12" cy="13" r="4" /></svg>Webcam</button>
             <button data-go="voice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 12h2M7 8v8M11 5v14M15 8v8M19 11v2" /></svg>Voice</button>
           </div>
@@ -994,8 +995,102 @@
       </form>
     </dialog>
 
-    <!-- Read the text (ocr.ts) -->
-    <dialog class="sheet ocr" id="ocr">
+    <!-- Film (film.ts): a cast, a plan, a card per shot with its takes, and a timeline to cut them into a film -->
+    <dialog class="sheet film" id="film">
+      <div class="fm-head">
+        <input id="fm-name" class="fm-name" type="text" autocomplete="off" aria-label="The film's name" title="Rename the film" />
+        <span class="seg fm-tabs" id="fm-tabs"><button type="button" data-tab="cast">1 · Cast</button><button type="button" data-tab="plan">2 · Plan</button><button type="button" data-tab="shots">3 · Shots</button><button type="button" data-tab="cut">4 · Timeline</button></span>
+        <span class="grow"></span>
+        <button type="button" class="btn danger" id="fm-delete" title="Delete this film (its takes and exports stay in the gallery)">Delete film</button>
+        <button type="button" class="btn" id="fm-close" title="The film is kept: open it again from Studio's Film tab">Close</button>
+      </div>
+      <section class="fm-page" data-page="cast">
+        <p class="muted">Who's in it: your Characters (their face and voice), or any picture as a cast member with a name. A shot with a cast member in it starts on a frame with their picture in the scene.</p>
+        <div class="fm-cast" id="fm-cast"></div>
+        <div class="acts fm-acts">
+          <label>Add a character<select id="fm-add-char"></select></label>
+          <button type="button" class="btn" id="fm-add-pic">Add a picture…</button>
+          <input type="file" id="fm-pic-file" accept="image/*" hidden />
+          <span class="grow"></span>
+        </div>
+        <p class="credit" id="fm-consent"></p>
+      </section>
+      <section class="fm-page" data-page="plan" hidden>
+        <div class="fm-row">
+          <span class="seg" id="fm-kind"><button type="button" data-kind="short">Short film</button><button type="button" data-kind="music">Music video</button></span>
+          <label>Length<select id="fm-length"></select></label>
+          <span class="grow"></span>
+          <button type="button" class="btn primary" id="fm-plan">Plan it</button>
+        </div>
+        <label>The idea<textarea id="fm-idea" rows="3" placeholder="What happens, who's in it, the mood"></textarea></label>
+        <label>The look, in front of every shot<textarea id="fm-look" rows="2" placeholder="The visual style: cinematic 35 mm, anime, claymation…"></textarea></label>
+        <div class="fm-song" id="fm-song">
+          <div class="sb-top">
+            <label>Song title<input id="fm-song-title" type="text" autocomplete="off" /></label>
+            <label>Music style<input id="fm-song-style" type="text" autocomplete="off" placeholder="genre, mood, instruments, vocals" /></label>
+          </div>
+          <label>Lyrics<textarea id="fm-song-lyrics" rows="4" placeholder="Empty for an instrumental"></textarea></label>
+          <div class="fm-row"><button type="button" class="btn" id="fm-song-make">Make the song</button><audio id="fm-song-audio" controls preload="none" hidden></audio><span class="muted" id="fm-song-state"></span></div>
+        </div>
+        <p class="muted" id="fm-plan-note"></p>
+      </section>
+      <section class="fm-page" data-page="shots" hidden>
+        <div class="sb-shots fm-shots" id="fm-shots"></div>
+        <div class="acts fm-acts">
+          <label class="check"><input id="fm-draft" type="checkbox" />Draft (quicker shots)</label>
+          <span class="grow"></span>
+          <button type="button" class="btn" id="fm-add-shot">Add a shot</button>
+          <button type="button" class="btn" id="fm-voice">Voice the lines</button>
+          <button type="button" class="btn" id="fm-frames">Draw missing frames</button>
+          <button type="button" class="btn primary" id="fm-shoot">Shoot missing shots</button>
+        </div>
+      </section>
+      <section class="fm-page" data-page="cut" hidden>
+        <div class="fm-row">
+          <button type="button" class="btn" id="fm-title">+ Title card</button>
+          <button type="button" class="btn" id="fm-reset" title="Every shot that has a take, in the shots' order (titles stay where they are)">Put every shot in order</button>
+          <label class="fm-zoom">Zoom<input id="fm-zoom" type="range" min="10" max="80" value="28" /></label>
+          <span class="grow"></span>
+          <span class="muted" id="fm-total"></span>
+        </div>
+        <div class="fm-tracks" id="fm-tracks">
+          <div class="fm-track"><span class="fm-label">Picture</span><div class="fm-lane" id="fm-lane-v"></div></div>
+          <div class="fm-track"><span class="fm-label">Clip sound</span><div class="fm-lane" id="fm-lane-s"></div></div>
+          <div class="fm-track"><span class="fm-label">Dialogue</span><div class="fm-lane" id="fm-lane-d"></div></div>
+          <div class="fm-track"><span class="fm-label">Music</span><div class="fm-lane" id="fm-lane-m"></div></div>
+        </div>
+        <div class="fm-inspect" id="fm-inspect"></div>
+        <div class="fm-row fm-mix">
+          <label>Music bed<select id="fm-bed"></select></label>
+          <label>Its level<input id="fm-bed-vol" type="range" min="0" max="1" step="0.05" /></label>
+          <label>Dialogue level<input id="fm-line-vol" type="range" min="0" max="1.5" step="0.05" /></label>
+          <span class="grow"></span>
+          <label>Size<select id="fm-size"><option value="768x512">768 × 512</option><option value="1152x768">1152 × 768</option><option value="1620x1080">1620 × 1080 (upscaled takes)</option></select></label>
+          <button type="button" class="btn primary" id="fm-export">Export MP4</button>
+        </div>
+        <p class="muted" id="fm-exports"></p>
+      </section>
+      <p class="muted fm-status" id="fm-status"></p>
+    </dialog>
+
+    <!-- Film: swap a cast member into a clip (SCAIL-2) -->
+    <dialog class="sheet" id="fm-swap">
+      <form method="dialog">
+        <h2>Swap a cast member in</h2>
+        <label>Who goes in<select id="fs-who"></select></label>
+        <label>Into<select id="fs-from"><option value="take">This shot's take</option><option value="own">A clip of your own…</option></select></label>
+        <label>Who to replace<input id="fs-target" type="text" autocomplete="off" placeholder="person, the woman in red, the dancer" /></label>
+        <label>Quality<select id="fs-quality"><option value="draft">Draft (4 steps)</option><option value="standard">Standard (8 steps)</option></select></label>
+        <p class="muted" id="fs-est"></p>
+        <p class="credit">SCAIL-2 by Z.ai (Wan 2.1 14B) with SAM 3.1 and BiRefNet. The clip's sound is kept, its first 20 s swapped. <span id="fs-consent"></span></p>
+        <div class="acts">
+          <button class="btn" value="cancel">Cancel</button>
+          <button class="btn primary" value="go" id="fs-go">Swap</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- Read the text (ocr.ts) -->    <dialog class="sheet ocr" id="ocr">
       <form method="dialog" onsubmit="return false">
         <h2>Text from the picture <span class="credit" id="ocr-name"></span></h2>
         <div class="ocr-md msg-body" id="ocr-body"></div>
