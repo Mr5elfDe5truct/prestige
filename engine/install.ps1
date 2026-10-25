@@ -190,7 +190,7 @@ $PackInfo = [ordered]@{
     main     = @{ GB = 22.1; Text = "Main           Qwen3.6 35B Heretic (llama.cpp) - best quality; needs 32 GB RAM" }
     deep     = @{ GB = 10.9; Text = "Deep           Qwen3.8 27B Uncensored (llama.cpp) - strongest reasoning, ~30 tok/s on 12 GB" }
     voice    = @{ GB = 18.1; Text = "Voice          Whisper turbo + VoxCPM2 voices and cloning + Qwen3.5 2B/4B for Live calls (GPU, 8 GB+)" }
-    images   = @{ GB = 36.6; Text = "Images         Qwen-Image-2.1 (+ 4-step turbo and Lightning) and Z-Image-Turbo (ComfyUI) - text to image and editing" }
+    images   = @{ GB = 41.9; Text = "Images         Qwen-Image-2.1 int8 (+ 8-step Turbo and Lightning) and Z-Image-Turbo (ComfyUI) - text to image and editing" }
     video    = @{ GB = 60.3; Text = "Video          LTX-2.5 + Wan 2.2 (ComfyUI) - text/image to video with sound" }
     computer = @{ GB = 6.9;  Text = "Computer use   UI-TARS 1.5 7B (llama.cpp) - drives the mouse and keyboard; asks about Nex-N2.5-mini (+21.6 GB)" }
     music    = @{ GB = 14.8; Text = "Music          ACE-Step 1.5 turbo + base (ComfyUI) - songs with vocals, the song editor and stems" }
@@ -200,7 +200,7 @@ $PackInfo = [ordered]@{
     talk     = @{ GB = 17.4; Text = "Talking        InfiniteTalk on Wan 2.1 14B (ComfyUI, GGUF) - a face and a voice to a lip-synced video" }
     select   = @{ GB = 2.2;  Text = "Select         SAM 3.1 + BiRefNet (ComfyUI) - click or name to select, cut-outs, background removal" }
     upscale  = @{ GB = 12.3; Text = "Upscale        SeedVR2 7B + 3B (ComfyUI, int8) - sharpen pictures to 1080p or 4K, videos to 1080p" }
-    moss     = @{ GB = 14.6; Text = "MOSS-Image     MOSS-Image (ComfyUI 0.42+, int8, 8 steps) - a second picture model, best with text and layouts" }
+    moss     = @{ GB = 14.9; Text = "MOSS-Image     MOSS-Image (ComfyUI 0.42+, int8, 8 steps) - a second picture model for text, layouts and edits" }
     kromoss  = @{ GB = 6.6;  Text = "Kromoss        Kromoss for MOSS-Image - more natural people (needs moss)" }
 }
 Step 3 "Choosing models"
@@ -395,9 +395,9 @@ $comfy = Join-Path $Root "apps\ComfyUI"
 if ($desk -and -not $NoComfyDesktop -and -not (Test-Path "$comfy\main.py")) {
     Skip "using your Comfy Desktop install ($($desk.Name))"
     $nodes = "$($desk.FullName)\ComfyUI\custom_nodes"; $comfyPy = "$($desk.FullName)\ComfyUI\.venv\Scripts\python.exe"
-    # Qwen-Image-2.1 and LTX-2.5 need ComfyUI 0.37 or newer.
+    # Qwen-Image-2.1's int8 files and LTX-2.5 need ComfyUI 0.38 or newer (tested on 0.42.5).
     $ver = (Select-String -Path "$($desk.FullName)\ComfyUI\comfyui_version.py" -Pattern '(\d+)\.(\d+)\.\d+' -ErrorAction SilentlyContinue).Matches
-    if ($ver -and [version]$ver[0].Value -lt [version]"0.37.0") {
+    if ($ver -and [version]$ver[0].Value -lt [version]"0.38.0") {
         Warn "Comfy Desktop has ComfyUI $($ver[0].Value); update it in Comfy Desktop for Qwen-Image-2.1 and LTX-2.5"
     } elseif ($ver -and $Packs -contains "moss" -and [version]$ver[0].Value -lt [version]"0.42.0") {
         Warn "Comfy Desktop has ComfyUI $($ver[0].Value); MOSS-Image needs 0.42 or newer, so update it in Comfy Desktop"
@@ -438,6 +438,22 @@ foreach ($n in @(@{ Name = "ComfyUI-GGUF"; Url = "https://github.com/leejet/Comf
     }
     Ok $n.Name
 }
+# SageAttention 2.2 for Prestige's Faster video (Workstation Sage Attention): triton-windows for the environment's
+# PyTorch (2.10 takes Triton 3.6, 2.11 3.7, 2.12 3.8) and woct0rdho's Windows wheel for its CUDA. Only where it runs:
+# an NVIDIA card of compute 8.0 or newer (RTX 30-series and up). Without it, Faster video simply does nothing.
+$cc = (& nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>$null | ForEach-Object { [double]$_ } | Measure-Object -Maximum).Maximum
+& $comfyPy -c "import sageattention" 2>$null
+if ($LASTEXITCODE -eq 0) { Skip "SageAttention already installed" }
+elseif ($cc -ge 8.0) {
+    $tv = & $comfyPy -c "import torch; print(torch.__version__)" 2>$null
+    if ($tv -match '^2\.(\d+)\.\d+\+cu(128|130)' -and [int]$Matches[1] -ge 10) {
+        $minor = [int]$Matches[1]; $cu = $Matches[2]
+        $venv = Split-Path (Split-Path $comfyPy)
+        & uv pip install -p $venv "triton-windows>=3.$($minor - 4),<3.$($minor - 3)" `
+            "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post6/sageattention-2.2.0+cu${cu}torch2.10.0andhigher.post6-cp310-abi3-win_amd64.whl" -q
+        if ($LASTEXITCODE) { Warn "couldn't install SageAttention; Faster video will do nothing" } else { Ok "SageAttention 2.2 (Faster video)" }
+    } else { Skip "SageAttention needs PyTorch 2.10+ with CUDA 12.8 or 13.0 (ComfyUI has $tv)" }
+} else { Skip "SageAttention needs an RTX 30-series card or newer" }
 
 # ---------- 9. models ----------
 Step 9 "Models"
@@ -561,6 +577,9 @@ if ($Packs -contains "moss") {
         Download (HF "Comfy-Org/MOSS-Image" $f) "$comfyModels\$folder\moss\$name"
     }
     Download (HF "lodestones/MOSS-Image-SFT-8-steps-dmd" "lora.safetensors") "$comfyModels\loras\moss\moss-image-sft-8-steps-dmd-lora.safetensors"
+    # chinoll's Moss-Image-Edit LoRA (GPL-3.0, rank 64) in ComfyUI's key names, for Prestige's MOSS-Image edits
+    # (Edit with: MOSS-Image). Its node, Text Encode MOSS-Image Edit, is in ComfyUI newer than 0.42.5.
+    Download (HF "PedroMarinhoDev/Moss-Image-Edit-ComfyUI" "moss_image_edit_lora_bf16.safetensors") "$comfyModels\loras\moss\moss-image-edit-lora-bf16.safetensors"
     # Transparent pictures: paralaif's MOSS-Image Alpha LoRA (a proof of concept for non-commercial research and evaluation
     # only) and trmz's RGBA FLUX.2 VAE (Apache-2.0) that decodes its latents with an alpha channel.
     Download (HF "paralaif/MOSS-Image-Alpha-LoRA" "moss_alpha_v1.safetensors") "$comfyModels\loras\moss\moss-alpha-v1.safetensors"
@@ -579,9 +598,13 @@ if ($Packs -contains "upscale") {
     }
 }
 if ($Packs -contains "images") {
-    # Qwen-Image-2.1: Q4_K_M DiT (uncensored build), Qwen3-VL-8B text encoder (GGUF plus its vision mmproj) and VAE.
-    Download (HF "abenzerps/Qwen-Image-2.1-Uncensored-GGUF" "qwen-image-2.1-UC-Q4_K_M.gguf") "$comfyModels\unet\qwen-image-2.1-UC-Q4_K_M.gguf"
-    Download (HF "Abiray/Qwen-Image-2.1-viggle-4-steps-turbo-GGUF" "qwen_image_2.1_turbo_Q4_K_M.gguf") "$comfyModels\unet\qwen_image_2.1_turbo_Q4_K_M.gguf"
+    # Qwen-Image-2.1: Comfy-Org's int8 convrot DiT and Qwen's 8-step Turbo (2.5x the Q4_K_M GGUFs' speed on an RTX 3060),
+    # abenzerps' uncensored LoRA that Prestige puts on both, the Qwen3-VL-8B text encoder (GGUF plus its vision mmproj)
+    # and the VAE. Prestige still runs the older GGUFs (qwen-image-2.1-UC-Q4_K_M, the Viggle turbo) where they're installed instead.
+    foreach ($f in "qwen_image_2.1_int8_convrot.safetensors", "qwen_image_2.1_turbo_int8_convrot.safetensors") {
+        Download (HF "Comfy-Org/Qwen-Image-2.1" "diffusion_models/$f") "$comfyModels\diffusion_models\qwen-image\$f"
+    }
+    Download (HF "abenzerps/Qwen-Image-2.1-Uncensored-Quantized" "qwen-image-2.1-uncensored-lora.safetensors") "$comfyModels\loras\qwen-image\qwen-image-2.1-uncensored-lora.safetensors"
     Download (HF "unsloth/Qwen3-VL-8B-Instruct-GGUF" "Qwen3-VL-8B-Instruct-UD-Q4_K_XL.gguf") "$comfyModels\text_encoders\Qwen3-VL-8B-Instruct-UD-Q4_K_XL.gguf"
     Download (HF "unsloth/Qwen3-VL-8B-Instruct-GGUF" "mmproj-F16.gguf") "$comfyModels\text_encoders\Qwen3-VL-8B-Instruct-mmproj-F16.gguf"
     Download (HF "Comfy-Org/Qwen-Image-2.1" "vae/qwen_image_2.1_vae_bf16.safetensors") "$comfyModels\vae\qwen_image_2.1_vae_bf16.safetensors"
