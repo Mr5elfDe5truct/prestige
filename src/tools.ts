@@ -52,6 +52,7 @@ export interface ToolStep {
   ok?: boolean;
   denied?: boolean;
   ms?: number;
+  by?: string; // the model (or agent) that called it
 }
 
 // Read-only operations run without asking. Everything else asks first.
