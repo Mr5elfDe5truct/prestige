@@ -95,6 +95,7 @@ import type { RefKind } from "./reference";
 import { initPhone, onPhoneAsk, phoneOn, phonePush, phoneState, refreshPhone } from "./phone";
 import { initToolStore, openToolStore } from "./toolstore";
 import { listen } from "@tauri-apps/api/event";
+import { beginWork, endWork, initWorking, isWorking, pctOf, stepWork, toolDoing, workBy } from "./working";
 
 const inTauri = "__TAURI_INTERNALS__" in window;
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
@@ -926,13 +927,14 @@ function renderToolStep(bubble: HTMLElement, step: ToolStep) {
     el = document.createElement("details") as HTMLDetailsElement & { _step?: ToolStep };
     el._step = step;
     el.className = "tool-step";
-    el.innerHTML = `<summary><span class="ico"></span><span class="what"></span><span class="ms"></span></summary><pre></pre>`;
+    el.innerHTML = `<summary><span class="ico"></span><span class="what"></span><span class="by"></span><span class="ms"></span></summary><pre></pre>`;
     box.appendChild(el);
   }
   const state = step.denied ? "denied" : step.ok === true ? "ok" : step.ok === false ? "fail" : "run";
   el.dataset.state = state;
   $(".ico", el).textContent = { ok: "✓", fail: "✗", denied: "⛔", run: "…" }[state]!;
   $(".what", el).textContent = describeCall(step.name, step.args);
+  $(".by", el).textContent = step.by ? `by ${step.by}` : "";
   $(".ms", el).textContent = step.denied ? "not allowed" : step.ms != null ? `${(step.ms / 1000).toFixed(1)} s` : "running";
   $("pre", el).textContent =
     `Arguments\n${JSON.stringify(step.args ?? {}, null, 2)}` + (step.result != null ? `\n\nResult\n${step.result}` : "");
@@ -941,6 +943,7 @@ function renderToolStep(bubble: HTMLElement, step: ToolStep) {
 
 /** An inline "Allow this?" card in the reply; resolves when the user decides (or the reply is stopped). */
 function confirmTool(bubble: HTMLElement, def: ToolDef, args: any, signal: AbortSignal): Promise<boolean> {
+  stepWork("reply", "Waiting for you to allow it…", undefined, def.name);
   return new Promise((resolve) => {
     const card = document.createElement("div");
     card.className = "tool-confirm";
@@ -1162,8 +1165,11 @@ function mediaRequest(text: string): { kind: MediaKind; prompt: string } | null 
   return m ? { kind: v ? "video" : "image", prompt: text.slice(m[0].length).trim().replace(/[.?!]+$/, "") } : null;
 }
 
-function setBusyUi(on: boolean) {
+/** `what` names the job in the working readout ("Picture", "Deep research"…), `who` the model doing it. */
+function setBusyUi(on: boolean, what = "Prestige", who?: string) {
   document.body.classList.toggle("busy", on);
+  if (on) beginWork("reply", what, who);
+  else endWork("reply");
   $("#thinking").hidden = !on;
   $("#stop").hidden = !on;
   ($("#send") as HTMLButtonElement).disabled = on;
@@ -1190,7 +1196,7 @@ async function makeMedia(text: string, kind: MediaKind, prompt: string, hooks?: 
   scrollDown(true);
   busy = new AbortController();
   busy.signal.addEventListener("abort", () => cancelRender(), { once: true });
-  setBusyUi(true);
+  setBusyUi(true, kind === "video" ? "Video" : "Picture");
   const t0 = Date.now();
   try {
     const ref = refB64 ? await referenceFromBase64(refB64) : undefined;
@@ -1277,7 +1283,7 @@ async function makeWorld(text: string, request: string, hooks?: ReplyHooks, pict
   scrollDown(true);
   busy = new AbortController();
   busy.signal.addEventListener("abort", () => cancelRender(), { once: true });
-  setBusyUi(true);
+  setBusyUi(true, "World");
   const t0 = Date.now();
   try {
     const { text: words, camera } = splitCamera(request.replace(WORLD_NEXT, ""));
@@ -1345,7 +1351,7 @@ async function make3d(text: string, srcB64: string, hooks?: ReplyHooks) {
   scrollDown(true);
   busy = new AbortController();
   busy.signal.addEventListener("abort", () => cancelRender(), { once: true });
-  setBusyUi(true);
+  setBusyUi(true, "3D model");
   const t0 = Date.now();
   try {
     const ref = await referenceFromBase64(srcB64);
@@ -1401,7 +1407,7 @@ async function makeTalk(text: string, line: string, srcB64: string, voice: strin
   scrollDown(true);
   busy = new AbortController();
   busy.signal.addEventListener("abort", () => cancelRender(), { once: true });
-  setBusyUi(true);
+  setBusyUi(true, "Talking video");
   const t0 = Date.now();
   try {
     const speech = await speakLine(line, voice);
@@ -1520,7 +1526,7 @@ async function makeSong(text: string, request: string, hooks?: ReplyHooks, image
   scrollDown(true);
   busy = new AbortController();
   busy.signal.addEventListener("abort", () => cancelRender(), { once: true });
-  setBusyUi(true);
+  setBusyUi(true, "Song");
   const t0 = Date.now();
   try {
     const context = before.length ? `Conversation so far:\n${before.map((m) => `${m.role}: ${m.content.slice(0, 800)}`).join("\n")}\n\nWrite this song: ` : "";
@@ -1601,7 +1607,7 @@ async function makeDrama(text: string, request: string, hooks?: ReplyHooks) {
   scrollDown(true);
   busy = new AbortController();
   busy.signal.addEventListener("abort", () => cancelRender(), { once: true });
-  setBusyUi(true);
+  setBusyUi(true, "Drama");
   const t0 = Date.now();
   let unlisten: (() => void) | null = null;
   try {
@@ -1736,7 +1742,7 @@ async function makeStoryboard(text: string, idea: string, hooks?: ReplyHooks) {
   body.innerHTML = `<span class="status-line">${model.name} is planning the song and the shots…</span>`;
   scrollDown(true);
   busy = new AbortController();
-  setBusyUi(true);
+  setBusyUi(true, "Storyboard");
   const seconds = askedSeconds(idea);
   try {
     const plan = await planVideo(model, idea, seconds, busy.signal, (n) => {
@@ -1812,7 +1818,7 @@ async function makeDirector(text: string, idea: string, hooks?: ReplyHooks, boar
   scrollDown(true);
   busy = new AbortController();
   busy.signal.addEventListener("abort", () => (cancelRender(), cancelRender("Director")), { once: true });
-  setBusyUi(true);
+  setBusyUi(true, "Music video");
   const t0 = Date.now();
   const seconds = board?.plan.seconds ?? askedSeconds(idea);
   // A storyboard's Draft box decides; unticked, the saved Video quality (or standard, if that's draft).
@@ -1934,7 +1940,7 @@ async function runResearch(text: string, question: string, hooks?: ReplyHooks) {
   body.innerHTML = `<span class="status-line">Starting deep research…</span>`;
   scrollDown(true);
   busy = new AbortController();
-  setBusyUi(true);
+  setBusyUi(true, "Deep research", model.name);
   const t0 = Date.now();
   let thinking = "";
   let pending = false;
@@ -1947,9 +1953,10 @@ async function runResearch(text: string, question: string, hooks?: ReplyHooks) {
       model,
       {
         step: (name, arg) => {
-          const step: ToolStep = { name, args: name === "read" ? { url: arg } : name === "plan" ? { goal: arg } : { query: arg } };
+          const step: ToolStep = { name, args: name === "read" ? { url: arg } : name === "plan" ? { goal: arg } : { query: arg }, by: model.name };
           reply.tools!.push(step);
           renderToolStep(bubble, step);
+          stepWork("reply", toolDoing(name, step.args), undefined, name);
           const t = performance.now();
           return {
             done: (ok, result) => {
@@ -1961,6 +1968,7 @@ async function runResearch(text: string, question: string, hooks?: ReplyHooks) {
           };
         },
         status: (s) => {
+          stepWork("reply", s, undefined, null);
           if (!reply.content) body.innerHTML = `<span class="status-line">${escapeHtml(s)}</span>`;
           phonePush({ type: "status", chatId: replyChat, text: s });
         },
@@ -2049,7 +2057,7 @@ async function runTranscribe(src: MediaSource, hooks?: ReplyHooks) {
   };
   scrollDown(true);
   busy = new AbortController();
-  setBusyUi(true);
+  setBusyUi(true, "Transcribe");
   try {
     const t = await transcribeMedia(src, settings.stackRoot ?? null, (pct, what) => progress(pct * 0.8, what));
     if (!t.turns.length) throw new Error("no speech was found in it");
@@ -2163,7 +2171,7 @@ async function runComputer(text: string, task: string, hooks?: ReplyHooks) {
   sel.innerHTML = list.map((m) => `<option value="${escapeHtml(m.key)}"${m.key === pick.key ? " selected" : ""}>${escapeHtml(m.name)}</option>`).join("");
   scrollDown(true);
   busy = new AbortController();
-  setBusyUi(true);
+  setBusyUi(true, "Do it for me");
   const go = await new Promise<boolean>((resolve) => {
     body.querySelectorAll<HTMLButtonElement>("[data-a]").forEach((b) => b.addEventListener("click", () => resolve(b.dataset.a === "yes"), { once: true }));
     busy!.signal.addEventListener("abort", () => resolve(false), { once: true });
@@ -2179,12 +2187,14 @@ async function runComputer(text: string, task: string, hooks?: ReplyHooks) {
       saveSettings().catch(() => {});
     }
     reply.model = `Computer use · ${model.name}`;
+    workBy("reply", model.name);
     $(".msg-who", bubble).textContent = reply.model;
     body.innerHTML = `<span class="status-line">Working on it in the panel…</span>`;
     phonePush({ type: "status", chatId: replyChat, text: `Computer use: ${task}` });
     const r = await doItForMe(task, model);
     for (const s of r.steps) {
       const step: ToolStep = {
+        by: model.name,
         name: "computer",
         args: { action: describeAct(s.act) },
         ok: s.state === "done",
@@ -2474,10 +2484,7 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
 
   busy = new AbortController();
   let reacts: ReturnType<typeof reactFilter> | null = null;
-  document.body.classList.add("busy");
-  $("#thinking").hidden = false;
-  $("#stop").hidden = false;
-  ($("#send") as HTMLButtonElement).disabled = true;
+  setBusyUi(true, char ? `Chat · ${char.name}` : "Chat", model.name);
 
   try {
     // Shared memory: "remember that …" saves a fact; every reply gets the relevant facts. Talking to a character, the
@@ -2650,9 +2657,10 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
       messages.push({ role: "assistant", content: reply.content.slice(before), tool_calls: res.toolCalls });
       for (const call of res.toolCalls) {
         const def = toolDefs.find((d) => d.name === call.name);
-        const step: ToolStep = { name: call.name, args: call.arguments };
+        const step: ToolStep = { name: call.name, args: call.arguments, by: model.name };
         (reply.tools ??= []).push(step);
         renderToolStep(bubble, step);
+        stepWork("reply", toolDoing(call.name, call.arguments), undefined, call.name);
         let result: string;
         if (!def) {
           result = `There is no tool called ${call.name}.`;
@@ -2674,7 +2682,7 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
           step.denied = true;
           result = "The user did not allow this action. Don't retry it; tell them what you would have done instead.";
         } else {
-          if (!reply.content) body.innerHTML = `<span class="status-line">Running ${def.name}…</span>`;
+          if (!reply.content) body.innerHTML = `<span class="status-line">${escapeHtml(toolDoing(def.name, call.arguments))}</span>`;
           const t0 = performance.now();
           try {
             result = await runTool(def, call.arguments);
@@ -2689,6 +2697,7 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
         renderToolStep(bubble, step);
         messages.push({ role: "tool", content: result, tool_call_id: call.id, tool_name: call.name });
       }
+      stepWork("reply", "Reading the results…", undefined, null);
       if (!reply.content) body.innerHTML = `<span class="status-line">Reading the results…</span>`;
     }
     reply.stats = stats;
@@ -2727,10 +2736,7 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     if (!live && !char && !reply.error && !busy?.signal.aborted) queueMemoryWrite(text, reply.content, model);
     if (speakIt && !busy?.signal.aborted) speakEnd();
     busy = null;
-    document.body.classList.remove("busy");
-    $("#thinking").hidden = true;
-    $("#stop").hidden = true;
-    ($("#send") as HTMLButtonElement).disabled = false;
+    setBusyUi(false);
     scrollDown();
     persist()
       .catch((e) => toast(`Couldn't save this chat: ${e}`, "warn"))
@@ -2817,6 +2823,44 @@ async function fromPhone(p: PhoneSend) {
 let queueSent = 0;
 let queueTimer: number | undefined;
 let queueShape = "";
+/** The render queue in the working readout: what's rendering now and how many wait. */
+function queueWork() {
+  const q = phoneQueue();
+  const run = q.find((j) => j.state === "running");
+  const waiting = q.filter((j) => j.state === "waiting").length;
+  if (!run && !waiting) return endWork("render");
+  const what = `Render queue${waiting ? ` · ${waiting} waiting` : ""}`;
+  beginWork("render", what);
+  stepWork("render", run ? `${run.label}: ${run.status || "rendering"}` : "Waiting to start…", run?.pct);
+}
+
+/** The working readout follows what the newest reply says it's doing: every feature writes its steps into a
+ *  .status-line in the bubble ("Searching your files…", "Rendering (42%)"), and once the words come it's writing. */
+function watchReplySteps() {
+  const thread = $("#thread");
+  let queued = false;
+  let seen = "";
+  const read = () => {
+    queued = false;
+    if (!isWorking("reply")) return void (seen = "");
+    const bubble = $$(".msg.ai", thread).pop();
+    if (!bubble) return;
+    const line = $$(".status-line", bubble).pop()?.textContent?.trim();
+    const bar = ($(".progress", bubble) as HTMLElement | null)?.style.getPropertyValue("--v");
+    const text = line || ($(".msg-body", bubble)?.textContent?.trim() ? "Writing the reply…" : "");
+    // Only what changed in the bubble: Do it for me and tool calls also say what they're doing straight to the readout.
+    const key = `${text}|${bar ?? ""}`;
+    if (!text || key === seen) return;
+    seen = key;
+    stepWork("reply", text, (line ? pctOf(line) : undefined) ?? (bar ? Number(bar) : undefined));
+  };
+  new MutationObserver(() => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(read);
+  }).observe(thread, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["style"] });
+}
+
 function phoneQueueChanged() {
   if (!phoneOn()) return;
   const q = phoneQueue();
@@ -3506,6 +3550,9 @@ async function main() {
     },
     openFile: (id) => openSource({ doc: id, name: "", text: "" }),
   });
+  // What Prestige is doing right now, in the HUD (working.ts).
+  initWorking($("#hud-gpus"));
+  watchReplySteps();
   $("#search-btn").addEventListener("click", () => openSearch());
   $("#ide-btn").addEventListener("click", async () => {
     try {
@@ -3736,6 +3783,7 @@ async function main() {
     onPhoneAsk("catalog", (action, args) => phoneCatalog(action, args));
     onPhoneAsk("settings", phoneSettings);
     onQueueChange(phoneQueueChanged);
+    onQueueChange(queueWork);
   }
   updateToolsButton();
   updateSpeakButton();

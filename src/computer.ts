@@ -6,6 +6,7 @@
 // model's summary.
 import { invoke } from "@tauri-apps/api/core";
 import { errMsg, streamChat, type ChatMessage, type ModelInfo } from "./backends";
+import { stepWork } from "./working";
 
 /** "/do open Notepad and write a haiku" (or /computer). */
 export const DO_CMD = /^\/(?:do|computer)\b\s*/i;
@@ -286,8 +287,10 @@ class Panel {
     this.onStop();
   }
 
-  status(t: string) {
+  /** Also what the working readout says, with the action as the tool when it's doing one. */
+  status(t: string, tool: string | null = null) {
     $(".cu-status", this.el).textContent = t;
+    stepWork("reply", t, undefined, tool);
   }
 
   count(n: number) {
@@ -422,7 +425,7 @@ export async function doItForMe(task: string, model: ModelInfo): Promise<CuResul
       const step: CuStep = { n, act, thought, state: "done", ms };
       if (d === "skip") step.state = "skipped";
       else {
-        panel.status(`${describe(act)}…`);
+        panel.status(`${describe(act)}…`, act.action);
         try {
           await perform(act, shot);
         } catch (e) {

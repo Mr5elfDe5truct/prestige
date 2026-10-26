@@ -9,6 +9,7 @@ import { isPermissionGranted, requestPermission, sendNotification } from "@tauri
 import { ctxOf, errMsg, streamChat, type ChatMessage, type ModelInfo } from "./backends";
 import { supportsTools } from "./caps";
 import { deepResearch } from "./research";
+import { beginWork, endWork, stepWork, toolDoing } from "./working";
 import { GROUPS, LAST_ROUND, TOOL_ROUNDS, fitToolResults, loadTools, withoutToolCalls, runTool, toolSpecs, type ToolStep } from "./tools";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
@@ -221,6 +222,7 @@ export async function runMission(m: Mission) {
   const t0 = Date.now();
   running = m.id;
   runCtrl = new AbortController();
+  beginWork("mission", `Mission · ${m.name}`, model?.name);
   renderList();
   const stamp = new Date().toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
   const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -230,12 +232,13 @@ export async function runMission(m: Mission) {
     if (!model) throw new Error("no chat model is available (start the services)");
     if (m.how === "research") {
       const step = (name: string, arg: string) => {
-        const s: ToolStep = { name, args: name === "read" ? { url: arg } : name === "plan" ? { goal: arg } : { query: arg } };
+        const s: ToolStep = { name, args: name === "read" ? { url: arg } : name === "plan" ? { goal: arg } : { query: arg }, by: model.name };
         reply.tools!.push(s);
+        stepWork("mission", toolDoing(name, s.args), undefined, name);
         const t = performance.now();
         return { done: (ok: boolean, result?: string) => Object.assign(s, { ok, ms: Math.round(performance.now() - t), result: result && result.length > 2000 ? result.slice(0, 2000) + "…" : result }) };
       };
-      const res = await deepResearch(m.prompt, model, { step, status: () => {}, thinking: () => {}, token: () => {} }, runCtrl.signal, "");
+      const res = await deepResearch(m.prompt, model, { step, status: (t) => stepWork("mission", t, undefined, null), thinking: () => {}, token: () => {} }, runCtrl.signal, "");
       reply.content = res.report;
       reply.note = `mission · deep research · ${res.sources.length} sources · ${Math.max(1, Math.round((Date.now() - t0) / 60000))} min`;
     } else {
@@ -261,6 +264,7 @@ export async function runMission(m: Mission) {
       deps.toast(`Couldn't save the mission's chat: ${errMsg(e)}`, "warn");
     }
     m.next = nextTime(m.when, Date.now());
+    endWork("mission");
     running = null;
     runCtrl = null;
     await save();
@@ -290,12 +294,27 @@ async function chatRun(m: Mission, model: ModelInfo, reply: SavedChat["messages"
     const before = reply.content.length;
     const last = round === TOOL_ROUNDS || (round > 0 && !fitToolResults(messages, ctxOf(model), Math.round(ctxOf(model) / 4)));
     if (last) messages.push(LAST_ROUND);
-    const res = await streamChat(model, messages, { onToken: (t) => (reply.content += t), onThinking: (t) => (thinking += t), onStats: () => {} }, signal, last ? undefined : specs);
+    stepWork("mission", round ? "Reading the results…" : "Thinking…", undefined, null);
+    const res = await streamChat(
+      model,
+      messages,
+      {
+        onToken: (t) => {
+          reply.content += t;
+          stepWork("mission", "Writing the report…");
+        },
+        onThinking: (t) => (thinking += t),
+        onStats: () => {},
+      },
+      signal,
+      last ? undefined : specs,
+    );
     if (last || !res.toolCalls.length || signal.aborted) break;
     messages.push({ role: "assistant", content: reply.content.slice(before), tool_calls: res.toolCalls });
     for (const call of res.toolCalls) {
       const def = defs.find((d) => d.name === call.name);
-      const step: ToolStep = { name: call.name, args: call.arguments };
+      const step: ToolStep = { name: call.name, args: call.arguments, by: model.name };
+      stepWork("mission", toolDoing(call.name, call.arguments), undefined, call.name);
       reply.tools!.push(step);
       let result: string;
       if (!def) {
