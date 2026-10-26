@@ -1223,6 +1223,8 @@ interface Deps {
   songFromPicture: (path: string) => void;
   /** Whether there's a storyboard to open again. */
   hasStoryboard: () => boolean;
+  /** Film mode (film.ts): the chips under the prompt (the saved films), a new film from the idea, and a chip clicked. */
+  film: { opts: () => string; create: (idea: string) => void; click: (el: HTMLElement) => void };
 }
 
 let deps: Deps;
@@ -1237,7 +1239,7 @@ let anchor: string | null = null;
 // The gallery builds this many cards at a time, and more as it scrolls (a big output folder stays quick).
 const PAGE = 120;
 let shown = 0;
-let mode: "image" | "video" | "music" | "storyboard" | "webcam" = "image";
+let mode: "image" | "video" | "music" | "storyboard" | "film" | "webcam" = "image";
 // The image being animated (Video mode) or edited (Image mode), picked from the lightbox.
 let srcAsset: Asset | null = null;
 // The reference image (a character or item to put in a new scene), and how it's used. Kept across Image and Video.
@@ -1310,6 +1312,7 @@ export function initStudio(d: Deps) {
     }
     if (t.closest(".opt.model")) flipModel(mode === "video");
     if (t.closest(".opt.board")) deps.storyboard("");
+    if (mode === "film") deps.film.click(t);
     const lo = t.closest<HTMLElement>(".opt.layout");
     if (lo) lo.classList.contains("off") ? deps.toast(lo.title, "warn") : openLayoutFor(currentMode()).catch((err) => deps.toast(errMsg(err), "warn"));
     // The pictures selected in the gallery start the photo set.
@@ -1496,14 +1499,21 @@ function renderCreate() {
   const gm = currentMode();
   syncLayout(gm);
   $$(".modes [data-mode]").forEach((x) => x.classList.toggle("on", x.dataset.mode === mode));
-  // Storyboard: the idea for a music video; the chat model plans it and it opens as a storyboard (storyboard.ts).
-  if (mode === "storyboard") {
+  // Storyboard: the idea for a music video; the chat model plans it and it opens as a storyboard (storyboard.ts). Film:
+  // the idea for a short film or a music video, which opens as a film to cast, plan, shoot and cut (film.ts).
+  if (mode === "storyboard" || mode === "film") {
     for (const id of ["#animate-src", "#song-lyrics", "#ref-slot", "#gen-warn", "#gen-settings", "#cam-pane"]) $(id).hidden = true;
     deps?.cameraPane(false);
     $("#gen-form").hidden = false;
     $("#gen-opts").hidden = false;
     $("#create").classList.remove("disabled");
     ($("#gen-btn") as HTMLButtonElement).disabled = false;
+    if (mode === "film") {
+      $("#gen-btn").textContent = "New film";
+      ($("#gen-prompt") as HTMLInputElement).placeholder = "What's the film about? e.g. two rival street chefs settle it with one dish at midnight (or leave it empty to start blank)";
+      $("#gen-opts").innerHTML = deps?.film.opts() ?? "";
+      return;
+    }
     $("#gen-btn").textContent = "Plan storyboard";
     ($("#gen-prompt") as HTMLInputElement).placeholder = "What's the music video about? e.g. a fox driving a vintage car through a neon city at night, 30 seconds";
     $("#gen-opts").innerHTML =
@@ -2973,24 +2983,32 @@ async function addSound(a: Asset) {
     "e.g. footsteps on gravel, a dog barking twice, wind in the trees",
   );
   if (!what) return;
+  deps.toast(`Making the sound: about ${aboutTime(foleySecs(secs))} on an RTX 3060. It opens when it's done.`);
+  try {
+    openRender(await foleyFor(a, secs, what));
+  } catch (e) {
+    if (errMsg(e) !== "stopped") deps.toast(`Couldn't add sound: ${errMsg(e)}`, "warn");
+  }
+}
+
+/** How long Add sound takes for a video this long, in seconds (on the RTX 3060). */
+const foleySecs = (secs: number) => FOLEY_LOAD_SECS + Math.ceil(Math.max(9, Math.floor(Math.min(secs, FOLEY_MAX_SECONDS) * 24)) / FOLEY_WINDOW) * FOLEY_WINDOW_SECS;
+
+/** The sound itself: LTX-2.3 Foley makes it for the video's first 15 s, and it goes onto the original as a new file.
+ *  Resolves with that file's path. */
+async function foleyFor(a: Asset, secs: number, what: string, progress?: (pct: number, label: string) => void, from = "Add sound") {
   const frames = Math.max(9, Math.floor(Math.min(secs, FOLEY_MAX_SECONDS) * 24));
   // LTX hears the frames at about 832×480 (what the LoRA was made at), the video's shape kept, in multiples of 32.
   const ratio = a.width && a.height ? a.width / a.height : 16 / 9;
   const area = 832 * 480;
   const w = Math.max(256, Math.round(Math.sqrt(area * ratio) / 32) * 32);
   const h = Math.max(256, Math.round(Math.sqrt(area / ratio) / 32) * 32);
-  const windows = Math.ceil(frames / FOLEY_WINDOW);
-  deps.toast(`Making the sound: about ${aboutTime(FOLEY_LOAD_SECS + windows * FOLEY_WINDOW_SECS)} on an RTX 3060. It opens when it's done.`);
-  try {
-    const out = await run("foley", what, a, { foley: { frames, w, h } }, undefined, { from: "Add sound", title: `Sound for ${a.name}: ${what}` });
-    const track = out.find((x) => x.kind === "audio");
-    if (!track) throw new Error("no sound came back");
-    const video = await invoke<string>("mux_foley", { root: deps.root(), video: a.path, audio: track.path });
-    await refresh();
-    openRender(video);
-  } catch (e) {
-    if (errMsg(e) !== "stopped") deps.toast(`Couldn't add sound: ${errMsg(e)}`, "warn");
-  }
+  const out = await run("foley", what, a, { foley: { frames, w, h } }, progress, { from, title: `Sound for ${a.name}: ${what}` });
+  const track = out.find((x) => x.kind === "audio");
+  if (!track) throw new Error("no sound came back");
+  const video = await invoke<string>("mux_foley", { root: deps.root(), video: a.path, audio: track.path });
+  await refresh();
+  return video;
 }
 
 /** What ffprobe reads of a video (video_info). */
@@ -3104,26 +3122,33 @@ async function swapCharacter(a?: Asset) {
   if (dlg.returnValue !== "go" || !picked) return;
   const q = quality.value as SwapQuality;
   const target = ($("#sw-who") as HTMLInputElement).value.trim() || "person";
+  deps.toast(`Swapping the character in: ${aboutTime(swapSecs(frames, q))} on an RTX 3060. It opens when it's done.`);
+  try {
+    openRender(await swapInto(a, info, picked, target, q));
+  } catch (e) {
+    if (errMsg(e) !== "stopped") deps.toast(`Couldn't swap the character: ${errMsg(e)}`, "warn");
+  }
+}
+
+/** The swap itself: SCAIL-2 puts the character from `picture` in place of `target` in the video (its first 20 s), then
+ *  the video's own sound goes back on. Resolves with the new video's path. */
+async function swapInto(a: Asset, info: VideoInfo, picture: Blob, target: string, q: SwapQuality, progress?: (pct: number, label: string) => void, from = "Swap a character") {
+  const frames = Math.min(info.frames, Math.floor(SWAP.maxSeconds * info.fps));
   // The video's shape at about 832×480 (what SCAIL-2 and the distill LoRA were made at), in multiples of 32.
   const ratio = info.width && info.height ? info.width / info.height : 16 / 9;
   const w = Math.max(256, Math.round(Math.sqrt(SWAP.area * ratio) / 32) * 32);
   const h = Math.max(256, Math.round(Math.sqrt(SWAP.area / ratio) / 32) * 32);
-  deps.toast(`Swapping the character in: ${aboutTime(swapSecs(frames, q))} on an RTX 3060. It opens when it's done.`);
-  try {
-    // As a reference: scaled to at most 2048 px and kept as a JPEG.
-    const r = await loadReference(picked);
-    URL.revokeObjectURL(r.url);
-    const ref = await uploadReference(r);
-    const job: SwapJob = { ref, who: target, steps: SWAP_STEPS[q], frames, w, h };
-    const out = await run("swap", target, a, { swap: job }, undefined, { from: "Swap a character", title: `${a.name}: ${target} swapped` });
-    const made = out.find((x) => x.kind === "video" && x.path !== a.path);
-    if (!made) throw new Error("no video came back");
-    const swapped = await invoke<string>("mux_swap", { root: deps.root(), video: made.path, source: a.path });
-    await refresh();
-    openRender(swapped);
-  } catch (e) {
-    if (errMsg(e) !== "stopped") deps.toast(`Couldn't swap the character: ${errMsg(e)}`, "warn");
-  }
+  // As a reference: scaled to at most 2048 px and kept as a JPEG.
+  const r = await loadReference(picture);
+  URL.revokeObjectURL(r.url);
+  const ref = await uploadReference(r);
+  const job: SwapJob = { ref, who: target, steps: SWAP_STEPS[q], frames, w, h };
+  const out = await run("swap", target, a, { swap: job }, progress, { from, title: `${a.name}: ${target} swapped` });
+  const made = out.find((x) => x.kind === "video" && x.path !== a.path);
+  if (!made) throw new Error("no video came back");
+  const swapped = await invoke<string>("mux_swap", { root: deps.root(), video: made.path, source: a.path });
+  await refresh();
+  return swapped;
 }
 
 /** A video's length in seconds, from its own metadata (8 when it can't be read). */
@@ -3443,6 +3468,10 @@ async function copy(text: string, what = "Prompt") {
 async function generate() {
   const prompt = ($("#gen-prompt") as HTMLInputElement).value.trim();
   if (mode === "webcam") return;
+  if (mode === "film") {
+    ($("#gen-prompt") as HTMLInputElement).value = "";
+    return deps.film.create(prompt);
+  }
   if (mode === "storyboard") {
     if (!prompt) return deps.toast("Say what the music video is about, e.g. a lonely robot finds a flower, 30 seconds");
     ($("#gen-prompt") as HTMLInputElement).value = "";
@@ -3566,6 +3595,7 @@ interface QueueOpts {
   fast?: boolean; // Lightning whatever the Speed setting (Reference's Turbo pick)
   world?: WorldState; // Explore a world: the world so far, rendered whole
   extra?: string[]; // an edit: more pictures in ComfyUI's input folder, as images 2 and 3
+  seed?: number; // this seed rather than the settings' (a Film shot's retake)
 }
 
 /** ACE-Step's way of asking for no vocals. */
@@ -4134,7 +4164,7 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
   if (m.promptNode)
     graph[m.promptNode].inputs[m.promptKey ?? "text"] = gm === "ref" || gm === "reffast" ? (moss ? mossRefPrompt : refPrompt)(opts.kind ?? "auto", prompt) : prompt;
   // Renders without generation settings keep their seed to themselves, rather than taking the Image settings' one.
-  const seed = NO_SETTINGS.includes(m.family) ? Math.floor(Math.random() * 2 ** 32) : takeSeed(settingsKey(gm));
+  const seed = opts.seed ?? (NO_SETTINGS.includes(m.family) ? Math.floor(Math.random() * 2 ** 32) : takeSeed(settingsKey(gm)));
   const p = m.family === "talk" ? talkPlan(src, opts.talk?.seconds ?? 0) : plan(gm, src, opts.override, opts.song, opts.video);
   if (m.family === "svi") shotPrompts(prompt, p.shots!).forEach((t, i) => (graph[SVI.shots[i].prompt].inputs.text = t));
   if (m.family === "song") graph[m.promptNode].inputs.lyrics = isInstrumental(opts.lyrics) ? INSTRUMENTAL : opts.lyrics!.trim();
@@ -4663,19 +4693,23 @@ export async function renderShot(
   prompt: string,
   seconds: number,
   progress: (pct: number, label: string) => void,
-  how: { title?: string; note?: string; quality?: Quality; frame?: string } = {},
+  how: { title?: string; note?: string; quality?: Quality; frame?: string; seed?: number; from?: string } = {},
 ): Promise<Asset[]> {
   await ensureWorkflows();
   const video: Partial<VideoSettings> = { seconds, res: "768x512", fps: 24, ...(how.quality ? { quality: how.quality } : {}) };
+  const from = how.from ?? "Director";
   // A storyboard shot with its frame drawn: LTX-2.5 image-to-video, starting on that frame.
   if (how.frame) {
     if (!workflows.shotvideo) throw new Error(`workflows\\${MODES.shotvideo.file} wasn't found (update the Workstation and add the video pack)`);
     const src: Source = items.find((x) => x.path === how.frame) ?? { path: how.frame, name: how.frame.split(/[\\/]/).pop() ?? "frame", kind: "image", mtime: 0, size: 0 };
-    return run("shotvideo", prompt, src, { video }, progress, { from: "Director", title: how.title, note: how.note });
+    return run("shotvideo", prompt, src, { video, seed: how.seed }, progress, { from, title: how.title, note: how.note });
   }
   if (!workflows.video) throw new Error(`workflows\\${MODES.video.file} wasn't found (update the Workstation and add the video pack)`);
-  return run("video", prompt, null, { video }, progress, { from: "Director", title: how.title, note: how.note });
+  return run("video", prompt, null, { video, seed: how.seed }, progress, { from, title: how.title, note: how.note });
 }
+
+/** How long one LTX-2.5 shot this long takes at 768×512 ("draft" skips the upscale pass), in seconds. */
+export const shotSecs = (seconds: number, draft: boolean) => plan("video", null, undefined, undefined, { seconds, res: "768x512", fps: 24, quality: draft ? "draft" : "standard" }).secs;
 
 /** Storyboard: a shot's frame, one picture from the image model at the video's shape (3:2, drawn at 1152×768 so it
  *  stays sharp when LTX-2.5 starts from it). `title` is what the render queue shows. */
@@ -4693,6 +4727,96 @@ export async function frameLabel() {
 }
 /** The saved Video quality ("draft" makes a Director's shots quicker). */
 export const videoQuality = () => settings().video.quality;
+
+/** Draws the create bar again (Film mode's list of films changed). */
+export const refreshCreate = () => renderCreate();
+
+// ---------- used from Film ----------
+/** A file as the gallery knows it (its size, prompt and model), or as a bare file when it isn't a render. */
+async function assetAt(path: string, kind: Asset["kind"]): Promise<Asset> {
+  await allowRenders();
+  let a = items.find((x) => x.path === path);
+  if (!a) {
+    await refresh();
+    a = items.find((x) => x.path === path);
+  }
+  return a ?? { path, name: path.split(/[\\/]/).pop() ?? kind, kind, mtime: 0, size: 0 };
+}
+
+/** Film: a shot's frame with a cast member in it. Qwen-Image puts the character from their picture into the scene, at
+ *  the video's 3:2 shape like a storyboard frame. */
+export async function renderCastFrame(prompt: string, r: Reference, progress: (pct: number, label: string) => void, title?: string): Promise<Asset[]> {
+  await ensureWorkflows();
+  const gm = refImageMode();
+  if (!workflowOf(gm)) throw new Error(`workflows\\${modeOf(gm).file} wasn't found`);
+  return run(gm, prompt, r, { kind: "character", override: { w: 1152, h: 768, count: 1 } }, progress, { from: "Film", title });
+}
+
+/** Whether Film's shot actions have their workflows: a long take (Wan 2.2 SVI), a swap, an upscale and Foley sound. */
+export async function filmTools() {
+  await ensureWorkflows();
+  return { long: !!workflows.long, swap: !!workflows.swap, upscale: !!workflows.upvideo, sound: !!workflows.foley, talk: !!workflows.talk };
+}
+
+/** Film: a long take from the shot's frame with Wan 2.2 SVI, in the saved Long video settings (a "|" in the prompt
+ *  splits it into its shots). Silent, at 48 fps. Resolves with the video's path. */
+export async function renderLongTake(prompt: string, frame: string, progress: (pct: number, label: string) => void, title?: string): Promise<string> {
+  await ensureWorkflows();
+  if (!workflows.long) throw new Error(`workflows\\${MODES.long.file} wasn't found`);
+  const out = await run("long", prompt, await assetAt(frame, "image"), {}, progress, { from: "Film", title });
+  const v = out.find((x) => x.kind === "video");
+  if (!v) throw new Error("no video came back");
+  return v.path;
+}
+
+/** How long a long take lasts, and takes to render, with the saved settings. */
+export function longTake(frame?: { width?: number | null; height?: number | null }) {
+  const s = settings().long;
+  return { seconds: sviSeconds(s.frames, s.shots), secs: plan("long", frame ? ({ path: "", name: "", kind: "image", mtime: 0, size: 0, ...frame } as Asset) : null).secs };
+}
+
+/** Film: SCAIL-2 swaps a cast member (their picture) in for `who` in a clip (one of the film's takes, or a video of
+ *  your own). Resolves with the new video's path. */
+export async function swapClip(path: string, picture: Blob, who: string, q: SwapQuality, progress: (pct: number, label: string) => void): Promise<string> {
+  await ensureWorkflows();
+  if (!workflows.swap) throw new Error(`workflows\\${MODES.swap.file} wasn't found (add the Swap a character pack)`);
+  const info = await invoke<VideoInfo>("video_info", { path });
+  return swapInto(await assetAt(path, "video"), info, picture, who || "person", q, progress, "Film");
+}
+
+/** How long a swap of a clip this long takes, in seconds. */
+export const swapClipSecs = (seconds: number, q: SwapQuality) => swapSecs(Math.ceil(Math.min(seconds, SWAP.maxSeconds) * 24) + 1, q);
+
+/** Film: SeedVR2 sharpens a take to 1080p (its sound kept). Resolves with the new video's path. */
+export async function upscaleClip(path: string, progress: (pct: number, label: string) => void): Promise<string> {
+  await ensureWorkflows();
+  if (!workflows.upvideo) throw new Error(`workflows\\${MODES.upvideo.file} wasn't found (add the Upscale pack)`);
+  const a = await assetAt(path, "video");
+  const out = await run("upvideo", a.prompt || a.name, a, { upscale: 1080 }, progress, { from: "Film", title: `${a.name} to 1080p` });
+  const v = out.find((x) => x.kind === "video");
+  if (!v) throw new Error("no video came back");
+  return v.path;
+}
+
+/** How long an upscale to 1080p takes for a clip this long, in seconds. */
+export const upscaleClipSecs = (seconds: number) => MODES.upvideo.secs * Math.max(1, seconds);
+
+/** Film: LTX-2.3 Foley makes a take's sound effects from what's said should be heard (its first 15 s), on a copy of
+ *  the take. Resolves with the new video's path. */
+export async function soundClip(path: string, seconds: number, what: string, progress: (pct: number, label: string) => void): Promise<string> {
+  await ensureWorkflows();
+  if (!workflows.foley) throw new Error(`workflows\\${MODES.foley.file} wasn't found (add the Add sound pack)`);
+  return foleyFor(await assetAt(path, "video"), seconds, what, progress, "Film");
+}
+
+export const soundClipSecs = (seconds: number) => foleySecs(seconds);
+
+/** Stops every render a film has waiting or running. */
+export function cancelFilm() {
+  for (const j of [...rq].reverse()) if (j.from === "Film" && (j.state === "waiting" || j.state === "running")) cancelJob(j);
+}
+
+export { ask as askLine };
 
 /** Chat's /song: a song in this style with these lyrics (empty: an instrumental). `song` sets its tempo, key or
  *  language for this one song; its length is the saved setting. Resolves with the saved file. */
