@@ -103,6 +103,36 @@ export function dragRender(el: HTMLElement, path: string) {
   el.addEventListener("dragend", () => document.body.classList.remove("dragging-render"));
 }
 
+// A render video carries its path under a type of its own, so only the Swap panel's Video box (and Studio's create
+// bar, which opens that panel) takes it, not the drop targets for pictures.
+const VIDEO_DRAG = "application/x-prestige-video";
+
+/** True while a render video is dragged over the window. */
+export const hasVideoRender = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes(VIDEO_DRAG);
+
+/** The path of a dropped render video, if that's what was dropped. */
+export const videoRenderIn = (data: DataTransfer | null) => data?.getData(VIDEO_DRAG) || null;
+
+/** Lets a render video's card be dragged onto Studio's create bar or the Swap panel. */
+export function dragVideo(el: HTMLElement, path: string) {
+  el.draggable = true;
+  el.addEventListener("dragstart", (e) => {
+    const dt = e.dataTransfer;
+    if (!dt) return;
+    dt.clearData();
+    dt.setData(VIDEO_DRAG, path);
+    dt.effectAllowed = "copy";
+    document.body.classList.add("dragging-video");
+  });
+  el.addEventListener("dragend", () => document.body.classList.remove("dragging-video"));
+}
+
+/** The first video file in a paste or drop, if there is one. */
+export function videoIn(data: DataTransfer | null): File | null {
+  for (const f of Array.from(data?.files ?? [])) if (f.type.startsWith("video/") || /\.(mp4|webm|mov)$/i.test(f.name)) return f;
+  return null;
+}
+
 /** Sends the reference to ComfyUI's input folder and returns the name for its LoadImage node. */
 export async function uploadReference(r: Reference): Promise<string> {
   const body = new Uint8Array(await r.blob.arrayBuffer());

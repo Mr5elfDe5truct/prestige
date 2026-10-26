@@ -642,6 +642,7 @@ pub fn run() {
             studio::mux_swap,
             studio::video_info,
             studio::pick_video,
+            studio::swap_video_save,
             studio::video_first_frame,
             studio::pick_background,
             studio::person_video,

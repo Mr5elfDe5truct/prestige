@@ -1564,5 +1564,30 @@ async function exportFilm() {
   }
 }
 
+/** The film a swap from Studio's Swap panel can go into: the one open (or last open), else the last one changed. */
+function target(): { id: string; name: string } | null {
+  return film ? { id: film.id, name: film.name } : (entries[0] ?? null);
+}
+
+/** Studio's Swap panel: a swapped video goes on the end of the film as a new shot of its own, its take the swap. */
+async function addClip(path: string, note: string) {
+  const t = target();
+  if (!t) return;
+  if (film?.id !== t.id) {
+    const f = await invoke<Film | null>("store_get", { name: `film-${t.id}` }).catch(() => null);
+    if (!f) return deps.toast("That film isn't there any more.", "warn");
+    film = f;
+    jobs.clear();
+    selected = null;
+  }
+  const f = film!;
+  const info = await invoke<{ seconds: number }>("video_info", { path }).catch(() => ({ seconds: SHOT_MAX }));
+  const sh: Shot = { id: newId(), action: note, seconds: clamp(Math.round(info.seconds), SHOT_MIN, SHOT_MAX), cast: [], lines: [], takes: [] };
+  f.shots.push(sh);
+  await addTake(f, sh, path, "swap", note, Date.now());
+  deps.toast(`Added to ${f.name} as shot ${f.shots.length}.`);
+  show("shots");
+}
+
 /** Studio's Film mode. */
-export const filmMode = { opts, create, click };
+export const filmMode = { opts, create, click, target, addClip };

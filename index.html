@@ -224,6 +224,42 @@
           <div class="opts" id="gen-opts"></div>
           <p class="vram-warn" id="gen-warn" hidden></p>
           <div class="gen-settings" id="gen-settings" hidden></div>
+          <!-- Swap (studio.ts): the person in a video replaced by the one in a picture (SCAIL-2), from Film's and Video's Swap chip -->
+          <div class="swap-panel" id="swap-panel" hidden>
+            <div class="swap-boxes">
+              <div class="swap-box" id="sp-video" tabindex="0" role="button" aria-label="The video: drop one, paste one or click to choose">
+                <span class="swap-tag">Video</span>
+                <div class="swap-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2" /><path d="M16 10l5-3v10l-5-3z" /></svg><b>Drop a video</b><small>from Explorer or the Renders gallery, paste one, or click to choose</small></div>
+                <video class="swap-media" muted loop playsinline preload="metadata" hidden></video>
+                <span class="swap-name"></span>
+                <button type="button" class="swap-clear" title="Clear the video" aria-label="Clear the video" hidden>×</button>
+              </div>
+              <div class="swap-box" id="sp-person" tabindex="0" role="button" aria-label="The person: drop a picture, paste one or click to choose">
+                <span class="swap-tag">Person</span>
+                <div class="swap-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="8" r="4" /><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6" /></svg><b>Drop a picture of who goes in</b><small>from Explorer or the gallery, paste one, or click to choose</small></div>
+                <img class="swap-media" alt="Who goes in" hidden />
+                <span class="swap-name"></span>
+                <button type="button" class="swap-clear" title="Clear the picture" aria-label="Clear the picture" hidden>×</button>
+              </div>
+            </div>
+            <input type="file" id="sp-video-file" accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov" hidden />
+            <input type="file" id="sp-person-file" accept="image/*" hidden />
+            <div class="swap-opts">
+              <label>Or a character<select id="sp-char" aria-label="A saved character's face"></select></label>
+              <label class="grow">Who to replace<input id="sp-who" type="text" autocomplete="off" placeholder="person, the woman in red, the dancer" /></label>
+              <label>Quality<select id="sp-quality">
+                <option value="draft">Draft (4 steps)</option>
+                <option value="standard">Standard (8 steps)</option>
+              </select></label>
+            </div>
+            <p class="muted" id="sp-est"></p>
+            <p class="credit">A full-body picture on a plain background works best. If several match, the biggest one is replaced, and the video's sound is kept. SCAIL-2 by Z.ai (Wan 2.1 14B) with SAM 3.1 and BiRefNet. <span id="sp-consent"></span></p>
+            <div class="swap-acts">
+              <button type="button" class="btn primary swap-go" id="sp-go" disabled>Swap</button>
+              <span class="muted" id="sp-done"></span>
+              <button type="button" class="btn" id="sp-add" hidden>Add to film</button>
+            </div>
+          </div>
           <div class="cam-pane" id="cam-pane" hidden>
             <div class="cam-view" id="cam-view"><video id="cam-video" muted playsinline></video><div class="scan"></div><span class="off-note">Camera is off</span></div>
             <div class="cam-side">
@@ -1160,36 +1196,6 @@
       </div>
       <div class="kb-list-head"><span class="eyebrow">Learned so far</span></div>
       <div class="kb-list" id="tn-list"></div>
-    </dialog>
-
-    <dialog class="sheet talk" id="swap">
-      <form method="dialog">
-        <h2>Swap a character</h2>
-        <div class="talk-top">
-          <video id="sw-video" muted loop autoplay playsinline></video>
-          <div class="talk-fields">
-            <label>Who goes in<select id="sw-char"></select></label>
-            <p class="muted talk-file-row">
-              <button type="button" class="btn" id="sw-pick">Choose a picture…</button>
-              <span id="sw-name"></span>
-            </p>
-            <input type="file" id="sw-file" accept="image/*" hidden />
-            <img id="sw-pic" class="of-outfit" alt="The character" hidden />
-            <label>Who to replace<input id="sw-who" type="text" autocomplete="off" placeholder="person, the woman in red, the dancer" /></label>
-            <label>Quality<select id="sw-quality">
-              <option value="draft">Draft (4 steps)</option>
-              <option value="standard">Standard (8 steps)</option>
-            </select></label>
-          </div>
-        </div>
-        <p class="muted">A full-body picture on a plain background works best. If several match, the biggest one is replaced; the sound is kept. Paste or drop a picture here too.</p>
-        <p class="muted" id="sw-est"></p>
-        <p class="credit">SCAIL-2 by Z.ai (Wan 2.1 14B) with SAM 3.1 and BiRefNet. <span id="sw-consent"></span></p>
-        <div class="acts">
-          <button class="btn" value="cancel">Cancel</button>
-          <button class="btn primary" value="go" id="sw-go">Swap</button>
-        </div>
-      </form>
     </dialog>
 
     <dialog class="sheet" id="person">

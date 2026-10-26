@@ -441,6 +441,43 @@ pub async fn pick_video(app: AppHandle) -> Result<Option<String>, String> {
     Ok(picked.and_then(|p| p.into_path().ok()).map(|p| p.to_string_lossy().into_owned()))
 }
 
+/// The name a dropped video is kept under: its own name's letters, digits, '-' and '_' (at most 60), with its
+/// extension, or None when it isn't a video Prestige reads.
+fn dropped_video_name(name: &str) -> Option<String> {
+    let (stem, ext) = name.rsplit_once('.')?;
+    let ext = ext.to_ascii_lowercase();
+    if !VIDEO_EXT.contains(&ext.as_str()) {
+        return None;
+    }
+    let stem: String = stem.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' }).take(60).collect();
+    let stem = stem.trim_matches('-');
+    Some(format!("{}.{ext}", if stem.is_empty() { "video" } else { stem }))
+}
+
+/// A video dropped or pasted into the Swap panel (from Explorer the page gets its bytes, not its path), kept in a
+/// swap.frames folder of ComfyUI's output folder, which the gallery leaves out. The "x-name" header is its name and
+/// "x-root" the stack's folder (percent-encoded). Resolves with its path.
+#[tauri::command]
+pub async fn swap_video_save(request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("expected the video's bytes".into());
+    };
+    let header = |k: &str| request.headers().get(k).and_then(|v| v.to_str().ok()).map(crate::film::unpercent).unwrap_or_default();
+    let root = Some(header("x-root")).filter(|r| !r.is_empty());
+    let name = header("x-name");
+    let name = dropped_video_name(&name).ok_or_else(|| format!("{name} isn't an MP4, WebM or MOV video"))?;
+    let dir = output_dir(root).join("swap.frames");
+    let bytes = bytes.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let path = dir.join(&name);
+        fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+        Ok(path.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// A video's first frame as a PNG, to pick what to cut out of it (Cut out a person), in a .frames folder of ComfyUI's
 /// output folder, which the gallery leaves out.
 #[tauri::command]
@@ -821,3 +858,18 @@ pub fn comfy_listen(app: AppHandle, client_id: String, state: tauri::State<Comfy
 
 #[derive(Default)]
 pub struct ComfyListener(Mutex<bool>);
+
+#[cfg(test)]
+mod tests {
+    use super::dropped_video_name;
+
+    #[test]
+    fn dropped_videos_keep_a_safe_name() {
+        assert_eq!(dropped_video_name("My clip (1).MP4").as_deref(), Some("My-clip--1.mp4"));
+        assert_eq!(dropped_video_name("dance_take-2.webm").as_deref(), Some("dance_take-2.webm"));
+        assert_eq!(dropped_video_name(r"..\..\evil.mov").as_deref(), Some("evil.mov"));
+        assert_eq!(dropped_video_name("???.mp4").as_deref(), Some("video.mp4"));
+        assert_eq!(dropped_video_name("picture.png"), None);
+        assert_eq!(dropped_video_name("noext"), None);
+    }
+}

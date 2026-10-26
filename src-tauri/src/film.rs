@@ -25,7 +25,7 @@ fn film_dir(root: Option<String>, film: &str) -> Result<PathBuf, String> {
 }
 
 /// %41 → 'A' (the UI sends the folder percent-encoded, since headers are ASCII).
-fn unpercent(s: &str) -> String {
+pub(crate) fn unpercent(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;

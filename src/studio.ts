@@ -47,7 +47,7 @@ import {
   type SettingsKey,
   type VideoSettings,
 } from "./gensettings";
-import { CONSENT, bindRefChoices, dragRender, hasFiles, hasRender, imageIn, loadReference, mossRefPrompt, onRefPrefsChange, refChoicesHtml, refKeep, refPrefs, refPrompt, referenceFromBase64, renderIn, sceneOf, setRefPrefs, uploadReference, type RefKind, type Reference } from "./reference";
+import { CONSENT, bindRefChoices, dragRender, dragVideo, hasFiles, hasRender, hasVideoRender, imageIn, loadReference, mossRefPrompt, onRefPrefsChange, refChoicesHtml, refKeep, refPrefs, refPrompt, referenceFromBase64, renderIn, sceneOf, setRefPrefs, uploadReference, videoIn, videoRenderIn, type RefKind, type Reference } from "./reference";
 import { characterById, characters, faceBlob, onCharactersChange } from "./characters";
 import { initInpaint, openInpaint, type SelectQuery } from "./inpaint";
 import { initLaser, openLaser } from "./laser";
@@ -1223,8 +1223,15 @@ interface Deps {
   songFromPicture: (path: string) => void;
   /** Whether there's a storyboard to open again. */
   hasStoryboard: () => boolean;
-  /** Film mode (film.ts): the chips under the prompt (the saved films), a new film from the idea, and a chip clicked. */
-  film: { opts: () => string; create: (idea: string) => void; click: (el: HTMLElement) => void };
+  /** Film mode (film.ts): the chips under the prompt (the saved films), a new film from the idea, and a chip clicked;
+   *  the film a swap can go into, and adding a swapped video to it as a new shot. */
+  film: {
+    opts: () => string;
+    create: (idea: string) => void;
+    click: (el: HTMLElement) => void;
+    target: () => { id: string; name: string } | null;
+    addClip: (path: string, note: string) => Promise<void>;
+  };
 }
 
 let deps: Deps;
@@ -1304,6 +1311,7 @@ export function initStudio(d: Deps) {
     renderCreate();
   });
   initRefSlot();
+  initSwapPanel();
   $("#gen-opts").addEventListener("click", (e) => {
     const t = e.target as HTMLElement;
     if (t.closest(".opt.set")) {
@@ -1312,15 +1320,17 @@ export function initStudio(d: Deps) {
     }
     if (t.closest(".opt.model")) flipModel(mode === "video");
     if (t.closest(".opt.board")) deps.storyboard("");
-    if (mode === "film") deps.film.click(t);
+    if (mode === "film" && !t.closest(".opt.swap")) deps.film.click(t);
     const lo = t.closest<HTMLElement>(".opt.layout");
     if (lo) lo.classList.contains("off") ? deps.toast(lo.title, "warn") : openLayoutFor(currentMode()).catch((err) => deps.toast(errMsg(err), "warn"));
     // The pictures selected in the gallery start the photo set.
     if (t.closest(".opt.teach")) openTrain(items.filter((a) => a.kind === "image" && selected.has(a.path)).map((a) => a.path));
-    // One video selected in the gallery is the one to swap in; otherwise one is picked from the PC.
+    // The Swap chip shows or hides the Swap panel; one video selected in the gallery goes in it when it's empty.
     if (t.closest(".opt.swap")) {
+      swapOpen = !swapOpen;
       const vids = items.filter((a) => a.kind === "video" && selected.has(a.path));
-      swapCharacter(vids.length === 1 ? vids[0] : undefined);
+      renderCreate();
+      if (swapOpen && !sw.video && vids.length === 1) setSwapVideo(vids[0]);
     }
   });
   onSettingsChange(() => renderCreate());
@@ -1499,19 +1509,23 @@ function renderCreate() {
   const gm = currentMode();
   syncLayout(gm);
   $$(".modes [data-mode]").forEach((x) => x.classList.toggle("on", x.dataset.mode === mode));
+  // The Swap panel (Film's and Video's Swap chip) takes the place of the prompt and what goes with it.
+  const swapping = swapShown();
+  $("#swap-panel").hidden = !swapping;
+  if (swapping) renderSwap();
   // Storyboard: the idea for a music video; the chat model plans it and it opens as a storyboard (storyboard.ts). Film:
   // the idea for a short film or a music video, which opens as a film to cast, plan, shoot and cut (film.ts).
   if (mode === "storyboard" || mode === "film") {
     for (const id of ["#animate-src", "#song-lyrics", "#ref-slot", "#gen-warn", "#gen-settings", "#cam-pane"]) $(id).hidden = true;
     deps?.cameraPane(false);
-    $("#gen-form").hidden = false;
+    $("#gen-form").hidden = swapping;
     $("#gen-opts").hidden = false;
     $("#create").classList.remove("disabled");
     ($("#gen-btn") as HTMLButtonElement).disabled = false;
     if (mode === "film") {
       $("#gen-btn").textContent = "New film";
       ($("#gen-prompt") as HTMLInputElement).placeholder = "What's the film about? e.g. two rival street chefs settle it with one dish at midnight (or leave it empty to start blank)";
-      $("#gen-opts").innerHTML = deps?.film.opts() ?? "";
+      $("#gen-opts").innerHTML = (deps?.film.opts() ?? "") + swapChip();
       return;
     }
     $("#gen-btn").textContent = "Plan storyboard";
@@ -1575,7 +1589,7 @@ function renderCreate() {
         ? `<button type="button" class="opt pick layout" title="${LAYOUT_TEXT[use].title}">▦ Layout${n ? ` · ${n} box${n > 1 ? "es" : ""}` : ""}</button>`
         : "";
   // Video mode can also swap a character into a video (a selected one in the gallery, or one from the PC).
-  const swap = mode === "video" && workflows.swap ? `<button type="button" class="opt pick swap" title="Put the character from a picture in place of a person in a video, moving as they did (SCAIL-2)">⇆ Swap a character</button>` : "";
+  const swap = mode === "video" ? swapChip() : "";
   $("#gen-opts").innerHTML = wf
     ? chip + summary(gm, shown).map((o) => `<span class="opt"><b>${o}</b></span>`).join("") + gear + teach + layout + swap
     : `<span class="opt">workflows\\${esc(missing)} not found, so this mode is off</span>`;
@@ -1583,8 +1597,10 @@ function renderCreate() {
   warn.hidden = !wf || !p.warn;
   warn.textContent = p.warn;
   const panel = $("#gen-settings");
-  panel.hidden = !wf || !settingsOpen;
+  panel.hidden = !wf || !settingsOpen || swapping;
   if (!panel.hidden) settingsForm(panel, gm, false);
+  // While swapping, the prompt and its reference, source picture and warning make way for the panel.
+  if (swapping) for (const id of ["#gen-form", "#animate-src", "#ref-slot", "#gen-warn"]) $(id).hidden = true;
 }
 
 /** The create button's words: "Add to queue" while something renders. */
@@ -1716,11 +1732,11 @@ function initRefSlot() {
   const create = $("#create");
   const choices = $("#drop-choices");
   create.addEventListener("dragover", (e) => {
-    if (!(hasFiles(e) || hasRender(e)) || mode === "webcam") return;
+    if (!(hasFiles(e) || hasRender(e) || hasVideoRender(e)) || mode === "webcam") return;
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
     create.classList.add("drop");
-    if (!hasRender(e)) return;
+    if (!hasRender(e) || swapShown()) return;
     if (choices.hidden) showDropChoices();
     const over = (e.target as HTMLElement).closest?.("[data-drop]");
     $$("[data-drop]", choices).forEach((x) => x.classList.toggle("over", x === over));
@@ -1732,6 +1748,19 @@ function initRefSlot() {
   });
   create.addEventListener("drop", (e) => {
     create.classList.remove("drop");
+    // The Swap panel takes what's dropped anywhere on it; a video dropped from the gallery opens it.
+    const vid = videoRenderIn(e.dataTransfer);
+    if (swapShown() || vid) {
+      e.preventDefault();
+      choices.hidden = true;
+      if (mode === "webcam") return;
+      if (!swapShown()) {
+        if (vid) findItem(vid).then(swapCharacter, (err) => deps.toast(errMsg(err), "warn"));
+        return;
+      }
+      swapTake(e.dataTransfer);
+      return;
+    }
     const to = (e.target as HTMLElement).closest?.<HTMLElement>("[data-drop]:not([hidden])")?.dataset.drop ?? "ref";
     choices.hidden = true;
     const path = renderIn(e.dataTransfer);
@@ -1749,6 +1778,14 @@ function initRefSlot() {
   });
   document.addEventListener("paste", (e) => {
     if (!studioShown() || mode === "webcam" || (e.target as HTMLElement)?.closest?.("dialog")) return;
+    if (swapShown()) {
+      if ((e.target as HTMLElement)?.closest?.("input, textarea")) return;
+      if (videoIn(e.clipboardData) || imageIn(e.clipboardData)) {
+        e.preventDefault();
+        swapTake(e.clipboardData);
+      }
+      return;
+    }
     const f = imageIn(e.clipboardData);
     if (!f) return;
     e.preventDefault();
@@ -2212,6 +2249,8 @@ function card(a: Asset) {
   fig.addEventListener("contextmenu", (e) => showMenu(e, a));
   // A picture can be dragged up onto the create bar: the reference, or the picture to edit or animate.
   if (a.kind === "image") dragRender(fig, a.path);
+  // A video can be dragged into the Swap panel (or onto the create bar, which opens it).
+  if (a.kind === "video") dragVideo(fig, a.path);
   if (!song && !model) io.observe(fig);
   return fig;
 }
@@ -3031,100 +3070,249 @@ function swapSecs(frames: number, q: SwapQuality) {
   return t;
 }
 
-/** Swap a character: the person in a video (a render, or one from the PC) replaced by the character in a picture (a
- *  saved Character's face, or any picture picked, pasted or dropped), moving as they did, with the video's sound kept.
- *  Saved as a new video in the gallery. */
+// ---------- the Swap panel ----------
+// Swap a character in Studio's create bar (Film's and Video's Swap chip, or a video's "Swap a character…"): the video
+// on the left, who goes in on the right, each dropped from Explorer or the gallery, pasted or picked; then the swap
+// joins the render queue like any render, so another can be set up while it runs.
+let swapOpen = false;
+const sw: { video: Asset | null; info: VideoInfo | null; picture: Blob | null; picName: string; picUrl: string; done: string | null } = {
+  video: null,
+  info: null,
+  picture: null,
+  picName: "",
+  picUrl: "",
+  done: null,
+};
+
+/** Whether the Swap panel is showing (Film and Video modes, with the Swap a character pack). */
+const swapShown = () => swapOpen && (mode === "film" || mode === "video") && !!workflows.swap;
+
+/** The Swap chip beside the other chips: it shows and hides the panel. */
+const swapChip = () =>
+  workflows.swap
+    ? `<button type="button" class="opt pick swap${swapOpen ? " on" : ""}" aria-expanded="${swapOpen}" title="Put the person in a picture in place of a person in a video, moving as they did (SCAIL-2)">⇆ ${mode === "film" ? "<b>Swap</b>" : "Swap a character"}</button>`
+    : "";
+
+/** Opens the Swap panel (in Video mode, unless Film is showing), with this video in it when there's one. */
 async function swapCharacter(a?: Asset) {
   closeLightbox();
-  if (!a) {
-    const path = await invoke<string | null>("pick_video").catch(() => null);
-    if (!path) return;
-    a = { path, name: path.split(/[\\/]/).pop()!, kind: "video", mtime: 0, size: 0 };
+  deps.show();
+  await ensureWorkflows();
+  if (!workflows.swap) return deps.toast(`workflows\\${MODES.swap.file} wasn't found: add the Swap a character pack in Packs`, "warn");
+  if (mode !== "film" && mode !== "video") {
+    mode = "video";
+    srcAsset = null;
   }
-  const info = await invoke<VideoInfo>("video_info", { path: a.path }).catch((e) => {
-    deps.toast(`Couldn't read the video: ${errMsg(e)}`, "warn");
-    return null;
-  });
-  if (!info) return;
-  const dlg = $("#swap") as HTMLDialogElement;
-  const file = $("#sw-file") as HTMLInputElement;
-  const pic = $("#sw-pic") as HTMLImageElement;
-  const who = $("#sw-char") as HTMLSelectElement;
-  const quality = $("#sw-quality") as HTMLSelectElement;
-  const go = $("#sw-go") as HTMLButtonElement;
-  const video = $("#sw-video") as HTMLVideoElement;
-  video.src = convertFileSrc(a.path);
-  $("#sw-consent").textContent = `${CONSENT} Never make sexual content of anyone under 18.`;
-  // Who goes in: a saved Character's face, or a picture of anyone or anything.
-  const faces = characters().filter((c) => c.face);
-  who.innerHTML = `<option value="">A picture…</option>`;
-  for (const c of faces) {
-    const o = document.createElement("option");
-    o.value = c.id;
-    o.textContent = c.name;
-    who.appendChild(o);
-  }
-  let picture: Blob | null = null;
-  let url = "";
-  const frames = Math.min(info.frames, Math.floor(SWAP.maxSeconds * info.fps));
-  const parts = swapParts(frames);
-  const show = () => {
-    if (url) URL.revokeObjectURL(url);
-    url = picture ? URL.createObjectURL(picture) : "";
-    pic.hidden = !picture;
-    pic.src = url;
-    go.disabled = !picture;
-    const over = info.seconds > SWAP.maxSeconds + 0.05 ? ` Only the first ${SWAP.maxSeconds} s are swapped.` : "";
-    $("#sw-est").textContent = `Takes ${aboutTime(swapSecs(frames, quality.value as SwapQuality))} on an RTX 3060 (${parts} part${parts > 1 ? "s" : ""} of up to ${(SWAP.part / info.fps).toFixed(1)} s).${over}`;
-  };
-  const take = (b: Blob | null, name = "") => {
-    if (!b) return;
-    picture = b;
-    who.value = "";
-    $("#sw-name").textContent = name;
-    show();
-  };
-  who.onchange = () => {
-    const c = characterById(who.value);
-    picture = c?.face ? faceBlob(c) : null;
-    $("#sw-name").textContent = c ? `${c.name}'s face` : "";
-    show();
-  };
-  quality.onchange = show;
-  file.value = "";
-  file.onchange = () => take(file.files?.[0] ?? null, file.files?.[0]?.name);
-  $("#sw-pick").onclick = () => file.click();
-  // A picture dropped from Explorer, a browser or the gallery, or pasted, works too.
-  dlg.ondragover = (e) => e.preventDefault();
-  dlg.ondrop = async (e) => {
-    e.preventDefault();
-    const path = renderIn(e.dataTransfer);
-    if (path) take(await fetch(convertFileSrc(path)).then((r) => (r.ok ? r.blob() : null)).catch(() => null), path.split(/[\\/]/).pop());
-    else {
-      const f = imageIn(e.dataTransfer);
-      take(f, f?.name);
-    }
-  };
-  dlg.onpaste = (e) => {
-    const f = imageIn(e.clipboardData);
-    if (f) take(f, "a pasted picture");
-  };
-  ($("#sw-who") as HTMLInputElement).value = "person";
-  $("#sw-name").textContent = "";
-  show();
-  dlg.returnValue = "";
-  dlg.showModal();
-  await new Promise((r) => dlg.addEventListener("close", r, { once: true }));
-  if (url) URL.revokeObjectURL(url);
-  video.removeAttribute("src");
-  video.load();
-  const picked = picture as Blob | null;
-  if (dlg.returnValue !== "go" || !picked) return;
-  const q = quality.value as SwapQuality;
-  const target = ($("#sw-who") as HTMLInputElement).value.trim() || "person";
-  deps.toast(`Swapping the character in: ${aboutTime(swapSecs(frames, q))} on an RTX 3060. It opens when it's done.`);
+  swapOpen = true;
+  renderCreate();
+  if (a) await setSwapVideo(a);
+  $("#swap-panel").scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+/** The video to swap in (null clears it): ffprobe reads its size, frame rate and length first. */
+async function setSwapVideo(a: Asset | null) {
+  const info = a
+    ? await invoke<VideoInfo>("video_info", { path: a.path }).catch((e) => {
+        deps.toast(`Couldn't read the video: ${errMsg(e)}`, "warn");
+        return null;
+      })
+    : null;
+  if (a && !info) return;
+  sw.video = a;
+  sw.info = info;
+  sw.done = null;
+  renderSwap();
+}
+
+/** A video file dropped or pasted from outside: the page gets its bytes, so it's saved first (swap_video_save). */
+async function swapVideoFile(f: File) {
   try {
-    openRender(await swapInto(a, info, picked, target, q));
+    const body = new Uint8Array(await f.arrayBuffer());
+    const path = await invoke<string>("swap_video_save", body, { headers: { "x-name": encodeURIComponent(f.name), "x-root": encodeURIComponent(deps.root() ?? "") } });
+    await setSwapVideo({ path, name: f.name, kind: "video", mtime: 0, size: f.size });
+  } catch (e) {
+    deps.toast(`Couldn't take ${f.name}: ${errMsg(e)}`, "warn");
+  }
+}
+
+/** Who goes in (null clears it): any picture, or a saved Character's face. */
+function setSwapPicture(b: Blob | null, name = "") {
+  if (sw.picUrl) URL.revokeObjectURL(sw.picUrl);
+  sw.picture = b;
+  sw.picName = b ? name : "";
+  sw.picUrl = b ? URL.createObjectURL(b) : "";
+  sw.done = null;
+  if (!b || !name.endsWith("'s face")) ($("#sp-char") as HTMLSelectElement).value = "";
+  renderSwap();
+}
+
+/** A drop or paste while the panel shows: a video (a render or a file) goes in the Video box, a picture in Person.
+ *  False when there's neither. */
+async function swapTake(data: DataTransfer | null): Promise<boolean> {
+  const vid = videoRenderIn(data);
+  if (vid) {
+    findItem(vid).then(setSwapVideo, (e) => deps.toast(errMsg(e), "warn"));
+    return true;
+  }
+  const pic = renderIn(data);
+  if (pic) {
+    const b = await fetch(convertFileSrc(pic))
+      .then((r) => (r.ok ? r.blob() : null))
+      .catch(() => null);
+    if (b) setSwapPicture(b, pic.split(/[\\/]/).pop());
+    return true;
+  }
+  const v = videoIn(data);
+  if (v) {
+    swapVideoFile(v);
+    return true;
+  }
+  const f = imageIn(data);
+  if (f) {
+    setSwapPicture(f, f.name && f.name !== "image.png" ? f.name : "a pasted picture");
+    return true;
+  }
+  return false;
+}
+
+function initSwapPanel() {
+  const vbox = $("#sp-video");
+  const pbox = $("#sp-person");
+  const vfile = $("#sp-video-file") as HTMLInputElement;
+  const pfile = $("#sp-person-file") as HTMLInputElement;
+  const video = $("video", vbox) as HTMLVideoElement;
+  // Click a box to pick (the PC's own file dialog for a video, so it's read where it is); × clears it.
+  vbox.addEventListener("click", async (e) => {
+    if ((e.target as HTMLElement).closest(".swap-clear")) return setSwapVideo(null);
+    if (!("__TAURI_INTERNALS__" in window)) return vfile.click();
+    const path = await invoke<string | null>("pick_video").catch(() => null);
+    if (path) setSwapVideo({ path, name: path.split(/[\\/]/).pop()!, kind: "video", mtime: 0, size: 0 });
+  });
+  pbox.addEventListener("click", (e) => {
+    if ((e.target as HTMLElement).closest(".swap-clear")) return setSwapPicture(null);
+    if ((e.target as HTMLElement).closest("select")) return;
+    pfile.click();
+  });
+  for (const box of [vbox, pbox]) {
+    box.addEventListener("keydown", (e) => {
+      if (e.target !== box || (e.key !== "Enter" && e.key !== " ")) return;
+      e.preventDefault();
+      box.click();
+    });
+    box.addEventListener("dragover", () => box.classList.add("over"));
+    box.addEventListener("dragleave", (e) => !box.contains(e.relatedTarget as Node) && box.classList.remove("over"));
+    box.addEventListener("drop", () => box.classList.remove("over"));
+  }
+  vfile.addEventListener("change", () => {
+    const f = vfile.files?.[0];
+    vfile.value = "";
+    if (f) swapVideoFile(f);
+  });
+  pfile.addEventListener("change", () => {
+    const f = pfile.files?.[0];
+    pfile.value = "";
+    if (f) setSwapPicture(f, f.name);
+  });
+  // The video plays (muted) while the pointer is over it.
+  vbox.addEventListener("mouseenter", () => sw.video && video.play().catch(() => {}));
+  vbox.addEventListener("mouseleave", () => video.pause());
+  $("#sp-char").addEventListener("change", (e) => {
+    const c = characterById((e.target as HTMLSelectElement).value);
+    if (c?.face) setSwapPicture(faceBlob(c), `${c.name}'s face`);
+  });
+  $("#sp-quality").addEventListener("change", renderSwap);
+  ($("#sp-who") as HTMLInputElement).value = "person";
+  $("#sp-consent").textContent = `${CONSENT} Never make sexual content of anyone under 18.`;
+  onCharactersChange(() => swapShown() && renderSwap());
+  $("#sp-go").addEventListener("click", runSwap);
+  $("#sp-add").addEventListener("click", async () => {
+    const path = sw.done;
+    if (!path) return;
+    const add = $("#sp-add") as HTMLButtonElement;
+    add.disabled = true;
+    try {
+      await deps.film.addClip(path, sw.picName.endsWith("'s face") ? `${sw.picName.slice(0, -7)} swapped in` : `Swapped in from ${sw.picName || "a picture"}`);
+    } catch (e) {
+      deps.toast(`Couldn't add it to the film: ${errMsg(e)}`, "warn");
+    }
+    add.disabled = false;
+  });
+}
+
+/** Draws the panel from what's in it. */
+function renderSwap() {
+  const vbox = $("#sp-video");
+  const pbox = $("#sp-person");
+  const video = $("video", vbox) as HTMLVideoElement;
+  const src = sw.video ? convertFileSrc(sw.video.path) : "";
+  if (video.dataset.src !== src) {
+    video.dataset.src = src;
+    if (src) video.src = src;
+    else {
+      video.removeAttribute("src");
+      video.load();
+    }
+  }
+  vbox.classList.toggle("full", !!sw.video);
+  video.hidden = !sw.video;
+  $(".swap-empty", vbox).hidden = !!sw.video;
+  $(".swap-clear", vbox).hidden = !sw.video;
+  $(".swap-name", vbox).textContent = sw.video ? `${sw.video.name}${sw.info ? ` · ${sw.info.seconds.toFixed(1)} s · ${sw.info.width}×${sw.info.height}` : ""}` : "";
+  const img = $("img", pbox) as HTMLImageElement;
+  if (img.getAttribute("src") !== sw.picUrl) {
+    if (sw.picUrl) img.src = sw.picUrl;
+    else img.removeAttribute("src");
+  }
+  pbox.classList.toggle("full", !!sw.picture);
+  img.hidden = !sw.picture;
+  $(".swap-empty", pbox).hidden = !!sw.picture;
+  $(".swap-clear", pbox).hidden = !sw.picture;
+  $(".swap-name", pbox).textContent = sw.picName;
+  // A saved Character's face can go in instead.
+  const sel = $("#sp-char") as HTMLSelectElement;
+  const faces = characters().filter((c) => c.face);
+  const was = sel.value;
+  sel.innerHTML = `<option value="">${faces.length ? "Pick one…" : "none saved yet"}</option>` + faces.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("");
+  sel.value = faces.some((c) => c.id === was) ? was : "";
+  sel.disabled = !faces.length;
+  // How long it takes, and how much of the video is swapped.
+  const q = ($("#sp-quality") as HTMLSelectElement).value as SwapQuality;
+  const info = sw.info;
+  if (info) {
+    const frames = Math.min(info.frames, Math.floor(SWAP.maxSeconds * info.fps));
+    const parts = swapParts(frames);
+    const over = info.seconds > SWAP.maxSeconds + 0.05 ? ` Only the first ${SWAP.maxSeconds} s are swapped.` : "";
+    $("#sp-est").textContent = `Takes ${aboutTime(swapSecs(frames, q))} on an RTX 3060 (${parts} part${parts > 1 ? "s" : ""} of up to ${(SWAP.part / info.fps).toFixed(1)} s). The chat model is unloaded while it runs.${over}`;
+  } else $("#sp-est").textContent = `Up to the first ${SWAP.maxSeconds} s of a video is swapped; 5 s at Draft takes about 12 min on an RTX 3060.`;
+  const go = $("#sp-go") as HTMLButtonElement;
+  go.disabled = !sw.video || !sw.picture;
+  go.textContent = job || starting || current ? "Swap (add to queue)" : "Swap";
+  go.title = !sw.video ? "Put a video in the left box first" : !sw.picture ? "Put a picture of who goes in in the right box first" : "";
+  // When it's done: open it, or put it in the film.
+  const film = sw.done ? deps.film.target() : null;
+  const add = $("#sp-add") as HTMLButtonElement;
+  add.hidden = !film;
+  if (film) add.textContent = `Add to “${film.name}”`;
+  const done = $("#sp-done");
+  done.innerHTML = sw.done ? `Done: <button type="button" class="linkish" id="sp-open">${esc(sw.done.split(/[\\/]/).pop() ?? "")}</button> is in Renders.` : "";
+  if (sw.done) $("#sp-open").onclick = () => sw.done && openRender(sw.done);
+}
+
+/** The Swap button: the swap joins the render queue (the chat model is unloaded for it, the video's sound kept). */
+async function runSwap() {
+  const a = sw.video;
+  const info = sw.info;
+  const picture = sw.picture;
+  if (!a || !info || !picture) return;
+  const q = ($("#sp-quality") as HTMLSelectElement).value as SwapQuality;
+  const target = ($("#sp-who") as HTMLInputElement).value.trim() || "person";
+  const frames = Math.min(info.frames, Math.floor(SWAP.maxSeconds * info.fps));
+  deps.toast(`Swapping ${sw.picName || "the character"} in: ${aboutTime(swapSecs(frames, q))} on an RTX 3060. It's in the render queue.`);
+  try {
+    const path = await swapInto(a, info, picture, target, q);
+    sw.done = path;
+    if (swapShown()) renderSwap();
+    deps.toast(`The swap is done: ${path.split(/[\\/]/).pop()} is in Renders.`);
   } catch (e) {
     if (errMsg(e) !== "stopped") deps.toast(`Couldn't swap the character: ${errMsg(e)}`, "warn");
   }
