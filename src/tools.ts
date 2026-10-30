@@ -175,6 +175,25 @@ export function toolSpecs(tools: ToolDef[], enabled: Set<string>) {
     .map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.parameters } }));
 }
 
+/** Tool descriptions go with every message, and they add up: PowerShell's 25 tools are ~7.7k tokens, Browser control's
+ *  ~5.1k, all nine servers ~20k, which filled Qwen3.8 27B's 20k context before it answered. Keeps the groups on offer
+ *  to `budget` tokens by leaving out the biggest of the optional (server) groups first; Prestige's own small ones stay. */
+export function groupsWithin(tools: ToolDef[], groups: Set<string>, budget: number): { keep: Set<string>; dropped: { id: string; tokens: number }[] } {
+  const size = new Map<string, number>();
+  for (const t of tools) if (groups.has(t.group)) size.set(t.group, (size.get(t.group) ?? 0) + tokensIn(JSON.stringify(toolSpecs([t], groups)[0])));
+  const keep = new Set(groups);
+  const dropped: { id: string; tokens: number }[] = [];
+  let total = [...size.values()].reduce((a, b) => a + b, 0);
+  const optional = [...size].filter(([id]) => tools.some((t) => t.group === id && t.server)).sort((a, b) => b[1] - a[1]);
+  for (const [id, n] of optional) {
+    if (total <= budget) break;
+    keep.delete(id);
+    dropped.push({ id, tokens: n });
+    total -= n;
+  }
+  return { keep, dropped };
+}
+
 const MAX_RESULT = 8000;
 
 /** Rounds of tool calls in one reply. A model that still wants more after these gets one more turn without tools,

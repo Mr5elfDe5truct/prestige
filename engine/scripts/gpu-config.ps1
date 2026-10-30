@@ -180,6 +180,10 @@ function Convert-LlamaIni($Text, $Plan) {
             if ($l -match '^\s*(n-gpu-layers|ngl|n-cpu-moe|cpu-moe)\s*=') { continue }
             # Small cards: cap the context so --fit spends the VRAM on layers rather than cache.
             if ($Plan.LlamaGB -lt 10 -and $l -match '^\s*(c|ctx-size)\s*=\s*(\d+)' -and [int]$Matches[2] -gt 16384) { $l = "$($Matches[1]) = 16384" }
+            # Qwen3.8 27B's 20k is sized for one 12 GB card. It's a hybrid model: only 16 of its 65 layers keep a KV cache,
+            # so 128k is 4.3 GB at q8_0. Pooled over two 3060s it loads whole at 128k (22-26 tok/s); at 256k --fit moved
+            # 17 layers to the CPU and it fell to 3.6 tok/s. Prestige's tool descriptions alone can take 20k.
+            if ($pool -and $Plan.LlamaGB -ge 22 -and $section -eq "qwen3.8-27b-uncensored" -and $l -match '^\s*(c|ctx-size)\s*=\s*(\d+)' -and [int]$Matches[2] -lt 131072) { $l = "$($Matches[1]) = 131072" }
         }
         $l
         if ($l -match '^\s*\[\*\]' -and $Plan.TensorSplit) { "tensor-split = $($Plan.TensorSplit)" }

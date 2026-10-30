@@ -50,7 +50,7 @@ import {
 import { bestFor, capsFor, chipsHtml, nameHints, supportsTools } from "./caps";
 import { initCatalog, openCatalog, phoneCatalog } from "./catalog";
 import { checkForUpdates, initUpdates } from "./updates";
-import { GROUPS, LAST_ROUND, TOOL_ROUNDS, describeCall, fitToolResults, withoutToolCalls, loadTools, runTool, toolContext, tokensIn, toolSpecs, type ToolDef, type ToolStep } from "./tools";
+import { GROUPS, LAST_ROUND, TOOL_ROUNDS, describeCall, fitToolResults, groupsWithin, withoutToolCalls, loadTools, runTool, toolContext, tokensIn, toolSpecs, type ToolDef, type ToolStep } from "./tools";
 import { ctxOf, errMsg, freeLlamaVram, http, nameFor, listModels, ping, streamChat, OLLAMA, LLAMA, type ChatMessage, type ModelInfo, type StreamStats } from "./backends";
 import { initMemoryWriter, pauseMemoryWrite, queueMemoryWrite } from "./memwriter";
 import { addFact, memoryContext, factCount, listFacts, listOwui, syncFromOwui, rememberRequest, DEFAULT_OWUI, type MemoryConfig } from "./memory";
@@ -427,6 +427,22 @@ function statText(s?: StreamStats, live = false) {
   parts.push(`${s.tokens} tokens`);
   if (!live) parts.push(`${s.seconds.toFixed(1)} s`);
   return parts.join(" · ");
+}
+
+/** Why a reply stopped short. The reply itself is often the small part: the system notes and tool descriptions
+ *  sent with every question can take most of a 20k context, so it says how much went where. */
+function cutOffNote(model: ModelInfo, s?: StreamStats) {
+  const k = (n: number) => `${(n / 1024).toFixed(1).replace(/\.0$/, "")}k`;
+  const ctx = ctxOf(model);
+  const head = `Cut off: ${model.name}'s ${k(ctx)} context is full.`;
+  if (!s?.promptTokens) return `${head} Start a new chat, or pick a model with more context, to go further.`;
+  const share = s.promptTokens / ctx;
+  const split = ` ${k(s.promptTokens)} of it went to the chat so far, Prestige's notes and the tool descriptions, leaving ${k(Math.max(0, ctx - s.promptTokens))} for this reply.`;
+  // Mostly the prompt: fewer tools (the wrench) frees the most; else the reply itself ran long.
+  const fix = share > 0.5
+    ? " Switch off tool groups you don't need with the wrench, start a new chat, or give the model more context in Settings > Workstation settings > Models."
+    : " Start a new chat, or give the model more context in Settings > Workstation settings > Models, to go further.";
+  return head + split + fix;
 }
 
 function addUserBubble(text: string, images?: string[]) {
@@ -2603,7 +2619,14 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     // (Not in a call: tool rounds and "Allow?" cards don't work by voice, and they'd hold up the answer.)
     if (!live && groups.size && (await supportsTools(model))) {
       const t = await loadTools();
-      const offer = canvasTurn ? new Set([...groups].filter((g) => CANVAS_TOOLS.has(g))) : groups;
+      // A third of the context at most, so the chat and the answer keep the rest.
+      const fit = groupsWithin(t.tools, canvasTurn ? new Set([...groups].filter((g) => CANVAS_TOOLS.has(g))) : groups, Math.round(ctxOf(model) / 3));
+      const offer = fit.keep;
+      if (fit.dropped.length) {
+        const names = fit.dropped.map((d) => GROUPS.find((g) => g.id === d.id)?.label ?? d.id);
+        const k = Math.round(fit.dropped.reduce((a, d) => a + d.tokens, 0) / 1024);
+        toast(`Left out ${names.join(", ")} for this reply: their tool descriptions would take ~${k}k of ${model.name}'s ${Math.round(ctxOf(model) / 1024)}k context.`, "warn");
+      }
       toolDefs = t.tools.filter((x) => offer.has(x.group));
       specs = toolDefs.length ? toolSpecs(t.tools, offer) : undefined;
       if (specs) messages[0].content += "\n\n" + TOOLS_HINT;
@@ -2703,7 +2726,7 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     reply.stats = stats;
     reply.content = withoutToolCalls(reply.content);
     // Without this the reply just stopped mid-sentence (or mid-page), as if Prestige had hung.
-    if (cutOff) reply.content += `\n\n*(Cut off: this reply filled ${model.name}'s ${Math.round(ctxOf(model) / 1024)}k context. Start a new chat, or pick a model with more context, to go further.)*`;
+    if (cutOff) reply.content += `\n\n*(${cutOffNote(model, stats)})*`;
     // Llama 3.1 sometimes types a pretend tool call as plain text ({"name": ..., "parameters": ...}) instead
     // of calling a tool. Drop it when it doesn't name a real tool, so only the actual answer is shown.
     const fake = reply.content.match(/^\s*\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"parameters"\s*:\s*\{[^}]*\}\s*\}\s*/);
