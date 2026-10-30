@@ -363,19 +363,30 @@ async function loadModel(m: ModelInfo) {
   model = m;
   $("#live-model").textContent = m.name;
   setStatus(`Loading ${m.name}…`);
-  const r = await http(`${OLLAMA}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: m.id,
-      messages: [{ role: "user", content: "hi" }],
-      stream: false,
-      think: false,
-      keep_alive: "30m",
-      options: { num_ctx: LIVE_CTX, num_predict: 1 },
-    }),
-  });
-  if (!r.ok) throw new Error(`Ollama answered ${r.status}`);
+  // Read cold from a hard drive the first load can take over a minute (4 s once Windows has the file cached), so the
+  // call shows it's still going rather than looking stuck.
+  const t0 = performance.now();
+  const tick = window.setInterval(() => {
+    const s = Math.round((performance.now() - t0) / 1000);
+    if (s >= 10 && state !== "off") setStatus(`Loading ${m.name}… ${s} s (a first load from a hard drive can take a minute or two)`);
+  }, 1000);
+  try {
+    const r = await http(`${OLLAMA}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: m.id,
+        messages: [{ role: "user", content: "hi" }],
+        stream: false,
+        think: false,
+        keep_alive: "30m",
+        options: { num_ctx: LIVE_CTX, num_predict: 1 },
+      }),
+    });
+    if (!r.ok) throw new Error(`Ollama answered ${r.status}`);
+  } finally {
+    clearInterval(tick);
+  }
 }
 
 async function unloadOllama(which: (name: string) => boolean) {
