@@ -158,7 +158,16 @@ Write-Host (Format-GpuPlan $GpuPlan)
 
 # 1. Ollama: Gemma 4 (webcam/vision), Qwen3.5-9B uncensored, coders. Unloads after 5 min idle.
 #    With several GPUs it runs on the small card (split), so chat stays loaded while ComfyUI renders on the big one.
+# Through any junction to the real folder (models -> D:\models): Ollama 0.40 reads every manifest through a junction
+# as "bad" and lists no models.
 $env:OLLAMA_MODELS = "$Root\models\ollama"
+$at = ""
+foreach ($part in $env:OLLAMA_MODELS.Split("\")) {
+    $at = if ($at) { Join-Path $at $part } else { "$part\" }
+    $item = Get-Item -LiteralPath $at -Force -ErrorAction SilentlyContinue
+    if ($item -and $item.LinkType -eq "Junction" -and $item.Target) { $at = @($item.Target)[0] }
+}
+if (Test-Path -LiteralPath $at) { $env:OLLAMA_MODELS = $at }
 $env:OLLAMA_KEEP_ALIVE = $Svc.ollamaKeepAlive
 # Ollama picks 4096 tokens on a 12 GB card, which the memory + tool prompts overflow (~6k tokens
 # for a bare "Hello" in voice mode). 32k with a q8 KV cache still fits each model on a 12 GB card; the GPU plan

@@ -423,6 +423,25 @@ fn local_app_data() -> PathBuf {
     std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(home()).join("AppData").join("Local"))
 }
 
+/// The folder a path really is, through any junction on the way (a Workstation whose models folder links to
+/// D:\models). Ollama 0.40 reads every manifest through a junction as "bad" ("The system cannot find the path
+/// specified") and lists no models at all. Left as it is when it doesn't exist yet.
+fn real_dir(p: &Path) -> PathBuf {
+    p.canonicalize().map(|r| without_verbatim(&r)).unwrap_or_else(|_| p.to_path_buf())
+}
+
+/// canonicalize's \\?\D:\x as plain D:\x (and \\?\UNC\host\share as \\host\share).
+fn without_verbatim(p: &Path) -> PathBuf {
+    let s = p.to_string_lossy();
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) => match rest.strip_prefix(r"UNC\") {
+            Some(unc) => PathBuf::from(format!(r"\\{unc}")),
+            None => PathBuf::from(rest),
+        },
+        None => p.to_path_buf(),
+    }
+}
+
 /// {ROOT} and {HOME} in the Workstation's templates; `json` escapes the backslashes for a JSON file.
 pub fn expand(text: &str, root: &Path, json: bool) -> String {
     let (mut r, mut h) = (root.to_string_lossy().into_owned(), home());
@@ -691,7 +710,7 @@ pub fn prepare(root: &Path) -> Result<Prepared, String> {
     // 1. Ollama: fast chat, vision, Live calls. With several cards it runs on the small one.
     let mut env = BTreeMap::new();
     let ctx = plan.map(|p| p.ollama_context).unwrap_or(32768).to_string();
-    let models = root.join("models").join("ollama");
+    let models = real_dir(&root.join("models").join("ollama"));
     set(&mut env, &[
         ("OLLAMA_MODELS", &models.to_string_lossy()),
         ("OLLAMA_KEEP_ALIVE", &svc.ollama_keep_alive),
@@ -847,6 +866,15 @@ pub fn prepare(root: &Path) -> Result<Prepared, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plain_paths_from_canonicalize() {
+        assert_eq!(without_verbatim(Path::new(r"\\?\D:\models\ollama")), PathBuf::from(r"D:\models\ollama"));
+        assert_eq!(without_verbatim(Path::new(r"\\?\UNC\nas\share\ollama")), PathBuf::from(r"\\nas\share\ollama"));
+        assert_eq!(without_verbatim(Path::new(r"C:\Workstation\models")), PathBuf::from(r"C:\Workstation\models"));
+        let gone = Path::new(r"C:\no\such\folder\ollama");
+        assert_eq!(real_dir(gone), gone.to_path_buf());
+    }
 
     #[test]
     fn missing_packages_reads_dist_info() {

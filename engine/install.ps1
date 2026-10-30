@@ -470,7 +470,15 @@ if ($Packs) { $pulls += "qwen3-embedding:0.6b" }
 $pulls = @($pulls | Select-Object -Unique)
 if ($pulls) {
     # Pull into the workstation's own model store, using a temporary Ollama server pointed at it.
+    # Through any junction to the real folder: Ollama 0.40 can't read manifests through one (as in start-all.ps1).
     $env:OLLAMA_MODELS = Join-Path $Root "models\ollama"
+    $at = ""
+    foreach ($part in $env:OLLAMA_MODELS.Split("\")) {
+        $at = if ($at) { Join-Path $at $part } else { "$part\" }
+        $item = Get-Item -LiteralPath $at -Force -ErrorAction SilentlyContinue
+        if ($item -and $item.LinkType -eq "Junction" -and $item.Target) { $at = @($item.Target)[0] }
+    }
+    if (Test-Path -LiteralPath $at) { $env:OLLAMA_MODELS = $at }
     if (Get-NetTCPConnection -LocalPort 11434 -State Listen -ErrorAction SilentlyContinue) {
         Say "    stopping the Ollama tray app so the models go into the workstation folder…"
         Get-Process "ollama app", ollama -ErrorAction SilentlyContinue | Stop-Process -Force
