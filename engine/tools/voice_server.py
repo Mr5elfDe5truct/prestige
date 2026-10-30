@@ -49,7 +49,10 @@ VOICES = ROOT / "data" / "voices"
 WHISPER_MODEL = os.getenv("VOICE_WHISPER_MODEL", "large-v3-turbo")
 WHISPER_IDLE = int(os.getenv("VOICE_WHISPER_IDLE", "300"))  # seconds before Whisper leaves the GPU
 VOXCPM_IDLE = int(os.getenv("VOICE_TTS_IDLE", "180"))
-VOXCPM_STEPS = int(os.getenv("VOICE_TTS_STEPS", "6"))  # 10 is VoxCPM's default; 6 is ~30% faster and sounds the same
+VOXCPM_STEPS = int(os.getenv("VOICE_TTS_STEPS", "10"))  # VoxCPM's default; fewer let a cloned voice's pace and level wander
+VOXCPM_CFG = float(os.getenv("VOICE_TTS_CFG", "2.0"))
+LEVEL_DB = -20.0  # loudness (dBFS, over the voiced part) every voice clip and every spoken sentence is brought to
+CLIP_MAX = 20.0  # seconds of a cloned voice clip kept: VoxCPM2 averages a longer one into a flatter, wandering voice
 VOXCPM_VRAM = 6.2e9  # what VoxCPM2 needs free on the GPU (5.7 GB peak plus headroom)
 
 # Designed voices: VoxCPM2 makes a voice from a description. Each one is rendered once into data\voices and cloned
@@ -70,6 +73,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 gpu_lock = threading.Lock()  # one GPU job at a time
 state = {"whisper": None, "whisper_device": None, "whisper_used": 0.0, "tts": None, "tts_used": 0.0}
 prompt_cache: dict = {}  # voice -> (clip mtime, VoxCPM2 prompt cache): a clip is encoded once, not every sentence
+no_transcript: set = set()  # cloned voices Whisper found no words in (cloned from the sound alone)
 
 
 def _shares_card(other: str) -> bool:
@@ -234,6 +238,123 @@ def _voice_list():
     return sorted(names, key=lambda n: (n not in DESIGNED, n))
 
 
+def _frame_rms(audio: np.ndarray, sr: int, ms: int = 20) -> tuple[np.ndarray, int]:
+    hop = max(1, sr * ms // 1000)
+    n = len(audio) // hop
+    frames = audio[: n * hop].reshape(n, hop) if n else np.zeros((1, max(1, len(audio))))
+    return np.sqrt((frames ** 2).mean(axis=1) + 1e-12), hop
+
+
+def _voiced(rms: np.ndarray) -> np.ndarray:
+    # Speech, as opposed to room noise and breaths: within 35 dB of the clip's loud parts.
+    return rms > max(np.percentile(rms, 95) * 10 ** (-35 / 20), 1e-4)
+
+
+def _level(audio: np.ndarray, sr: int) -> np.ndarray:
+    """`audio` brought to LEVEL_DB over its voiced part, without clipping."""
+    rms, _ = _frame_rms(audio, sr)
+    voiced = rms[_voiced(rms)]
+    if not len(voiced):
+        return audio
+    gain = 10 ** (LEVEL_DB / 20) / np.sqrt((voiced ** 2).mean())
+    peak = np.abs(audio).max() * gain
+    if peak > 0.95:
+        gain *= 0.95 / peak
+    return (audio * gain).astype(np.float32)
+
+
+def _clean_clip(audio: np.ndarray, sr: int) -> np.ndarray:
+    """A voice clip as VoxCPM2 clones best from it: no silence at the ends, no long pauses, one steady level.
+    The quiet stretches of a mic recording otherwise come back as a voice that drops to a whisper now and then."""
+    rms, hop = _frame_rms(audio, sr)
+    on = np.flatnonzero(_voiced(rms))
+    if not len(on):
+        return audio
+    keep, gap, pause = [], int(0.7 * sr / hop), int(0.35 * sr / hop)
+    start = prev = on[0]
+    for i in on[1:]:
+        if i - prev > gap:  # a long pause: keep 0.35 s of it
+            keep.append((start, prev + pause // 2))
+            start = i - pause // 2
+        prev = i
+    keep.append((start, prev + 1))
+    pad = int(0.1 * sr)
+    pieces = [audio[max(0, a * hop - (pad if k == 0 else 0)): b * hop + (pad if k == len(keep) - 1 else 0)]
+              for k, (a, b) in enumerate(keep)]
+    return _level(np.concatenate(pieces).astype(np.float32), sr)
+
+
+def _clip_and_transcript(audio: np.ndarray, sr: int) -> tuple[np.ndarray, str]:
+    """Up to CLIP_MAX seconds of a cleaned clip, ending where a sentence ends, and what it says (Whisper, which the
+    caller holds gpu_lock for). VoxCPM2 clones from the clip alone without the words, and that is when a voice's
+    speed and volume drift from sentence to sentence; with them it continues the clip and stays steady."""
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
+        sf.write(f.name, audio, sr, subtype="PCM_16")
+    try:
+        segs, _ = _whisper().transcribe(f.name, beam_size=5, word_timestamps=True, vad_filter=False)
+        words = [w for s in segs for w in (s.words or [])]
+        state["whisper_used"] = time.time()
+    finally:
+        os.unlink(f.name)
+    fits = [i for i, w in enumerate(words) if w.end <= CLIP_MAX]
+    if not fits:
+        return audio, ""
+    last = fits[-1]
+    ends = [i for i in fits if words[i].word.strip().endswith((".", "!", "?")) and words[i].end >= 6]
+    if ends and len(audio) / sr > CLIP_MAX:
+        last = ends[-1]
+    cut = len(audio) if last == len(words) - 1 else min(len(audio), int((words[last].end + 0.15) * sr))
+    return audio[:cut], "".join(w.word for w in words[: last + 1]).strip()
+
+
+def _ready_clip(voice: str):
+    """A cloned voice saved without a transcript gets a cleaned clip and its words, once. The original stays beside
+    it as <name>.original.flac. Called with gpu_lock held, before VoxCPM2 loads (Whisper needs the room)."""
+    wav, transcript = _voice_files(voice)
+    if transcript is not None or not wav.exists() or voice in DESIGNED or voice in no_transcript:
+        return
+    try:
+        audio, sr = sf.read(str(wav), dtype="float32")
+        if audio.ndim > 1:
+            audio = audio.mean(axis=1)
+        clip, text = _clip_and_transcript(_clean_clip(audio, sr), sr)
+    except Exception as e:  # noqa: BLE001 - the voice still works from the clip alone
+        print(f"couldn't transcribe the {voice} clip ({e}); cloning from the sound alone", flush=True)
+        no_transcript.add(voice)
+        return
+    if not text:
+        no_transcript.add(voice)
+        return
+    original = wav.with_name(f"{voice}.original.flac")
+    if not original.exists():
+        sf.write(str(original), audio, sr)
+    sf.write(str(wav), clip, sr, subtype="PCM_16")
+    wav.with_suffix(".txt").write_text(text, encoding="utf-8")
+    print(f"{voice}: cleaned the clip to {len(clip) / sr:.1f} s and saved what it says", flush=True)
+
+
+class _Leveler:
+    """Keeps one sentence at LEVEL_DB as it streams: the gain follows the sentence's voiced loudness so far, so a
+    take that comes out quiet (or loud) is evened out, and changes smoothly within a piece so it doesn't pump."""
+
+    def __init__(self, sr: int):
+        self.sr, self.energy, self.frames, self.gain = sr, 0.0, 0, None
+
+    def __call__(self, chunk: np.ndarray) -> np.ndarray:
+        rms, _ = _frame_rms(chunk, self.sr)
+        voiced = rms[rms > 10 ** (-45 / 20)]
+        self.energy += float((voiced ** 2).sum())
+        self.frames += len(voiced)
+        if not self.frames:
+            return chunk
+        target = float(np.clip(10 ** (LEVEL_DB / 20) / np.sqrt(self.energy / self.frames), 0.5, 4.0))
+        start = target if self.gain is None else self.gain
+        self.gain = target
+        out = chunk * np.linspace(start, target, len(chunk), dtype=np.float32)
+        mag = np.abs(out)  # a soft ceiling for the loud bits of a sentence that started quiet
+        return np.where(mag > 0.9, np.sign(out) * (0.9 + 0.09 * np.tanh((mag - 0.9) / 0.09)), out).astype(np.float32)
+
+
 def _voice_kw(model, voice: str) -> dict:
     """The cloning arguments for a voice (rendering a designed voice the first time it is used)."""
     sr = model.tts_model.sample_rate
@@ -241,7 +362,7 @@ def _voice_kw(model, voice: str) -> dict:
     if not wav_path.exists() and voice in DESIGNED:
         # First use of a designed voice: render it from its description, then clone it from now on.
         VOICES.mkdir(parents=True, exist_ok=True)
-        sample = model.generate(text=f"({DESIGNED[voice]}){SAMPLE}", cfg_value=2.0, inference_timesteps=10)
+        sample = model.generate(text=f"({DESIGNED[voice]}){SAMPLE}", cfg_value=VOXCPM_CFG, inference_timesteps=10)
         sf.write(wav_path, sample, sr)
         wav_path.with_suffix(".txt").write_text(SAMPLE, encoding="utf-8")
         transcript = SAMPLE
@@ -278,26 +399,38 @@ def _cached_prompt(model, voice: str, kw: dict):
 
 
 def _chunks(model, text: str, voice: str, steps: int, streaming: bool):
-    """Audio for `text` in `voice`: one array, or (streaming) a piece at a time as it is made."""
+    """Audio for `text` in `voice`, at the same loudness as every other sentence: one array, or (streaming) a piece
+    at a time as it is made."""
+    level = _Leveler(model.tts_model.sample_rate)
+    gen = _raw_chunks(model, text, voice, steps, streaming)
+    try:
+        for piece in gen:
+            yield level(np.asarray(piece, dtype=np.float32))
+    finally:
+        gen.close()
+
+
+def _raw_chunks(model, text: str, voice: str, steps: int, streaming: bool):
     kw = _voice_kw(model, voice)
     text = _style(voice) + text
     cache = _cached_prompt(model, voice, kw)
     if cache is not None or not kw:
         gen = model.tts_model._generate_with_prompt_cache(target_text=text, prompt_cache=cache, inference_timesteps=steps,
-                                                          cfg_value=2.0, retry_badcase=not streaming, streaming=streaming)
+                                                          cfg_value=VOXCPM_CFG, retry_badcase=not streaming, streaming=streaming)
         try:
             for wav, _, _ in gen:
                 yield wav.squeeze(0).float().cpu().numpy()
         finally:
             gen.close()
     elif streaming:
-        yield from model.generate_streaming(text=text, cfg_value=2.0, inference_timesteps=steps, **kw)
+        yield from model.generate_streaming(text=text, cfg_value=VOXCPM_CFG, inference_timesteps=steps, **kw)
     else:
-        yield model.generate(text=text, cfg_value=2.0, inference_timesteps=steps, **kw)
+        yield model.generate(text=text, cfg_value=VOXCPM_CFG, inference_timesteps=steps, **kw)
 
 
 def _speak(text: str, voice: str, steps: int) -> tuple[np.ndarray, int]:
     with gpu_lock:
+        _ready_clip(voice)
         model = _voxcpm()
         audio = np.concatenate(list(_chunks(model, text, voice, steps, False)))
         state["tts_used"] = time.time()
@@ -341,6 +474,7 @@ async def _stream_speech(text: str, voice: str, steps: int):
     def work():
         try:
             with gpu_lock:
+                _ready_clip(voice)
                 model = _voxcpm()
                 out.put(("sr", model.tts_model.sample_rate))
                 gen = _chunks(model, text, voice, steps, True)
@@ -395,6 +529,8 @@ def load(body: dict | None = None):
             if fresh:
                 list(model.transcribe(np.zeros(16000, dtype=np.float32), language="en", beam_size=1)[0])
         if "tts" in which:
+            if voice:
+                _ready_clip(voice)
             fresh = state["tts"] is None
             model = _voxcpm()
             if voice:
@@ -498,7 +634,7 @@ def _design(description: str, text: str, takes: int) -> tuple[list[np.ndarray], 
     # No reference clip: VoxCPM2 makes the voice up from the description, differently every time.
     with gpu_lock:
         model = _voxcpm()
-        out = [model.generate(text=f"({description}){text}", cfg_value=2.0, inference_timesteps=10) for _ in range(takes)]
+        out = [model.generate(text=f"({description}){text}", cfg_value=VOXCPM_CFG, inference_timesteps=10) for _ in range(takes)]
         state["tts_used"] = time.time()
         return out, model.tts_model.sample_rate
 
@@ -548,13 +684,30 @@ async def add_voice(name: str = Form(...), file: UploadFile = File(...), transcr
         audio = audio.mean(axis=1)
     if len(audio) < sr * 3:
         raise HTTPException(400, f"that clip has {len(audio) / sr:.1f} s of audio; use 5-30 s of one person speaking")
-    audio = audio[: sr * 30]  # a 5-30 s clip is plenty
+    audio = audio[: sr * 60].astype(np.float32)
+    if not description.strip():  # a recording (a designed voice's take is already clean)
+        audio = _clean_clip(audio, sr)
+    if transcript.strip():
+        audio = audio[: sr * 30]  # a 5-30 s clip is plenty
+    else:  # Whisper writes down what it says, and the clip is cut to CLIP_MAX seconds at the end of a sentence
+        def words():
+            with gpu_lock:
+                return _clip_and_transcript(audio, sr)
+        try:
+            audio, transcript = await asyncio.to_thread(words)
+        except Exception as e:  # noqa: BLE001 - it still clones from the sound alone
+            print(f"couldn't transcribe the {name} clip ({e})", flush=True)
+            audio = audio[: sr * 30]
     sf.write(VOICES / f"{name}.wav", audio, sr, subtype="PCM_16")
+    VOICES.joinpath(f"{name}.original.flac").unlink(missing_ok=True)
+    prompt_cache.pop(name, None)
     txt = VOICES / f"{name}.txt"
     if transcript.strip():
         txt.write_text(transcript.strip(), encoding="utf-8")
-    elif txt.exists():
-        txt.unlink()
+        no_transcript.discard(name)
+    else:
+        txt.unlink(missing_ok=True)
+        no_transcript.add(name)
     # A designed voice keeps the words it was made from, so it can be made again.
     note = VOICES / f"{name}.design.txt"
     if description.strip():
