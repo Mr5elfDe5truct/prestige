@@ -5,8 +5,9 @@
 import { errMsg, http } from "./backends";
 import { audio, isVox, outputNode, speakable, KOKORO, VOICE_SERVER } from "./speech";
 
-/** VoxCPM2 diffusion steps in Live: 4 is ~20% quicker than the voice screen's 6 and still sounds clean. */
-const VOX_STEPS = 4;
+/** VoxCPM2 diffusion steps in Live: 6 is ~30% quicker than the voice screen's 10; 4 let a cloned voice's pace and
+ *  loudness wander from sentence to sentence. */
+const VOX_STEPS = 6;
 /** The longest first piece of a reply, in characters, before it's broken between words. Kokoro (on the CPU) only
  *  sends a piece once it's all made, so its first piece is shorter; VoxCPM2 streams, so a longer one costs less. */
 const FIRST_MAX = { vox: 72, kokoro: 44 };
