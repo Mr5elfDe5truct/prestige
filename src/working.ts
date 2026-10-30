@@ -158,7 +158,7 @@ export function initWorking(before: Element) {
   const wrap = document.createElement("div");
   wrap.className = "wk-wrap";
   wrap.innerHTML = `
-    <button type="button" class="working" id="working" hidden aria-live="polite">
+    <button type="button" class="wk-readout" id="working" hidden aria-live="polite">
       <span class="wk-orb" aria-hidden="true"><span class="wk-ring"></span><svg class="mark" viewBox="0 0 600 600"><use href="#rg-mark" /></svg></span>
       <span class="wk-who" hidden></span>
       <span class="wk-tool" hidden></span>
@@ -168,7 +168,7 @@ export function initWorking(before: Element) {
     </button>
     <div class="wk-pop" hidden></div>`;
   before.parentElement!.insertBefore(wrap, before);
-  el = $(".working", wrap);
+  el = $(".wk-readout", wrap);
   const pop = $(".wk-pop", wrap);
   el.addEventListener("click", (e) => {
     e.stopPropagation();

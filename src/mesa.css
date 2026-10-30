@@ -15,7 +15,7 @@ body[data-style="molded"] {
 /* One molded piece, not a stack: the surface bends up into a soft fillet (the crease at its foot, the lit slope behind,
    the shade in front), rolls over a rounded shoulder (light on the top edge, shade under the bottom one) onto a matte
    top. Everything is drawn with the element's own background and shadows, so nothing scrolls away inside a scroller. */
-body[data-style="molded"] :is(.hud, .composer-dock, .dock, .history, .card, .create, .rq, .update-banner, .offline, .live-bar, .cu-card, .cam-pop, .emote-pick, .ctx-menu, .canvas, .phone-box, .canvas-card, .cu-next, .tool-confirm, dialog.sheet, .model-menu, .tools-pop, .wk-pop, .working),
+body[data-style="molded"] :is(.hud, .composer-dock, .dock, .history, .card, .create, .rq, .update-banner, .offline, .live-bar, .cu-card, .cam-pop, .emote-pick, .ctx-menu, .canvas, .phone-box, .canvas-card, .cu-next, .tool-confirm, dialog.sheet, .model-menu, .tools-pop, .wk-pop, .wk-readout),
 body[data-style="molded"] :is(.mrow, .cat-card, .sb-shot, .ms-row, .thumb, .kb-model, .history-item, .model-menu button, .ch-list button, .ch-fact, .chat-render.song, .chat-render.model .model-card, .look-swatch, .ref-add, .swap-box, .ms-tpl),
 body[data-style="molded"] :is(.btn, .icon-btn, .model-btn, .suggests button, .filters button, .gen-tabs button, .cat-filters button, .canvas-tabs button, .modes button, .seg button, .opt.pick, .live-ctl, .sources button, .chat-files .cf),
 body[data-style="molded"] .msg.you,
