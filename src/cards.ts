@@ -37,6 +37,7 @@ export const io = new IntersectionObserver(
       const a = items.find((x) => x.path === fig.dataset.path);
       if (!a) continue;
       invoke<string>("thumbnail", { path: a.path, mtime: a.mtime })
+        .catch((e) => (a.kind === "model" ? drawModelThumb(a) : Promise.reject(e)))
         .then((t) => {
           const img = document.createElement("img");
           img.alt = "";
@@ -49,6 +50,38 @@ export const io = new IntersectionObserver(
   },
   { rootMargin: "300px" },
 );
+
+// A 3D model's tile: Rust can't draw a .glb or a splat, so the first time one scrolls into view it's loaded in the same
+// viewer as the Canvas, off screen and one at a time, and a picture of it is kept with the other cached thumbnails.
+let drawing: Promise<unknown> = Promise.resolve();
+
+function drawModelThumb(a: Asset): Promise<string> {
+  const next = drawing.then(async () => {
+    const host = document.createElement("div");
+    host.style.cssText = "position:fixed;left:-10000px;top:0;width:360px;height:360px;pointer-events:none";
+    document.body.appendChild(host);
+    try {
+      const { mountViewer } = await import("./model3d");
+      const v = await mountViewer(host, convertFileSrc(a.path), /\.ply$/i.test(a.path));
+      try {
+        // A splat is sorted for the view (in a worker) before it draws: wait for the first frame that shows something.
+        let jpeg: string | null = null;
+        for (let i = 0; i < 40 && !jpeg; i++) {
+          await new Promise((r) => setTimeout(r, i ? 300 : 600));
+          jpeg = v.snapshot(360);
+        }
+        if (!jpeg) throw new Error("the model didn't draw");
+        return await invoke<string>("thumbnail_save", { path: a.path, mtime: a.mtime, jpeg });
+      } finally {
+        v.dispose();
+      }
+    } finally {
+      host.remove();
+    }
+  });
+  drawing = next.catch(() => {});
+  return next;
+}
 
 export function render() {
   const g = $("#gallery");
@@ -116,7 +149,8 @@ export function card(a: Asset) {
   const model = a.kind === "model";
   fig.className = "thumb" + (song ? " song" : model ? " model" : " pending") + (fresh.has(a.name) ? " fresh" : "") + (selected.has(a.path) ? " sel" : "");
   fig.dataset.path = a.path;
-  // A song has no picture: a note and the first lines of its lyrics instead. A 3D model gets a cube, and a click opens
+  // A song has no picture: a note and the first lines of its lyrics instead. A 3D model shows a cube until a picture of
+  // it is drawn (drawModelThumb), and a click opens
   // it in the 3D viewer.
   const pic = song
     ? `<span class="song-art" aria-hidden="true">${NOTE_SVG}</span><span class="song-lines"></span>`
@@ -172,6 +206,6 @@ export function card(a: Asset) {
   if (a.kind === "image") dragRender(fig, a.path);
   // A video can be dragged into the Swap panel (or onto the create bar, which opens it).
   if (a.kind === "video") dragVideo(fig, a.path);
-  if (!song && !model) io.observe(fig);
+  if (!song) io.observe(fig);
   return fig;
 }

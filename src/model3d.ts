@@ -16,7 +16,11 @@ export interface ModelStats {
 
 /** Shows the model in `el` (`splat`: a Gaussian splat .ply); resolves with its stats and a function that stops and
  *  frees the viewer. */
-export async function mountViewer(el: HTMLElement, url: string, splat = false): Promise<{ stats: ModelStats; dispose: () => void }> {
+export async function mountViewer(
+  el: HTMLElement,
+  url: string,
+  splat = false,
+): Promise<{ stats: ModelStats; dispose: () => void; snapshot: (size?: number) => string | null }> {
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -44,7 +48,15 @@ export async function mountViewer(el: HTMLElement, url: string, splat = false): 
     const mesh = new SplatMesh({ url });
     // 3D Gaussian splat files are y-down; turned over so the object stands upright.
     mesh.quaternion.set(1, 0, 0, 0);
-    await mesh.initialized;
+    try {
+      await untilLoaded(mesh.initialized);
+    } catch (e) {
+      mesh.dispose();
+      pmrem.dispose();
+      renderer.dispose();
+      renderer.domElement.remove();
+      throw e;
+    }
     scene.add(mesh);
     model = mesh;
     mesh.updateMatrixWorld(true);
@@ -109,6 +121,24 @@ export async function mountViewer(el: HTMLElement, url: string, splat = false): 
   loop();
 
   return {
+    /** A JPEG data URL of the model as it is now, `size` pixels square (for its gallery tile); null while nothing shows. */
+    snapshot: (size = 360) => {
+      const w = el.clientWidth || size;
+      const h = el.clientHeight || size;
+      renderer.render(scene, camera); // the drawing buffer is only readable in the same task as a render
+      const c = document.createElement("canvas");
+      c.width = c.height = size;
+      const s = Math.min(w, h) * (renderer.domElement.width / w);
+      const sx = (renderer.domElement.width - s) / 2;
+      const sy = (renderer.domElement.height - s) / 2;
+      const g = c.getContext("2d", { willReadFrequently: true })!;
+      g.drawImage(renderer.domElement, sx, sy, s, s, 0, 0, size, size);
+      // Nothing drawn yet (a splat appears once it has been sorted for the view): null, so the caller tries again.
+      const px = g.getImageData(0, 0, size, size).data;
+      let drawn = 0;
+      for (let i = 0; i < px.length; i += 4 * 7) if (Math.abs(px[i] - 13) + Math.abs(px[i + 1] - 9) + Math.abs(px[i + 2] - 9) > 24) drawn++;
+      return drawn > 20 ? c.toDataURL("image/jpeg", 0.86) : null;
+    },
     stats: { triangles: Math.round(triangles), textures: textures.size, gaussians, size: [size.x, size.y, size.z] },
     dispose: () => {
       cancelAnimationFrame(raf);
@@ -127,4 +157,27 @@ export async function mountViewer(el: HTMLElement, url: string, splat = false): 
       renderer.domElement.remove();
     },
   };
+}
+
+/** Spark decodes the splat in a Web Worker with WebAssembly. If either is refused (the page's Content Security Policy) or
+ *  the worker dies, `initialized` never settles; this turns that into an error instead of "Loading…" forever. */
+function untilLoaded<T>(p: Promise<T>, ms = 180_000): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const blocked = (e: SecurityPolicyViolationEvent) => {
+      if (/worker|script/.test(e.effectiveDirective)) finish(() => reject(new Error(`the splat decoder was blocked (${e.effectiveDirective})`)));
+    };
+    const failed = (e: ErrorEvent) => {
+      if (/WebAssembly|Worker/i.test(e.message)) finish(() => reject(new Error(e.message)));
+    };
+    const timer = setTimeout(() => finish(() => reject(new Error("the splat took too long to load"))), ms);
+    const finish = (f: () => void) => {
+      clearTimeout(timer);
+      document.removeEventListener("securitypolicyviolation", blocked);
+      window.removeEventListener("error", failed);
+      f();
+    };
+    document.addEventListener("securitypolicyviolation", blocked);
+    window.addEventListener("error", failed);
+    p.then((v) => finish(() => resolve(v)), (e) => finish(() => reject(e)));
+  });
 }
