@@ -10,1182 +10,33 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { errMsg, http } from "./backends";
-import { cardsText, comfyCards, heldOn, othersText, readHolders, shortName, vramGB } from "./gpus";
-import {
-  ASPECTS,
-  LTX_FPS,
-  LTX_RES,
-  LTX_SECONDS,
-  QUALITY_NAMES,
-  SIZES,
-  SONG_BPMS,
-  SONG_KEYS,
-  SONG_LANGUAGES,
-  SONG_METERS,
-  SONG_SECONDS,
-  SVI_FPS,
-  SVI_FRAMES,
-  SVI_SHOTS,
-  SVI_SIZES,
-  WAN_RES,
-  WAN_SECONDS,
-  aboutTime,
-  imageDims,
-  lastSeed,
-  ltxFrames,
-  onSettingsChange,
-  parseRes,
-  reset,
-  settings,
-  sviSeconds,
-  takeSeed,
-  update,
-  wanAuto,
-  wanFrames,
-  type MusicSettings,
-  type Quality,
-  type SettingsKey,
-  type VideoSettings,
-} from "./gensettings";
-import { CONSENT, bindRefChoices, dragRender, dragVideo, hasFiles, hasRender, hasVideoRender, imageIn, loadReference, mossRefPrompt, onRefPrefsChange, refChoicesHtml, refKeep, refPrefs, refPrompt, referenceFromBase64, renderIn, sceneOf, setRefPrefs, uploadReference, videoIn, videoRenderIn, type RefKind, type Reference } from "./reference";
-import { characterById, characters, faceBlob, onCharactersChange } from "./characters";
-import { initInpaint, openInpaint, type SelectQuery } from "./inpaint";
-import { initLaser, openLaser } from "./laser";
+import { comfyCards } from "./gpus";
+import { SONG_LANGUAGES, SONG_METERS, aboutTime, onSettingsChange, parseRes, settings, takeSeed, type MusicSettings, type VideoSettings } from "./gensettings";
+import { mossRefPrompt, refKeep, refPrefs, refPrompt, uploadReference, type RefKind, type Reference } from "./reference";
+import { initInpaint } from "./inpaint";
+import { initLaser } from "./laser";
+import { loadJobs, saveJobs } from "./queuestore";
 import { editLayoutPrompt, layoutBoxes, layoutMask, layoutPrompt, layoutRefBox, boxWhat, onLayoutChange, openLayout, useLayout } from "./layout";
-import { attachZoom, type Zoom } from "./zoom";
-import { checkOcr, ocrReady, readText } from "./ocr";
-import { checkTranslate, openTranslate, translateReady } from "./translate";
+import { checkOcr } from "./ocr";
+import { checkTranslate } from "./translate";
 import { initTrain, openTrain, trainedLoras, type TrainedLora } from "./train";
-import { STOCK, applyWanModels, diffusionModels } from "./uncensored";
+import { applyWanModels, diffusionModels } from "./uncensored";
 import type { WorldState } from "./world";
-import { INSTRUMENTAL_PARTS, STEMS, askSongEdit, editSecs, stemSecs, type EditTask, type SongEdit, type SongMusic, type SongSource } from "./songedit";
+import { type SongEdit } from "./songedit";
+import { initSwapPanel, renderSwap, toggleSwap, setSwapVideo, sw, swapChip, swapOpen, swapShown } from "./swap";
+import { openRender } from "./renderapi";
+import { deleteRender } from "./fileactions";
+import { editSong, songEditGraph, uploadMask } from "./renderactions";
+import { clearSelection, closeLightbox, initLightboxZoom, initSelectionBar, lbAsset, loadStarred, pick, stepLightbox, toggleStar } from "./gallery";
+import { refresh, render } from "./cards";
+import { settingsForm } from "./settingsform";
+import { initRefSlot, renderRefSlot } from "./refslot";
+import { ACE_MODELS, ACE_PACK, apply, type Asset, CUT_STEPS, type Family, FOLEY_WINDOW, type GenMode, isVideo, KROMOSS, LIGHTNING, lightningOn, MANGA_MP, MANGA_PROMPT, type Mode, MODEL3D_STEPS, MODES, MP, type Override, plan, type Plan, QWEN_GGUF, QWEN_INT8, RESHOOT_LORAS, RESTORE, type RestoreKind, restorePrompt, settingsKey, shotPrompts, SONG_STEPS, songLength, type Source, stepsOf, SVI, SWAP, takenGB, TALK, TALK_STEPS, talkLabels, talkPlan, TURBO_SIGMAS, TURBO_UNET, UPSCALE_STEPS, type UpscaleSize, WORLD, ZIMAGE } from "./modes";
 
-const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
-const $$ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => Array.from(r.querySelectorAll(s)) as T[];
+export const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
+export const $$ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => Array.from(r.querySelectorAll(s)) as T[];
 
-const COMFY = "http://127.0.0.1:8188";
-
-interface Asset {
-  path: string;
-  name: string;
-  kind: "image" | "video" | "audio" | "model"; // model: a .glb from Picture to 3D
-  mtime: number;
-  size: number;
-  prompt?: string | null; // for a song, its style
-  model?: string | null;
-  width?: number | null;
-  height?: number | null;
-  seed?: number | null;
-  lyrics?: string | null; // a song's
-  duration?: number | null; // a song's length in seconds
-  music?: SongMusic | null; // a song's tempo, key, meter and language
-}
-
-type GenMode =
-  | "image"
-  | "fast"
-  | "edit"
-  | "inpaint"
-  | "video"
-  | "animate"
-  | "long"
-  | "ref"
-  | "reffast"
-  | "refvideo"
-  | "shotvideo"
-  | "song"
-  | "songedit"
-  | "model3d"
-  | "talk"
-  | "select"
-  | "cutout"
-  | "vidcut"
-  | "upimage"
-  | "upvideo"
-  | "angle"
-  | "outfit"
-  | "restore"
-  | "manga"
-  | "redraw4"
-  | "redraw8"
-  | "moss"
-  | "person"
-  | "foley"
-  | "swap"
-  | "world";
-
-// How a workflow takes the generation settings: an image model with a latent size and batch, an edit
-// (size follows the picture), LTX with a 2× upscale pass ("ltx") or without ("ltx1"), Wan's two samplers,
-// Wan 2.2 SVI's chained shots ("svi"), an ACE-Step song ("song"), Pixal3D turning a picture into a textured 3D model ("model3d"),
-// InfiniteTalk making a picture speak a voice recording ("talk"), SAM 3.1 selecting something in a picture ("select", not
-// queued), a picture cut out onto transparent ("cutout"), or SAM 3.1 tracking a subject through a video ("vidcut").
-// SeedVR2 sharpening a picture or a video to 1080p or 4K ("upscale"). LTX-2.3 making the sound for a silent video ("foley").
-// MatAnyone2 matting a person out of a video ("person"). Hy-Nomas exploring a world a segment at a time ("world").
-// SCAIL-2 swapping a person in a video for the character in a picture ("swap").
-type Family = "image" | "edit" | "ltx" | "ltx1" | "wan" | "svi" | "song" | "songedit" | "model3d" | "talk" | "select" | "cutout" | "vidcut" | "upscale" | "foley" | "person" | "world" | "swap";
-
-interface Mode {
-  file: string;
-  label: string;
-  family: Family;
-  promptNode: string;
-  promptKey?: string; // the prompt input's name, "text" unless set
-  seed: [string, string]; // node id, input name (for images also the sampler, which takes the steps)
-  latent?: string; // the empty latent's node (width, height, batch_size)
-  steps?: Partial<Record<Quality, number>>; // sampler steps per quality
-  secs: number; // render time at the default settings on the reference RTX 3060 12 GB
-  note?: string;
-  imageNode?: string; // LoadImage node for image-to-video, edits and reference images
-  imageKey?: string; // that node's file input, "image" unless set ("file" for a LoadVideo)
-  imageClass?: string; // when set, that node is found by its class_type instead of imageNode's id
-  fallback?: Mode; // used when this workflow file isn't there
-  fast?: number; // with the Lightning LoRA (4 steps): seconds a megapixel, on top of LIGHTNING_LOAD_SECS
-}
-
-/* InfiniteTalk on an RTX 3060 12 GB at 448×640, 4 steps (ComfyUI's log and nvidia-smi): 55 s a step, so each 81-frame
- * part takes ~255 s, plus ~15 s for the rest once the models are in RAM. 3.2 s of speech (one part) took 264 s, 8 s
- * (three parts) 774 s; VRAM peaked at 10.1 GB either way, as ComfyUI streams the rest of Wan 2.1 14B from RAM.
- * That's ~1.5 minutes of rendering per second of speech, so a talking video is capped at 30 s (~47 min). */
-const TALK_PART_SECS = 255;
-const TALK_LOAD_SECS = 15;
-/** The longest speech a talking video takes, in seconds. */
-export const TALK_MAX_SECONDS = 30;
-
-/* SAM 3.1 tracking a subject through a video, measured on an RTX 3060 12 GB: 8 s at 448×640 (199 frames) in 123 s,
- * peak 4.0 GB. On the RTX 2060 6 GB it took 117 s at 3.0 GB, so a second card can run it (see segment). */
-const VIDCUT_SECS = 15;
-
-/* SeedVR2 on an RTX 3060 12 GB (nvidia-smi every 2 s): a 1024² picture to 1080p in 9 s, to 4K (2160²) in 15 s with
- * the 3B model at 6.3 GB, or with the 7B at 10.6 GB (and a 832×1216 portrait to 2160×3156 in 18 s at 10.5 GB); the 7B is
- * more faithful (SSIM 0.92 against the original, 0.86 for the 3B) at the same speed.
- * Videos to 1080p with the 3B: sampling is quick (~3 s per 21 frames); SeedVR2's VAE is what takes the time, ~5 s a
- * frame at 1620×1080. 2 s of 768×512 took 378 s with the template's 512 px tiles, 267 s with 1024 px tiles and 128-frame
- * temporal tiles (7.1 GB), 240 s untiled (7.8 GB, but that grows with the length). SeedVR2's own automatic chunking
- * picked 1 frame per chunk at 1080p, so chunks are set to 21 frames, which keeps the frames consistent. */
-const UPSCALE_IMAGE_SECS = 20;
-const UPSCALE_VIDEO_SECS = 130;
-/* Add sound (Foley) on an RTX 3060 12 GB: LTX-2.3 dev Q4_K_M with the Foley LoRA, 30 steps at audio CFG 6 (Lightricks'
- * settings), 832×480: one 89-frame window (3.7 s) took 1,112 s including ~2 min of loading, ~33 s a step with 4 GB of
- * the model streamed from RAM. On the distilled model (8 steps) it was 4× quicker but made music-like sound, not
- * effects, so the pack brings dev. */
-const FOLEY_WINDOW_SECS = 1000;
-const FOLEY_LOAD_SECS = 120;
-/** LTX-2.3's frames a window (1 + 8k) and the longest video Add sound takes (seconds at 24 fps). */
-const FOLEY_WINDOW = 89;
-const FOLEY_MAX_SECONDS = 15;
-
-/* Swap a character: Z.ai's SCAIL-2 (Wan 2.1 14B, Comfy-Org's int8 convrot, with its DPO LoRA and lightx2v's 480p
- * step-distill LoRA at CFG 1) in Replacement mode, through ComfyUI's native nodes. SAM 3.1 tracks who's replaced
- * (the biggest one named), BiRefNet cuts the character out of the picture (padded to the video's shape first). It
- * makes 81 frames at a time; each segment after the first carries on from the last 5 frames of the one before (a
- * 76-frame step), its colours matched to it.
- * On an RTX 3060 12 GB a 5 s 768×512 clip (121 frames: a full segment and a 45-frame one) took 546 s at 4 steps, peaking
- * at 10.9 GB of VRAM and 24.5 GB of system RAM: ~52 s a step for a full segment, plus ~95 s a segment for SAM 3.1
- * (~35 s), decoding and getting the model back (ComfyUI reads all 16.7 GB again for each: 42 s from an SSD, 2 min 16 s
- * from a hard drive, so the pack puts it in a folder of its own that can be a junction). A shorter segment's steps
- * take less than its share of frames (attention grows faster than the frames). 6 steps with the model on a hard drive
- * took 1,003 s. That was on a card of its own; through Prestige, with the Windows desktop on ComfyUI's card, the same
- * 4-step swap took 701 s (10.5 GB peak), so secs below are scaled to that (and are for the SSD). */
-const SWAP = { part: 81, step: 76, overlap: 5, area: 832 * 480, loadSecs: 130, partSecs: 125, stepSecs: 69, maxSeconds: 20 };
-type SwapQuality = "draft" | "standard";
-const SWAP_STEPS: Record<SwapQuality, number> = { draft: 4, standard: 8 };
-
-/** What an upscale's shorter side becomes. */
-export type UpscaleSize = 1080 | 2160;
-
-// The nodes in the stack's exported API workflows (workflows\*.api.json) that the settings go into.
-const QWEN_STEPS = { draft: 12, standard: 20, high: 30, max: 40 };
-const ZIMAGE: Mode = {
-  file: "z-image-turbo.api.json",
-  label: "Z-Image-Turbo",
-  family: "image",
-  promptNode: "4",
-  seed: ["7", "seed"],
-  latent: "6",
-  steps: { draft: 6, standard: 8, high: 12, max: 16 },
-  secs: 40,
-};
-/* Explore a world: Tencent's Hy-Nomas (Apache-2.0 DiT, int8) through PedroMarinhoDev's ComfyUI-Hy-Nomas nodes (GPL-3.0),
- * in segments the chat model writes (world.ts). Its PixelUMM decoder is NVIDIA's, under the One-Way Noncommercial
- * License (research and evaluation only), which the pack and chat say. On the RTX 3060 at 832×480 a 5 s segment
- * sampled in 25-42 s (8 steps). The decoder runs at window overlap 1: Tencent's 5 took a 4-segment, 20 s world from
- * 428 s to 1,735 s, with no difference to see (FP8 runs no faster than dequantized on Ampere). A 3-segment world took
- * 305 s, one from a picture with a segment after it 137 s, peaking at 11.5 GB. secs is one segment with its share of
- * the decode. */
-const WORLD = { w: 832, h: 480, steps: 8, secs: 110 };
-/** Redraw upscale (Qwen-Image-2.1 with the Restore LoRA, a tile at a time); secs and fast are per megapixel made. */
-const REDRAW_MODE: Mode = {
-  file: "qwen-image-21-edit.api.json",
-  label: "Qwen-Image-2.1 Redraw",
-  family: "edit",
-  promptNode: "4",
-  promptKey: "prompt",
-  seed: ["6", "seed"],
-  steps: { draft: 16, standard: 25, high: 30, max: 40 },
-  secs: 71,
-  fast: 25,
-  note: "redraw upscale",
-  imageNode: "9",
-};
-const MODES: Record<GenMode, Mode> = {
-  image: {
-    file: "qwen-image-21.api.json",
-    label: "Qwen-Image-2.1",
-    family: "image",
-    promptNode: "4",
-    promptKey: "prompt",
-    seed: ["6", "seed"],
-    latent: "5",
-    steps: QWEN_STEPS,
-    secs: 90,
-    note: "best with text and signs",
-    fallback: ZIMAGE,
-  },
-  fast: {
-    file: "qwen-image-21-turbo.api.json",
-    label: "Qwen-Image-2.1 Turbo",
-    family: "image",
-    promptNode: "4",
-    promptKey: "prompt",
-    seed: ["6", "seed"],
-    latent: "5",
-    steps: { draft: 3, standard: 4, high: 6, max: 8 }, // the GGUF's; the int8 Turbo always runs its 8-step schedule
-    secs: 13,
-    fallback: ZIMAGE,
-  },
-  edit: {
-    file: "qwen-image-21-edit.api.json",
-    label: "Qwen-Image-2.1 Edit",
-    family: "edit",
-    promptNode: "4",
-    promptKey: "prompt",
-    seed: ["6", "seed"],
-    steps: QWEN_STEPS,
-    secs: 90,
-    fast: 15,
-    note: "keeps the image's size",
-    imageNode: "9",
-  },
-  // Paint to change: the edit graph with a mask, so only the painted area is regenerated (see inpaintGraph).
-  inpaint: {
-    file: "qwen-image-21-edit.api.json",
-    label: "Qwen-Image-2.1 Inpaint",
-    family: "edit",
-    promptNode: "4",
-    promptKey: "prompt",
-    seed: ["6", "seed"],
-    steps: QWEN_STEPS,
-    secs: 95,
-    fast: 16,
-    note: "only the painted area changes",
-    imageNode: "9",
-  },
-  video: {
-    file: "ltx25-t2v-distilled.api.json",
-    label: "LTX-2.5",
-    family: "ltx",
-    promptNode: "5",
-    seed: ["16", "noise_seed"],
-    secs: 360,
-    fallback: {
-      file: "ltx23-t2v-distilled.api.json",
-      label: "LTX-2.3",
-      family: "ltx1",
-      promptNode: "5",
-      seed: ["16", "noise_seed"],
-      secs: 360,
-    },
-  },
-  // MOSS-Image (OpenMOSS, Apache-2.0): a second text-to-image model, int8 with lodestones' 8-step DMD LoRA at CFG 1,
-  // its Qwen3.5-9B text encoder (w4a8) and FLUX.2's small VAE (workflows\moss-image-turbo.api.json). Best with
-  // lettering and with a layout (layout.ts); Kromoss can stand in for it (mossGraph). Text to image only: references
-  // and edits stay on Qwen-Image-2.1. On an RTX 3060 a 1024² picture took 14 s (21 s with loading), peaking at 8.1 GB.
-  moss: {
-    file: "moss-image-turbo.api.json",
-    label: "MOSS-Image",
-    family: "image",
-    promptNode: "4",
-    seed: ["6", "seed"],
-    latent: "5",
-    steps: { draft: 4, standard: 8 },
-    secs: 15,
-    note: "text and layouts",
-  },
-  // A reference image placed in a new scene: the text-to-image graph with the picture fed to the text encoder.
-  ref: {
-    file: "qwen-image-21-reference.api.json",
-    label: "Qwen-Image-2.1",
-    family: "image",
-    promptNode: "4",
-    promptKey: "prompt",
-    seed: ["6", "seed"],
-    latent: "5",
-    steps: QWEN_STEPS,
-    secs: 130,
-    note: "with your reference",
-    imageNode: "9",
-  },
-  reffast: {
-    file: "qwen-image-21-turbo-reference.api.json",
-    label: "Qwen-Image-2.1 Turbo",
-    family: "image",
-    promptNode: "4",
-    promptKey: "prompt",
-    seed: ["6", "seed"],
-    latent: "5",
-    steps: { draft: 3, standard: 4, high: 6, max: 8 },
-    secs: 40, // the turbo model; with Lightning on Qwen-Image-2.1 (fastRef) a 1216×832 scene took 29 s, peaking at 7.3 GB
-    note: "with your reference",
-    imageNode: "9",
-  },
-  // LTX image-to-video: the picture is the first frame of a clip with sound.
-  refvideo: {
-    file: "ltx25-i2v-distilled.api.json",
-    label: "LTX-2.5",
-    family: "ltx",
-    promptNode: "5",
-    seed: ["16", "noise_seed"],
-    secs: 360,
-    imageNode: "50",
-    fallback: {
-      file: "ltx23-i2v-distilled.api.json",
-      label: "LTX-2.3",
-      family: "ltx1",
-      promptNode: "5",
-      seed: ["16", "noise_seed"],
-      secs: 360,
-      imageNode: "50",
-    },
-  },
-  // Director's storyboard shot from its drawn frame: always LTX, for the sound and the shot's own length.
-  shotvideo: {
-    file: "ltx25-i2v-distilled.api.json",
-    label: "LTX-2.5",
-    family: "ltx",
-    promptNode: "5",
-    seed: ["16", "noise_seed"],
-    secs: 360,
-    imageNode: "50",
-    fallback: {
-      file: "ltx23-i2v-distilled.api.json",
-      label: "LTX-2.3",
-      family: "ltx1",
-      promptNode: "5",
-      seed: ["16", "noise_seed"],
-      secs: 360,
-      imageNode: "50",
-    },
-  },
-  animate: {
-    file: "wan22-i2v-4step.api.json",
-    label: "Wan 2.2",
-    family: "wan",
-    promptNode: "6",
-    seed: ["11", "noise_seed"],
-    steps: { standard: 4, high: 6, max: 8 },
-    secs: 600,
-    imageNode: "9",
-  },
-  // Wan 2.2 with the Stable Video Infinity LoRAs: each shot continues the last, then FILM doubles the frame rate.
-  long: {
-    file: "wan22-svi-long.api.json",
-    label: "Wan 2.2 SVI",
-    family: "svi",
-    promptNode: "7",
-    seed: ["28", "noise_seed"],
-    steps: { standard: 4, high: 6, max: 8 },
-    secs: 410,
-    imageNode: "6",
-  },
-  // ACE-Step 1.5 turbo: the style goes in as tags, and the lyrics and the music settings beside them (node 4).
-  song: {
-    file: "ace-step-15-song.api.json",
-    label: "ACE-Step 1.5",
-    family: "song",
-    promptNode: "4",
-    promptKey: "tags",
-    seed: ["7", "seed"],
-    latent: "6",
-    secs: 10,
-  },
-  // The song editor (songedit.ts): ACE-Step 1.5 turbo redoes a part of a song, extends it or covers it, through the
-  // Workstation's workstation_music node. The song goes into LoadAudio (node 20); the job, its times and the music
-  // settings are set per edit (songEditGraph). secs is a 60 s song's (editSecs has the rest).
-  songedit: {
-    file: "ace-step-15-edit.api.json",
-    label: "ACE-Step 1.5",
-    family: "songedit",
-    promptNode: "4",
-    promptKey: "tags",
-    seed: ["7", "seed"],
-    secs: 23,
-    note: "song edit",
-    imageNode: "20",
-    imageKey: "audio",
-  },
-  // Picture to 3D: Pixal3D (int8) through ComfyUI's native nodes, the picture's background removed by BiRefNet and its
-  // field of view from MoGe; a textured .glb comes out (workflows\pixal3d-image-to-3d.api.json).
-  model3d: {
-    file: "pixal3d-image-to-3d.api.json",
-    label: "Pixal3D",
-    family: "model3d",
-    promptNode: "",
-    seed: ["3", "seed"],
-    secs: 300,
-    note: "textured 3D model",
-    imageNode: "122",
-  },
-  // Talking characters: InfiniteTalk (MeiGen, on Wan 2.1 I2V 14B 480p in GGUF Q4_K_M with the lightx2v step-distill
-  // LoRA) lip-syncs a picture to a voice recording, through ComfyUI's native nodes (workflows\infinitetalk-talking.api.json).
-  // It makes 81 frames (3.24 s at 25 fps) at a time; longer speech chains more parts, each carrying on from the last 9
-  // frames of the one before (talkGraph). secs is one part.
-  talk: {
-    file: "infinitetalk-talking.api.json",
-    label: "InfiniteTalk",
-    family: "talk",
-    promptNode: "10",
-    seed: ["15", "noise_seed"],
-    secs: TALK_PART_SECS,
-    note: "talking video",
-    imageNode: "7",
-  },
-  // Click to select: SAM 3.1 (Meta, through ComfyUI's native nodes) outlines what's under a click, or things by name,
-  // in ~3 s. Run straight away rather than queued (segment), and returned as a mask (workflows\sam3-select.api.json).
-  select: {
-    file: "sam3-select.api.json",
-    label: "SAM 3.1",
-    family: "select",
-    promptNode: "",
-    seed: ["", ""],
-    secs: 3,
-    imageNode: "2",
-  },
-  // A transparent cut-out: BiRefNet finds the subject ("Remove background"), or the selection's mask is used
-  // (workflows\cutout.api.json).
-  cutout: {
-    file: "cutout.api.json",
-    label: "Cut-out",
-    family: "cutout",
-    promptNode: "",
-    seed: ["", ""],
-    secs: 5,
-    imageNode: "1",
-  },
-  // A video's subject, tracked by SAM 3.1 in every frame, on a green screen with the sound kept
-  // (workflows\sam3-video-cutout.api.json). secs is per second of video.
-  vidcut: {
-    file: "sam3-video-cutout.api.json",
-    label: "SAM 3.1",
-    family: "vidcut",
-    promptNode: "4",
-    seed: ["", ""],
-    secs: VIDCUT_SECS,
-    imageNode: "2",
-    imageKey: "file",
-  },
-  // Cut out a person: MatAnyone2 (spiritform's ComfyUI nodes) follows the person picked on the first frame (a SAM 3.1
-  // selection) through the video as an alpha matte; the frames come back as RGBA PNGs in a .frames folder, plus the
-  // matte as a video, and person_video (studio.rs) makes them into what was asked for with ffmpeg
-  // (workflows\matanyone2-person.api.json). On an RTX 3060 an 8 s 448×640 clip (199 frames) took 24–28 s, peaking at
-  // 2.5 GB. secs is per second of video, loading included.
-  person: {
-    file: "matanyone2-person.api.json",
-    label: "MatAnyone2",
-    family: "person",
-    promptNode: "",
-    seed: ["", ""],
-    secs: 4,
-    imageNode: "2",
-    imageKey: "file",
-  },
-  // Upscale and enhance: SeedVR2 (ByteDance, one-step diffusion restoration, ComfyUI's native nodes, 0.38's faster
-  // version) redraws a picture at 1080p or 4K with real detail, in tiles so it fits 12 GB
-  // (workflows\seedvr2-upscale-image.api.json). Pictures use the 7B model; secs is for 4K.
-  upimage: {
-    file: "seedvr2-upscale-image.api.json",
-    label: "SeedVR2",
-    family: "upscale",
-    promptNode: "",
-    seed: ["9", "seed"],
-    secs: UPSCALE_IMAGE_SECS,
-    imageNode: "1",
-  },
-  // A video to 1080p with the 3B model, a few frames at a time so they stay consistent
-  // (workflows\seedvr2-upscale-video.api.json). secs is per second of video.
-  upvideo: {
-    file: "seedvr2-upscale-video.api.json",
-    label: "SeedVR2",
-    family: "upscale",
-    promptNode: "",
-    seed: ["10", "seed"],
-    secs: UPSCALE_VIDEO_SECS,
-    imageNode: "1",
-    imageKey: "file",
-  },
-  // New camera angle: the edit graph with the Multiple-Angles LoRA v2 (reshootGraph), asked for a view by its labels.
-  angle: {
-    file: "qwen-image-21-edit.api.json",
-    label: "Qwen-Image-2.1 Angles",
-    family: "edit",
-    promptNode: "4",
-    promptKey: "prompt",
-    seed: ["6", "seed"],
-    steps: QWEN_STEPS,
-    secs: 135, // an 832×1216 portrait took 128–152 s on the RTX 3060, loading included
-    note: "new camera angle",
-    imageNode: "9",
-  },
-  // Try on outfit: the edit graph with the Outfit Swap LoRA, the person as image 1 and the outfit as image 2. Its
-  // author measured it at 25 steps, CFG 1, euler / simple.
-  outfit: {
-    file: "qwen-image-21-edit.api.json",
-    label: "Qwen-Image-2.1 Outfit",
-    family: "edit",
-    promptNode: "4",
-    promptKey: "prompt",
-    seed: ["6", "seed"],
-    steps: { draft: 16, standard: 25, high: 30, max: 40 },
-    secs: 180, // 178 s for an 832×1216 portrait on the RTX 3060 (two pictures encoded, 25 steps)
-    note: "try on outfit",
-    imageNode: "9",
-  },
-  // Restore photo: the edit graph with ausboss's Restore LoRA (restoreGraph). The picture is redrawn at about 2 MP,
-  // which its author trained and measured at; 25 steps without Lightning, as in its card. On the RTX 3060 a 448×252
-  // JPEG took 278 s at 25 steps and 92 s with Lightning (4 steps), loading included, peaking at 8.3 and 9.6 GB.
-  restore: {
-    file: "qwen-image-21-edit.api.json",
-    label: "Qwen-Image-2.1 Restore",
-    family: "edit",
-    promptNode: "4",
-    promptKey: "prompt",
-    seed: ["6", "seed"],
-    steps: { draft: 16, standard: 25, high: 30, max: 40 },
-    secs: 139,
-    fast: 36,
-    note: "restore photo",
-    imageNode: "9",
-  },
-  // Redraw at 4 or 8 MP: the edit graph with the Restore LoRA, run on the tiles AusBoss's Tiled Upscale cuts the
-  // picture into (redrawGraph). secs and fast are per megapixel of the result. On the RTX 3060 a 1 MP picture took
-  // 286 s to 4 MP and 567 s to 8 MP at 25 steps, and 60 s and 228 s Fast (Lightning), peaking at 11.5 GB.
-  redraw4: REDRAW_MODE,
-  redraw8: REDRAW_MODE,
-  // Make it manga: the edit graph redraws the picture as an inked black-and-white panel at about 2 MP, then
-  // ashukae's Manga Finish prints it with a real screentone and Manga Panel frames it (mangaGraph). On the RTX 3060 a
-  // 1024² picture took 204 s to sample at 20 steps and 44 s with Lightning, peaking at 9.1 and 10.3 GB.
-  manga: {
-    file: "qwen-image-21-edit.api.json",
-    label: "Qwen-Image-2.1 Manga",
-    family: "edit",
-    promptNode: "4",
-    promptKey: "prompt",
-    seed: ["6", "seed"],
-    steps: QWEN_STEPS,
-    secs: 115,
-    fast: 30,
-    note: "manga panel",
-    imageNode: "9",
-  },
-  // Add sound: LTX-2.3 dev with Lightricks' Foley LoRA hears the video (frozen, its own frames) and makes its sound
-  // effects, 89 frames (3.7 s) at a time (foleyGraph); Prestige then puts the sound on the original video (mux_foley).
-  // secs is one window.
-  world: {
-    file: "hy-nomas-world.api.json",
-    label: "Hy-Nomas",
-    family: "world",
-    promptNode: "",
-    seed: ["6", "seed"],
-    secs: WORLD.secs,
-  },
-  foley: {
-    file: "ltx23-foley-v2a.api.json",
-    label: "LTX-2.3 Foley",
-    family: "foley",
-    promptNode: "5",
-    seed: ["w0n", "noise_seed"],
-    secs: FOLEY_WINDOW_SECS,
-    imageNode: "10",
-    imageKey: "video",
-  },
-  // Swap a character: SCAIL-2 puts the character from a picture in place of a person in a video, moving as they did,
-  // in 81-frame segments (swapGraph); Prestige then puts the video's own sound back on (mux_swap). The video goes into
-  // LoadVideo, the picture into LoadImage (swapGraph finds both by class). secs is one segment at Draft.
-  swap: {
-    file: "scail2-swap.api.json",
-    label: "SCAIL-2",
-    family: "swap",
-    promptNode: "",
-    seed: ["", ""],
-    secs: SWAP.partSecs + SWAP.stepSecs * SWAP_STEPS.draft,
-    imageNode: "9",
-    imageClass: "LoadVideo",
-    imageKey: "file",
-  },
-};
-
-/* The LoRAs for New camera angle and Try on outfit (the reshoot pack), in ComfyUI's loras folder. Multiple-Angles v2 is
- * the step-1,500 checkpoint its card recommends, at 0.9 (its range is 0.8–1.0: lower holds the subject, higher turns
- * the camera further); Outfit Swap is step 1,000 at 1.0 (at 0.5 half of the drift it removes comes back). */
-const RESHOOT_LORAS: Partial<Record<GenMode, { file: string; strength: number }>> = {
-  angle: { file: "qwen-image-2.1-multiple-angles-v2.safetensors", strength: 0.9 },
-  outfit: { file: "qwen-image-2.1-outfit-swap.safetensors", strength: 1 },
-};
-
-/* lightx2v's Lightning LoRA for Qwen-Image-2.1 (DMD, 4 steps, CFG 1, text to image and edits, one picture or several).
- * On the RTX 3060 a 1024×576 edit with the uncensored Q4_K_M took 19 s for 4 steps against 93 s for 20 (4.7 s a step),
- * peaking at 9.4 GB the first time (the LoRA patched in) and 7.3–8 GB after; its result held the subject as 20 steps did,
- * a little less saturated. It stacks with a taught face or style and with the Restore LoRA, but not with the Reshoot
- * ones: with it the Multiple-Angles LoRA hardly turned the camera (even at 1.0 and 6 steps), and Outfit Swap moved and
- * enlarged the person, which is what that LoRA is there to stop. Those two keep their own steps. */
-const LIGHTNING = { file: "qwen-image-2.1-lightning-4step.safetensors", steps: 4 };
-const LIGHTNING_LOAD_SECS = 20;
-/** The modes the Speed setting (Fast or Quality) applies to. Reference's own Turbo pick runs Lightning too. */
-const LIGHTNING_MODES: GenMode[] = ["edit", "inpaint", "restore", "manga", "redraw4", "redraw8"];
-const lightningOn = (gm: GenMode) => (LIGHTNING_MODES.includes(gm) && settings().image.edits !== "quality") || gm === "reffast";
-/** The turbo model Reference's Turbo pick falls back to when the Lightning LoRA isn't installed. */
-const TURBO_UNET = "qwen-image\\qwen_image_2.1_turbo_int8_convrot.safetensors";
-
-/* Qwen-Image-2.1 runs as Comfy-Org's int8 convrot files (the base model and Qwen's own 8-step Turbo), in
- * models\comfy\diffusion_models\qwen-image. On the RTX 3060 a 20-step 1024² edit took 40 s against 102 s with the
- * Q4_K_M GGUF (peak 10.9 GB against 6.6), and a Turbo picture 12 s against 21 s. abenzerps' uncensored LoRA goes on
- * top of both: it is what their uncensored builds have merged in (their UC int8 file gave the same edit as the
- * official int8 with the LoRA). The Turbo samples Qwen's saved 8-step schedule: at the Viggle turbo's 4 simple steps
- * it came out dark with a garbled sign. Without the int8 files the GGUFs still run (qwenModels). */
-const QWEN_INT8 = {
-  base: "qwen-image\\qwen_image_2.1_int8_convrot.safetensors",
-  turbo: TURBO_UNET,
-  uncensored: "qwen-image\\qwen-image-2.1-uncensored-lora.safetensors",
-};
-const QWEN_GGUF: Record<string, string> = {
-  [QWEN_INT8.base]: "qwen-image-2.1-UC-Q4_K_M.gguf",
-  [QWEN_INT8.turbo]: "qwen_image_2.1_turbo_Q4_K_M.gguf",
-};
-const TURBO_SIGMAS = "1.0, 0.978453, 0.95418, 0.926626, 0.89508, 0.845148, 0.704534, 0.414568, 0.0";
-
-/* Restore photo: ausboss's Restore LoRA (step 1,500, rank 32) at 1.0, or 0.5 for a blurry photo (at 1.0 it stays true to
- * the blur), with the requests it was trained on. */
-export type RestoreKind = "photo" | "blurry" | "old";
-const RESTORE = { file: "qwen-image-2.1-restore.safetensors", mp: 2 };
-const RESTORE_PROMPTS: Record<RestoreKind, string> = {
-  photo: "Restore the photo: remove blur, noise and compression artifacts and recover sharp, natural detail, keeping the same composition, people and colors.",
-  blurry: "Restore the photo: remove blur, noise and compression artifacts and recover sharp, natural detail, keeping the same composition, people and colors.",
-  old: "Restore the old photo: remove scratches, dust, fading and grain and recover sharp, natural detail and color, keeping the same composition and people.",
-};
-export const restorePrompt = (k: RestoreKind) => RESTORE_PROMPTS[k];
-
-/* Kromoss (lodestones' full fine-tune of MOSS-Image-Base) in place of the SFT model, with its own DMD2 8-step LoRA.
- * Next to the SFT one it drew people more naturally but misspelt a sign ("RCG TUDIOS" for "RG STUDIOS"), so MOSS-Image
- * stays the default. Both are in models\comfy\<folder>\moss. */
-const KROMOSS = { unet: "moss\\kromoss_int8_convrot.safetensors", lora: "moss\\kromoss-8-steps-dmd2-lora.safetensors" };
-
-/* Make it manga: the edit request from ashukae's QWEN-Manga workflow (Qwen-Image-2.1 decides what is paper, tone and
- * ink by meaning, not brightness), then Manga Finish with that workflow's settings and Manga Panel with no crop. */
-const MANGA_PROMPT =
-  "Redraw <image1> as a printed black-and-white manga page panel, as if inked by the original artist for serialization. Keep the exact composition, pose, character design, face, expression and drawing style of <image1>. Use confident ink lines with varied line weight, solid black for dark hair and deep shadows, white paper for skin and light surfaces, ink hatching lines for shadows on cloth, and regular screentone only where a mid tone is needed. No color and no smooth gradients. Do not add anything that is not in <image1>.";
-const MANGA_MP = 2;
-
-/** The Multiple-Angles LoRA's 12 azimuths (30° apart, clockwise from the front) and 4 elevations, by the labels it was
- *  trained on, with what the menu shows. */
-export const ANGLES = [
-  ["front view", "Front"],
-  ["front-right view", "Front, a little right"],
-  ["front-right quarter view", "Three-quarter right"],
-  ["right side view", "Right side"],
-  ["back-right quarter view", "Back three-quarter right"],
-  ["back-right view", "Back, a little right"],
-  ["back view", "Back"],
-  ["back-left view", "Back, a little left"],
-  ["back-left quarter view", "Back three-quarter left"],
-  ["left side view", "Left side"],
-  ["front-left quarter view", "Three-quarter left"],
-  ["front-left view", "Front, a little left"],
-] as const;
-export const ELEVATIONS = [
-  ["eye-level shot", "Eye level"],
-  ["elevated shot", "A little above (30°)"],
-  ["high-angle shot", "High angle (60°)"],
-  ["top-down shot", "Straight down (90°)"],
-] as const;
-/** The Multiple-Angles prompt: "<mva> {azimuth}, {elevation}[ close-up]". */
-export const anglePrompt = (az: number, el: number, close: boolean) => `<mva> ${ANGLES[az][0]}, ${ELEVATIONS[el][0]}${close ? " close-up" : ""}`;
-
-/** The Outfit Swap prompt its author tested, with the sentence that takes the old outfit off (or keeps shoes on). */
-export const outfitPrompt = (what: string, keepShoes: boolean) =>
-  `Dress the person in image 1 in the ${what.trim().replace(/[.\s]+$/, "") || "outfit"} shown in image 2. Keep their face, hair, hands, pose and the background exactly the same. ${keepShoes ? "Keep their own shoes and legwear." : "Replace everything they wear."}`;
-
-/* ACE-Step 1.5 turbo on an RTX 3060 12 GB (ComfyUI's log and nvidia-smi): its 1.7B language model writes the audio codes
- * (~60 tokens/s), then 8 diffusion steps and a tiled VAE decode. Each song loads the models fresh (~5.2 GB peak at any
- * length): 30 s of music took 18 s, 60 s 26 s, 120 s 44 s, 180 s 62 s, 240 s 53 s. On a 6 GB RTX 2060 the language
- * model ran at 1.7 s a token (a 60 s song took 9 min), so songs stay on ComfyUI's main card. 8 minutes took 172 s
- * and peaked at 5.8 GB. */
-const SONG_FIXED_SECS = 10;
-const SONG_SECS_PER_SECOND = 0.3;
-const songPeakGB = (seconds: number) => (seconds > 240 ? 5.8 : 5.3);
-/* ACE-Step 1.5 XL turbo (4B, the music-xl pack), Settings' High quality: on the RTX 3060 a 60 s song took 128 s with
- * the 10 GB model loading, 4 min took 188 s, and VRAM peaked at 11.1 GB (ComfyUI streams what doesn't fit). */
-const XL_FIXED_SECS = 105;
-const XL_SECS_PER_SECOND = 0.35;
-const XL_PEAK_GB = 11.1;
-/** The ACE-Step models: Standard (turbo), High (XL turbo), and the base model that takes stems out. */
-const ACE_MODELS = {
-  standard: "acestep_v1.5_turbo.safetensors",
-  high: "acestep_v1.5_xl_turbo_bf16.safetensors",
-  stems: "acestep_v1.5_base.safetensors",
-};
-const ACE_PACK: Record<string, string> = { [ACE_MODELS.high]: "music-xl", [ACE_MODELS.stems]: "music" };
-/** What a song's progress line says for each step. */
-const SONG_STEPS: Record<string, string> = {
-  "TextEncodeAceStepAudio1.5": "Composing the melody and vocals",
-  TextEncodeAceStep15Task: "Reading the style and lyrics",
-  VAEEncodeAudio: "Reading the song",
-  AceStep15SongEdit: "Lining up the edit",
-  KSampler: "Rendering the audio",
-  VAEDecodeAudioTiled: "Decoding the audio",
-  SaveAudioMP3: "Saving the MP3",
-};
-
-// Pixal3D's samplers, in order (structure, shape, upsampled shape, texture): each gets its own seed.
-const MODEL3D_SAMPLERS = ["3", "18", "23", "12"];
-/** What a 3D render's progress line says for each of its steps. */
-const MODEL3D_STEPS: Record<string, string> = {
-  RemoveBackground: "Cutting out the subject",
-  Pixal3DConditioning: "Reading the picture",
-  ImageCropToMask: "Framing the subject",
-  Trellis2ShapeStage: "Shaping the model",
-  Trellis2UpsampleStage: "Refining the shape",
-  Trellis2TextureStage: "Painting the texture",
-  MeshSmoothNormals: "Smoothing the surface",
-  MoGeInference: "Estimating the camera",
-  KSampler: "Shaping the model",
-  VaeDecodeStructureTrellis2: "Decoding the structure",
-  VaeDecodeShapeTrellis: "Decoding the shape",
-  VaeDecodeTextureTrellis: "Decoding the texture",
-  RemeshMesh: "Remeshing",
-  DecimateMesh: "Simplifying the mesh",
-  UnwrapMesh: "Unwrapping the UVs",
-  BakeTextureFromVoxel: "Baking the texture",
-  BakeNormalMapFromMesh: "Baking the normal map",
-  BakeAmbientOcclusion: "Baking ambient occlusion",
-  ApplyTextureToMesh: "Texturing the mesh",
-  Save3DAdvanced: "Saving the .glb",
-};
-
-// InfiniteTalk's nodes (workflows\infinitetalk-talking.api.json): the voice recording and its encoding, the first
-// part's talk node, scheduler, sampler and decode, and the frames the video is made from. Each part is 81 frames at
-// 25 fps and carries on from the last 9 frames before it.
-const TALK = { audio: "8", encode: "9", talk: "12", scheduler: "14", sampler: "17", decode: "18", frames: "20", fps: 25, part: 81, motion: 9 };
-/** What an upscale's progress line says. */
-const UPSCALE_STEPS: Record<string, string> = {
-  ResizeImageMaskNode: "Resizing",
-  VAEEncodeTiled: "Encoding in tiles",
-  SeedVR2TemporalChunk: "Splitting the video into chunks",
-  KSampler: "Restoring detail",
-  SeedVR2TemporalMerge: "Joining the chunks",
-  VAEDecodeTiled: "Decoding in tiles",
-  SeedVR2PostProcessing: "Matching the colours",
-  CreateVideo: "Making the video",
-  SaveVideo: "Saving the video",
-  SaveImage: "Saving the picture",
-};
-/** What a cut-out's progress line says. */
-const CUT_STEPS: Record<string, string> = {
-  RemoveBackground: "Finding the subject",
-  SAM3_VideoTrack: "Tracking the subject in every frame",
-  SAM3_TrackToMask: "Cutting it out",
-  ImageCompositeMasked: "Putting it on a green screen",
-  CreateVideo: "Making the video",
-  SaveVideo: "Saving the video",
-  SaveImage: "Saving the PNG",
-};
-/** What a talking video's progress line says for its other steps. */
-const TALK_STEPS: Record<string, string> = {
-  LoadAudio: "Loading the voice",
-  AudioEncoderEncode: "Listening to the voice",
-  WanInfiniteTalkToVideo: "Matching the lips to the voice",
-  CreateVideo: "Adding the voice",
-  SaveVideo: "Saving the video",
-};
-
-/** A talking video's size: the picture's shape at the area of 448×640, in multiples of 16. On the 3060 a step took 54 s
- *  there and 81 s at 528×768 (480p's full area), and the faces looked as good. */
-const TALK_AREA = 448 * 640;
-function talkDims(srcW?: number | null, srcH?: number | null): [number, number] {
-  const r = srcW && srcH ? srcW / srcH : 1;
-  const r16 = (x: number) => Math.max(256, Math.round(x / 16) * 16);
-  return [r16(Math.sqrt(TALK_AREA * r)), r16(Math.sqrt(TALK_AREA / r))];
-}
-
-/** How many 81-frame parts cover this much speech: the first makes 81 frames, each after it 72 new ones. */
-export function talkParts(seconds: number) {
-  const frames = Math.ceil(seconds * TALK.fps);
-  return frames <= TALK.part ? 1 : 1 + Math.ceil((frames - TALK.part) / (TALK.part - TALK.motion));
-}
-
-/** A talking video's plan: the picture's shape, enough parts for the speech, and the measured time. */
-function talkPlan(src: Source | null, seconds: number): Plan {
-  const [w, h] = talkDims(src?.width, src?.height);
-  const parts = talkParts(seconds);
-  return { w, h, count: 1, seconds, frames: Math.ceil(seconds * TALK.fps), fps: TALK.fps, shots: parts, load: 0, secs: TALK_LOAD_SECS + TALK_PART_SECS * parts, warn: "" };
-}
-
-/** Chains InfiniteTalk parts until the frames cover the speech. A part carries on from the last 9 frames of the one
- *  before, and counts that part's frames to know where it is in its recording, so each gets the voice from where the
- *  previous part started (its first 72 frames' worth then lie behind it). Its own first 9 frames repeat the previous
- *  part's last 9, so they're dropped, and the parts are joined once at the end and cut to the speech's length. (Giving
- *  each part everything made so far instead kept every growing copy in RAM: ~20 GB for 23 s.) */
-function talkGraph(g: any, p: Plan, seed: number) {
-  set(g, TALK.talk, { width: p.w, height: p.h });
-  const step = TALK.part - TALK.motion;
-  const join: Record<string, [string, number]> = { "images.image0": [TALK.decode, 0] };
-  let prev: [string, number] = [TALK.decode, 0];
-  for (let k = 2; k <= p.shots!; k++) {
-    const id = (n: number) => `${k}0${n}`;
-    // ~6 s of voice from where the previous part started: the 72 frames behind this part, then its own 81.
-    g[id(1)] = { class_type: "TrimAudioDuration", inputs: { audio: [TALK.audio, 0], start_index: ((k - 2) * step) / TALK.fps, duration: (step + TALK.part) / TALK.fps + 1 } };
-    g[id(2)] = { class_type: "AudioEncoderEncode", inputs: { ...g[TALK.encode].inputs, audio: [id(1), 0] } };
-    g[id(3)] = { class_type: "WanInfiniteTalkToVideo", inputs: { ...g[TALK.talk].inputs, audio_encoder_output_1: [id(2), 0], previous_frames: prev } };
-    g[id(4)] = { class_type: "BasicScheduler", inputs: { ...g[TALK.scheduler].inputs, model: [id(3), 0] } };
-    g[id(5)] = { class_type: "RandomNoise", inputs: { noise_seed: seed + k - 1 } };
-    g[id(6)] = { class_type: "CFGGuider", inputs: { model: [id(3), 0], positive: [id(3), 1], negative: [id(3), 2], cfg: 1 } };
-    g[id(7)] = { class_type: "SamplerCustomAdvanced", inputs: { ...g[TALK.sampler].inputs, noise: [id(5), 0], guider: [id(6), 0], sigmas: [id(4), 0], latent_image: [id(3), 3] } };
-    g[id(8)] = { class_type: "VAEDecode", inputs: { ...g[TALK.decode].inputs, samples: [id(7), 0] } };
-    g[id(9)] = { class_type: "ImageFromBatch", inputs: { image: [id(8), 0], batch_index: TALK.motion, length: step } };
-    join[`images.image${k - 1}`] = [id(9), 0];
-    prev = [id(8), 0];
-  }
-  if (p.shots! > 1) {
-    g["19"] = { class_type: "BatchImagesNode", inputs: join };
-    set(g, TALK.frames, { image: ["19", 0] });
-  }
-  set(g, TALK.frames, { length: p.frames });
-}
-
-/** The progress line for each part: "Animating part 2 of 4", "Decoding part 2 of 4". */
-function talkLabels(nodes: Record<string, string>, parts: number) {
-  for (let k = 1; k <= parts; k++) {
-    const of = parts > 1 ? ` part ${k} of ${parts}` : "";
-    nodes[k === 1 ? TALK.sampler : `${k}07`] = `Animating${of || " the face"}`;
-    nodes[k === 1 ? TALK.decode : `${k}08`] = `Decoding${of || " the frames"}`;
-  }
-}
-
-// The SVI workflow's nodes: each shot's prompt and noise, the merge after each shot, and the settings.
-const SVI = {
-  high: "1",
-  low: "2",
-  fp16: ["24", "10"], // each model's fp16-accumulation patch (high, low)
-  frames: "13",
-  size: "14",
-  split: "20",
-  steps: "21",
-  shots: [
-    { prompt: "7", noise: "28", merged: ["33", 0] },
-    { prompt: "34", noise: "42", merged: ["48", 2] },
-    { prompt: "36", noise: "53", merged: ["59", 2] },
-    { prompt: "62", noise: "66", merged: ["72", 2] },
-  ],
-  finish: "73", // takes the joined frames on to FILM, the 2× upscale and the save
-};
-// Where the SVI render time was measured: 4 shots of 49 frames at 480 × 480.
-const SVI_BASE = 480 * 480 * 49 * 4;
-
-/** A long video's prompt: one per shot, separated by "|". A shorter list repeats its last prompt. */
-function shotPrompts(prompt: string, shots: number): string[] {
-  const parts = prompt.split("|").map((s) => s.trim()).filter(Boolean);
-  return Array.from({ length: shots }, (_, i) => parts[Math.min(i, parts.length - 1)] ?? prompt);
-}
-
-// ---------- generation settings → workflow inputs ----------
-interface Plan {
-  w: number; // output size; 0 when it follows the source picture (edits)
-  h: number;
-  steps?: number;
-  count: number;
-  seconds?: number;
-  frames?: number;
-  fps?: number;
-  shots?: number; // a long video's shots, each `frames` long
-  song?: MusicSettings; // a song's length, tempo, key, meter and language
-  draft?: boolean; // LTX without its upscale pass: half size, much quicker
-  load: number; // VRAM use relative to the defaults, which fit a 12 GB card (the limits scale with ComfyUI's card)
-  secs: number; // rough render time on the reference PC
-  warn: string; // "" when it should fit
-  cards?: string; // what each card holds, when ComfyUI has two (or for LTX-2.5, how much of the model fits)
-}
-
-const settingsKey = (gm: GenMode): SettingsKey =>
-  gm === "refvideo"
-    ? wanFromPicture()
-      ? "animate"
-      : "video"
-    : gm === "video" || gm === "shotvideo"
-      ? "video"
-      : gm === "animate"
-        ? "animate"
-        : gm === "long"
-          ? "long"
-          : gm === "song"
-            ? "music"
-            : "image";
-const isVideo = (gm: GenMode) => gm === "video" || gm === "animate" || gm === "long" || gm === "refvideo" || gm === "shotvideo";
-
-/** A picture a render starts from: a render in the gallery (edit, animate) or a reference image. */
-type Source = Asset | Reference;
-/** Changes to a plan for one step of a chain: the first frame for a video is one picture at the video's shape. */
-type Override = { w: number; h: number; count: 1 };
-
-/** "2:30", "45 s". */
-const songLength = (s: number) => (s < 60 ? `${s} s` : `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`);
-
-/** The quality levels a model offers, with their steps. */
-const levels = (m: Mode) => (Object.keys(QUALITY_NAMES) as Quality[]).filter((q) => m.steps?.[q] != null);
-const stepsOf = (m: Mode, q: Quality) => m.steps?.[q] ?? m.steps?.standard;
-
-const LTX_BASE = 768 * 512 * 97;
-const LTX_FRAME = 768 * 512;
-
-/* LTX-2.5 (two passes: half size, then upscaled 2× and refined), measured on an RTX 3060 12 GB with nvidia-smi and
- * ComfyUI's own log. ComfyUI fills the card and streams the rest of the 15.7 GB diffusion model from system RAM, so
- * every length runs; longer clips leave less of the model on the card and take longer:
- *   size      frames  left for the model (2nd pass)  peak     time
- *   768×512   121     8.2 GB                         11.9 GB  229 s
- *   768×512   145     8.0 GB                         11.9 GB  246 s
- *   768×512   241     7.0 GB                         12.0 GB  321 s
- *   1280×704  241     4.0 GB                         11.6 GB  595 s
- * That's ~10 MB per 768×512 frame on top of ~2.8 GB (the desktop, buffers and the 1 GB upscaler). With the upscaler on
- * a second card (an RTX 2060 on PCIe x4) the model got ~1.1 GB more (9.3 / 9.1 / 8.2 / 5.1 GB) in about the same time
- * (241 / 256 / 324 / 589 s). Even 4 GB left rendered at the usual pace, so the warnings start below that. */
-const LTX_MODEL_GB = 15.7;
-const LTX_FIXED_MIB = 2854;
-const LTX_FRAME_MIB = 10;
-const LTX_UPSCALER_MIB = 1120;
-const LTX_DRAFT_FIXED_MIB = 2526;
-
-/** GB of the LTX-2.5 diffusion model that stays on ComfyUI's main card for this render (the rest streams from RAM). */
-function ltxRoom(w: number, h: number, frames: number, draft: boolean): { room: number; mainGB: number } {
-  const { main, parts } = comfyCards();
-  const mainGB = main ? main.mem_total / 1024 - takenGB(main.index) : 12;
-  // w × h is the size the last pass renders at. A draft is the first pass alone (half size, no upscaler), which left
-  // 9.8 GB for the model at every length measured: ~2.5 GB fixed.
-  const fixed = draft ? LTX_DRAFT_FIXED_MIB : LTX_FIXED_MIB - (parts.includes("upscaler") ? LTX_UPSCALER_MIB : 0);
-  const room = mainGB - (fixed + LTX_FRAME_MIB * frames * ((w * h) / LTX_FRAME)) / 1024;
-  return { room, mainGB };
-}
-// The limits were measured with the Windows desktop on the card (~1 GB). Other programs beyond that (a browser, a game)
-// take VRAM ComfyUI can't free, measured per process (gpus.ts), so they come off the card's size.
-const DESKTOP_MIB = 1024;
-const othersGB = (index: number) => Math.max(0, heldOn(index).others - DESKTOP_MIB) / 1024;
-let rechecking = false;
-function takenGB(index: number): number {
-  const gb = othersGB(index);
-  // The counters are read in the background (cached 2 s); when a fresh reading moves the number, the warnings redraw.
-  if (!rechecking) {
-    rechecking = true;
-    readHolders().then(() => {
-      rechecking = false;
-      if (Math.abs(othersGB(index) - gb) >= 0.25) renderCreate();
-    });
-  }
-  return gb;
-}
-/** " Chrome 1.2 GB and … are using 2.0 GB of it." when other programs take a noticeable share of ComfyUI's card. */
-function takenText(index: number): string {
-  const gb = takenGB(index);
-  const who = othersText(index);
-  return gb >= 0.5 && who ? ` Other programs are using ${gb.toFixed(1)} GB of it (${who}); closing them gives ComfyUI more room.` : "";
-}
-const WAN_BASE = 832 * 480 * 81;
-const MP = 1024 * 1024;
-
-/** The SVI render size: the picture's shape with its longest side at `size`, in multiples of 32. */
-function sviDims(size: number, srcW?: number | null, srcH?: number | null): [number, number] {
-  const r = srcW && srcH ? srcW / srcH : 1;
-  const r32 = (x: number) => Math.max(32, Math.round(x / 32) * 32);
-  return r >= 1 ? [r32(size), r32(size / r)] : [r32(size * r), r32(size)];
-}
-
-/** What a render with the current settings will be: sizes, steps, frames, and a VRAM and time estimate. A song can
- *  take its own tempo, key and language (chat's songwriter picks them) over the saved ones. */
-function plan(gm: GenMode, src: Source | null = srcAsset, o?: Override, song?: Partial<MusicSettings>, video?: Partial<VideoSettings>): Plan {
-  const m = modeOf(gm);
-  let p: Omit<Plan, "warn">;
-  // Picture to 3D: one model per picture; its time and VRAM were measured (see MODES.model3d).
-  if (m.family === "model3d" || m.family === "select" || m.family === "cutout" || m.family === "upscale" || m.family === "songedit") return { w: 0, h: 0, count: 1, load: 0, secs: m.secs, warn: "" };
-  if (m.family === "vidcut" || m.family === "person") return { w: 0, h: 0, count: 1, load: 0, secs: m.secs * 8, warn: "" }; // per second of video (videoCutout, personCutout)
-  if (m.family === "foley") return { w: 0, h: 0, count: 1, load: 0, secs: m.secs * 2, warn: "" }; // per window (addSound)
-  if (m.family === "world") return { w: WORLD.w, h: WORLD.h, count: 1, load: 0, secs: m.secs, warn: "" }; // per segment (renderWorld)
-  if (m.family === "swap") return { w: 0, h: 0, count: 1, load: 0, secs: m.secs, warn: "" }; // per segment (swapSecs)
-  if (m.family === "song") {
-    // Measured (see SONG_FIXED_SECS): the same ~5.3 GB at every length, so only a small card gets a warning.
-    // A songwriter's pick that's missing (undefined) keeps the saved setting rather than blanking it.
-    const s = { ...settings().music, ...Object.fromEntries(Object.entries(song ?? {}).filter(([, v]) => v != null)) } as MusicSettings;
-    const { main } = comfyCards();
-    const mainGB = main ? main.mem_total / 1024 : vramGB("comfyui");
-    const where = main ? `the ${shortName(main)}'s ${Math.round(mainGB)} GB` : cardsText("comfyui");
-    const high = s.quality === "high";
-    const peak = high ? XL_PEAK_GB : songPeakGB(s.seconds);
-    const warn = mainGB < peak + 0.7 ? `ACE-Step${high ? " XL" : ""} peaks at about ${peak} GB, more than ${where} can hold: it will run partly from system RAM, slowly.` : "";
-    const secs = high ? XL_FIXED_SECS + XL_SECS_PER_SECOND * s.seconds : SONG_FIXED_SECS + SONG_SECS_PER_SECOND * s.seconds;
-    return { w: 0, h: 0, count: 1, seconds: s.seconds, song: s, load: 0, secs, warn };
-  }
-  if (m.family === "image" || m.family === "edit") {
-    const s = settings().image;
-    const fast = lightningOn(gm) && m.fast != null;
-    const steps = fast ? LIGHTNING.steps : stepsOf(m, s.quality)!;
-    const ratio = steps / m.steps!.standard!;
-    if (m.family === "edit") {
-      // Restore photo redraws the picture at about 2 MP, whatever its size.
-      const px = gm === "restore" ? RESTORE.mp : gm === "manga" ? MANGA_MP : REDRAW_MP[gm] ? redrawMp(gm, src) : src?.width && src.height ? (src.width * src.height) / MP : 1;
-      p = { w: 0, h: 0, steps, count: 1, load: REDRAW_MP[gm] ? REDRAW.tileMp : px, secs: fast ? LIGHTNING_LOAD_SECS + m.fast! * px : m.secs * px * ratio };
-    } else {
-      const [w, h] = o ? [o.w, o.h] : imageDims(s.aspect, s.size);
-      const count = o ? o.count : s.count;
-      const px = (w * h) / MP;
-      p = { w, h, steps, count, load: px * count, secs: m.secs * px * count * ratio };
-    }
-    if (mossEdits(gm)) {
-      const ms = fast || gm === "reffast" ? MOSS_EDIT.fast : MOSS_EDIT.quality;
-      p = { ...p, steps: ms.steps, secs: ms.secs * Math.max(1, p.load) };
-    }
-  } else if (m.family === "wan") {
-    const s = settings().animate;
-    const [w, h] = s.res === "auto" ? wanAuto(src?.width, src?.height) : parseRes(s.res);
-    const frames = wanFrames(s.seconds);
-    const steps = stepsOf(m, s.quality)!;
-    const load = (w * h * frames) / WAN_BASE;
-    p = { w, h, steps, count: 1, seconds: s.seconds, frames, fps: 16, load, secs: m.secs * load * (steps / 4) };
-  } else if (m.family === "svi") {
-    // The picture keeps its shape, scaled so its longest side is the size (multiples of 32), and the result is upscaled 2×.
-    const s = settings().long;
-    const [w, h] = sviDims(s.size, src?.width, src?.height);
-    const steps = stepsOf(m, s.quality)!;
-    const work = w * h * s.frames;
-    p = {
-      w: w * 2,
-      h: h * 2,
-      steps,
-      count: 1,
-      seconds: sviSeconds(s.frames, s.shots),
-      frames: s.frames,
-      fps: SVI_FPS * 2,
-      shots: s.shots,
-      load: work / WAN_BASE, // one shot is in VRAM at a time
-      secs: m.secs * ((work * s.shots) / SVI_BASE) * (steps / 4),
-    };
-  } else {
-    const s = { ...settings().video, ...video };
-    const [w, h] = parseRes(s.res);
-    const frames = ltxFrames(s.seconds, s.fps);
-    const draft = m.family === "ltx" && s.quality === "draft";
-    const work = (w * h * frames) / LTX_BASE;
-    // LTX-2.5's time: ~135 s of loading and the first pass, then ~0.77 s per 768×512 frame (measured; see above).
-    const secs = m.family === "ltx" ? (135 + 0.77 * frames * ((w * h) / LTX_FRAME)) * (draft ? 0.3 : 1) : m.secs * work * (draft ? 0.3 : 1);
-    p = { w: draft ? w / 2 : w, h: draft ? h / 2 : h, count: 1, seconds: s.seconds, frames, fps: s.fps, draft, load: draft ? work / 4 : work, secs };
-  }
-  const { main, aux, parts } = comfyCards();
-  const auxText = aux ? `${parts.map((x) => ({ upscaler: "the LTX upscaler", vae: "the VAEs", text_encoder: "the text encoders" })[x] ?? x).join(", ")} on the ${shortName(aux)}` : "";
-  if (m.family === "ltx") {
-    // Measured, per card: what's left on the main card for the model decides speed, and only a nearly full card fails.
-    const { room, mainGB } = ltxRoom(p.w, p.h, p.frames!, !!p.draft);
-    const where = main ? `the ${shortName(main)}` : "the GPU";
-    const kept = Math.max(0, Math.min(LTX_MODEL_GB, room));
-    const cards = `${kept.toFixed(1)} of the model's ${LTX_MODEL_GB} GB on ${where}, the rest streamed from RAM` + (auxText ? ` · ${auxText}` : "");
-    const warn =
-      (room < 1.5
-        ? `Likely more than ${where} can take: it may fail with out of memory. Try a smaller size or a shorter length.`
-        : room < 3
-          ? `Heavy for ${where}: only ${room.toFixed(1)} GB is left for the model, so most of it streams from system RAM and the render is slower.`
-          : "") + (room < 3 && main ? takenText(main.index) : "");
-    return { ...p, warn, cards };
-  }
-  // Videos hold every frame in VRAM at once, so they reach the limit sooner than images. The limits were set on a
-  // 12 GB card; they scale with ComfyUI's main card (a second card only takes the parts that can move).
-  const mainGB = main ? main.mem_total / 1024 - takenGB(main.index) : vramGB("comfyui");
-  const scale = mainGB / 12;
-  const [soft, hard] = (m.family === "image" || m.family === "edit" ? [2.2, 3.5] : [1.35, 2.2]).map((x) => x * scale);
-  const card = main ? `the ${shortName(main)}'s ${Math.round(main.mem_total / 1024)} GB` : cardsText("comfyui");
-  const warn =
-    (p.load > hard
-      ? `Likely more than ${card} of VRAM: it may fail with out of memory. Try a smaller size, a shorter length or fewer images.`
-      : p.load > soft
-        ? `Heavy for ${card}: ComfyUI may spill into system RAM and render much slower.`
-        : "") + (p.load > soft && main ? takenText(main.index) : "");
-  // The LTX upscaler is the only part other models don't use; the VAEs and text encoders follow them anywhere.
-  const moved = parts.filter((x) => x !== "upscaler");
-  const cards = aux && moved.length ? `the diffusion model on the ${shortName(main!)}, ${moved.map((x) => (x === "vae" ? "the VAE" : "the text encoder")).join(" and ")} on the ${shortName(aux)}` : undefined;
-  return { ...p, warn, cards };
-}
-
-/** Sets a node's inputs if the workflow has that node. */
-function set(g: any, id: string, inputs: Record<string, unknown>) {
-  if (g[id]) Object.assign(g[id].inputs, inputs);
-}
-
-/** Writes the plan and seed into a copy of the workflow. */
-function apply(m: Mode, g: any, p: Plan, seed: number) {
-  set(g, m.seed[0], { [m.seed[1]]: seed });
-  switch (m.family) {
-    case "image":
-      set(g, m.latent!, { width: p.w, height: p.h, batch_size: p.count });
-      set(g, m.seed[0], { steps: p.steps });
-      break;
-    case "edit":
-      set(g, m.seed[0], { steps: p.steps });
-      break;
-    case "ltx":
-    case "ltx1": {
-      // LTX-2.5 makes the clip at half size, then upscales it 2× and refines (nodes 40–46).
-      const half = m.family === "ltx" ? 2 : 1;
-      const [w, h] = p.draft ? [p.w * 2, p.h * 2] : [p.w, p.h];
-      set(g, "14", { width: w / half, height: h / half, length: p.frames });
-      set(g, "13", { frames_number: p.frames, frame_rate: p.fps });
-      set(g, "23", { frame_rate: p.fps });
-      set(g, "36", { fps: p.fps });
-      set(g, "43", { noise_seed: seed + 1 });
-      if (p.draft) {
-        // Decode the first pass directly and drop the upscale.
-        set(g, "35", { samples: ["19", 1] });
-        set(g, "37", { samples: ["19", 0] });
-        for (const id of ["40", "41", "42", "43", "44", "45", "46", "53"]) delete g[id];
-      }
-      break;
-    }
-    case "wan": {
-      // Two samplers split the steps: high-noise model first, low-noise model second.
-      const n = p.steps!;
-      set(g, "10", { width: p.w, height: p.h, length: p.frames });
-      set(g, "11", { steps: n, end_at_step: n / 2 });
-      set(g, "12", { steps: n, start_at_step: n / 2, end_at_step: n, noise_seed: seed });
-      break;
-    }
-    case "model3d":
-      MODEL3D_SAMPLERS.forEach((id, i) => set(g, id, { seed: seed + i }));
-      break;
-    case "talk":
-      talkGraph(g, p, seed);
-      break;
-    case "svi": {
-      const s = settings().long;
-      set(g, SVI.size, { value: s.size });
-      set(g, SVI.frames, { value: p.frames });
-      set(g, SVI.steps, { value: p.steps });
-      set(g, SVI.split, { value: p.steps! / 2 });
-      SVI.shots.forEach((shot, i) => set(g, shot.noise, { noise_seed: seed + i }));
-      // Fewer shots: the finishing nodes take the frames joined so far, and ComfyUI skips the rest.
-      set(g, SVI.finish, { anything: SVI.shots[p.shots! - 1].merged });
-      // The models picked in Settings go in when the render is sent (submit → applyWanModels).
-      break;
-    }
-    case "song": {
-      // The text encoder's own seed drives the language model that writes the audio codes; the sampler's the rest.
-      const s = p.song!;
-      set(g, m.promptNode, { seed, duration: s.seconds, bpm: s.bpm, keyscale: s.key, timesignature: s.meter, language: s.language });
-      set(g, m.latent!, { seconds: s.seconds });
-      if (s.quality === "high") set(g, "1", { unet_name: ACE_MODELS.high });
-      break;
-    }
-  }
-}
+export const COMFY = "http://127.0.0.1:8188";
 // The Image mode's model: Qwen-Image-2.1, or its 4-step turbo when "fast" is picked (remembered).
 let imageMode: ImageMode = (() => {
   try {
@@ -1234,38 +85,62 @@ interface Deps {
   };
 }
 
-let deps: Deps;
-let items: Asset[] = [];
-let filter: "all" | "image" | "video" | "audio" | "starred" = "all";
-let query = ""; // the gallery's search box: words that must all be in the prompt, file name, model or lyrics
+export let deps: Deps;
+export let items: Asset[] = [];
+export let filter: "all" | "image" | "video" | "audio" | "starred" = "all";
+export let query = ""; // the gallery's search box: words that must all be in the prompt, file name, model or lyrics
 // Starred renders (by path), kept in this PC's settings.
-const starred = new Set<string>(loadStarred());
-// Renders picked with Ctrl- or Shift-click, for the selection bar; a Shift-click range starts at the last one clicked.
-const selected = new Set<string>();
-let anchor: string | null = null;
-// The gallery builds this many cards at a time, and more as it scrolls (a big output folder stays quick).
-const PAGE = 120;
-let shown = 0;
-let mode: "image" | "video" | "music" | "storyboard" | "film" | "webcam" = "image";
+export const starred = new Set<string>(loadStarred());
+// Renders picked with Ctrl- or Shift-click, for the selection bar (gallery.ts).
+export const selected = new Set<string>();
+export let mode: "image" | "video" | "music" | "storyboard" | "film" | "webcam" = "image";
 // The image being animated (Video mode) or edited (Image mode), picked from the lightbox.
-let srcAsset: Asset | null = null;
+export let srcAsset: Asset | null = null;
+/** Switches the create bar to a mode, with the picture it edits or animates (none by default). */
+export function setMode(m: typeof mode, src: Asset | null = null) {
+  mode = m;
+  srcAsset = src;
+}
+/** The gallery's list of renders, as read from ComfyUI's output folder (cards.ts). */
+export function setItems(list: Asset[]) {
+  items = list;
+}
+/** Takes a render out of the gallery's list. */
+export function dropItem(path: string) {
+  items = items.filter((x) => x.path !== path);
+}
 // The reference image (a character or item to put in a new scene), and how it's used. Kept across Image and Video.
-let ref: Reference | null = null;
+export let ref: Reference | null = null;
 // How it's used (Auto / Character / Item, and a video's first frame) is in reference.ts, shared with chat.
+/** Sets the reference image (refslot.ts): one replaces a picked edit or animate source. */
+export function putRef(r: Reference | null) {
+  ref = r;
+  if (r) srcAsset = null;
+}
 // Shown before the progress label during a two-step render ("Step 1 of 2 · first frame · ").
 let stepNote = "";
-const workflows: Partial<Record<GenMode, any>> = {};
+export const workflows: Partial<Record<GenMode, any>> = {};
 const active: Partial<Record<GenMode, Mode>> = {}; // the Mode (or fallback) each workflow was loaded from
-const clientId = `prestige-${Math.random().toString(36).slice(2, 10)}`;
-let job: { id: string; mode: GenMode; started: number; prompt: string; nodes: Record<string, string>; outputs: string[]; seed: number; count: number } | null = null;
-let starting = false; // freeing the GPU / uploading, before ComfyUI has the job
-let fresh = new Set<string>(); // names of the files the last render made
+// Kept across a page reload: the app's websocket to ComfyUI outlives the page and keeps the id it was opened with, and
+// ComfyUI only tells that id how a render is going (a new one heard nothing, so a render after a reload never finished).
+export const clientId = (() => {
+  try {
+    const id = localStorage.getItem("studio.clientId") || `prestige-${Math.random().toString(36).slice(2, 10)}`;
+    localStorage.setItem("studio.clientId", id);
+    return id;
+  } catch {
+    return `prestige-${Math.random().toString(36).slice(2, 10)}`;
+  }
+})();
+export let job: { id: string; mode: GenMode; started: number; prompt: string; nodes: Record<string, string>; outputs: string[]; seed: number; count: number } | null = null;
+export let starting = false; // freeing the GPU / uploading, before ComfyUI has the job
+export let fresh = new Set<string>(); // names of the files the last render made
 let workflowsLoaded: Promise<void> | null = null;
 let settingsOpen = false;
 // A render started from chat: it hears the progress and gets the finished files.
 let waiter: { progress: (pct: number, label: string) => void; resolve: (a: Asset[]) => void; reject: (e: Error) => void } | null = null;
 
-const age = (ms: number) => {
+export const age = (ms: number) => {
   const s = (Date.now() - ms) / 1000;
   if (s < 60) return "just now";
   if (s < 3600) return `${Math.round(s / 60)} min ago`;
@@ -1282,7 +157,7 @@ export function initStudio(d: Deps) {
   });
   deps = d;
   initLaser({ toast: d.toast, root: d.root, openRender });
-  lbZoom = attachZoom($("#lb-media"), { target: () => $("#lb-media img"), bar: $("#lb-zoom"), panButton: 0 });
+  initLightboxZoom();
   $$(".filters [data-f]").forEach((b) =>
     b.addEventListener("click", () => {
       filter = b.dataset.f as typeof filter;
@@ -1327,7 +202,7 @@ export function initStudio(d: Deps) {
     if (t.closest(".opt.teach")) openTrain(items.filter((a) => a.kind === "image" && selected.has(a.path)).map((a) => a.path));
     // The Swap chip shows or hides the Swap panel; one video selected in the gallery goes in it when it's empty.
     if (t.closest(".opt.swap")) {
-      swapOpen = !swapOpen;
+      toggleSwap();
       const vids = items.filter((a) => a.kind === "video" && selected.has(a.path));
       renderCreate();
       if (swapOpen && !sw.video && vids.length === 1) setSwapVideo(vids[0]);
@@ -1360,6 +235,7 @@ export function initStudio(d: Deps) {
     clearSelection();
   });
   listen<any>("comfy", (e) => onComfy(e.payload));
+  restoreQueue();
 }
 
 let holdersTimer: number | undefined;
@@ -1380,7 +256,7 @@ export async function showStudio(on: boolean) {
 
 let workflowsRoot: string | null | undefined; // the Workstation folder they were read from
 let workflowsDone = false;
-function ensureWorkflows() {
+export function ensureWorkflows() {
   // Once read, read them again if the Workstation folder changed or one was missing (it may be installed since).
   const root = deps.root();
   if (workflowsDone && (root !== workflowsRoot || Object.values(workflows).some((w) => !w))) workflowsLoaded = null;
@@ -1406,7 +282,7 @@ async function loadWorkflows() {
 
 /** A new picture's workflow: the model picked on the chip, or MOSS-Image when Background is Transparent. */
 const transparentOn = () => settings().image.transparent === "on" && !!workflows.moss;
-const pictureMode = (): GenMode => (transparentOn() ? "moss" : workflows[imageMode] ? imageMode : "fast");
+export const pictureMode = (): GenMode => (transparentOn() ? "moss" : workflows[imageMode] ? imageMode : "fast");
 
 /** The workflow the create bar runs now. */
 function currentMode(): GenMode {
@@ -1476,10 +352,10 @@ async function openLayoutFor(gm: GenMode) {
 }
 
 /** The workflow that animates a picture: the remembered pick, or whichever of the two is there. */
-const animatePick = (): GenMode => (animateMode === "long" ? (workflows.long ? "long" : "animate") : workflows.animate ? "animate" : workflows.long ? "long" : "animate");
+export const animatePick = (): GenMode => (animateMode === "long" ? (workflows.long ? "long" : "animate") : workflows.animate ? "animate" : workflows.long ? "long" : "animate");
 
 /** The reference-image workflow for the Image mode's model pick (Qwen-Image-2.1 or its turbo). */
-const refImageMode = (): GenMode => (imageMode === "fast" ? (workflows.reffast ? "reffast" : "ref") : workflows.ref ? "ref" : "reffast");
+export const refImageMode = (): GenMode => (imageMode === "fast" ? (workflows.reffast ? "reffast" : "ref") : workflows.ref ? "ref" : "reffast");
 
 /** Image mode's model: Qwen-Image-2.1, its turbo, or MOSS-Image (text to image only, so a reference or an edit uses
  *  Qwen-Image whatever is picked). */
@@ -1487,24 +363,24 @@ type ImageMode = "image" | "fast" | "moss";
 const IMAGE_MODES: ImageMode[] = ["image", "fast", "moss"];
 
 /** A video from a reference: Qwen-Image makes the first frame first, unless the reference itself is the first frame. */
-const chained = (gm: GenMode) => gm === "refvideo" && refPrefs().frame === "scene";
+export const chained = (gm: GenMode) => gm === "refvideo" && refPrefs().frame === "scene";
 
 /** The first frame's size for a video: the video's shape at about a megapixel (LTX scales it to the clip). */
-function frameSize(): Override {
+export function frameSize(): Override {
   const [w, h] = parseRes(settings().video.res);
   const k = Math.sqrt(MP / (w * h));
   const r16 = (x: number) => Math.round((x * k) / 16) * 16;
   return { w: r16(w), h: r16(h), count: 1 };
 }
 
-const modeOf = (gm: GenMode) => (gm === "refvideo" && wanFromPicture() ? (active.animate ?? MODES.animate) : (active[gm] ?? MODES[gm]));
+export const modeOf = (gm: GenMode) => (gm === "refvideo" && wanFromPicture() ? (active.animate ?? MODES.animate) : (active[gm] ?? MODES[gm]));
 
 /** A video from a picture runs on Wan 2.2 (uncensored models, no sound) unless Video's settings pick LTX-2.5 (sound). */
-const wanFromPicture = () => settings().video.fromPicture !== "ltx" && !!workflows.animate;
+export const wanFromPicture = () => settings().video.fromPicture !== "ltx" && !!workflows.animate;
 /** The workflow a mode runs (a video from a picture may run Animate's). */
-const workflowOf = (gm: GenMode) => (gm === "refvideo" && wanFromPicture() ? workflows.animate : workflows[gm]);
+export const workflowOf = (gm: GenMode) => (gm === "refvideo" && wanFromPicture() ? workflows.animate : workflows[gm]);
 
-function renderCreate() {
+export function renderCreate() {
   const webcam = mode === "webcam";
   const gm = currentMode();
   syncLayout(gm);
@@ -1604,11 +480,11 @@ function renderCreate() {
 }
 
 /** The create button's words: "Add to queue" while something renders. */
-const buttonText = (gm: GenMode) =>
+export const buttonText = (gm: GenMode) =>
   job || starting || current ? "Add to queue" : gm === "animate" || gm === "long" ? "Animate" : gm === "edit" ? "Edit" : gm === "song" ? "Make song" : "Generate";
 
 /** Whether the model chip can switch: Qwen-Image-2.1 and its turbo, or one Wan 2.2 clip and a long SVI video. */
-const canPick = (gm: GenMode) =>
+export const canPick = (gm: GenMode) =>
   !!(
     ((gm === "image" || gm === "fast" || gm === "moss") && IMAGE_MODES.filter((x) => workflows[x]).length > 1 && active.image !== ZIMAGE) ||
     ((gm === "ref" || gm === "reffast") && workflows.ref && workflows.reffast) ||
@@ -1616,7 +492,7 @@ const canPick = (gm: GenMode) =>
   );
 
 /** The model chip: switches the image model, or one clip and a long video (Studio and the phone). */
-function flipModel(video: boolean) {
+export function flipModel(video: boolean) {
   if (video) {
     animateMode = animateMode === "long" ? "animate" : "long";
     try {
@@ -1634,7 +510,7 @@ function flipModel(video: boolean) {
 }
 
 /** What the prompt box asks for in a mode. */
-function promptHint(gm: GenMode) {
+export function promptHint(gm: GenMode) {
   const chain = chained(gm);
   return gm === "song"
       ? "Describe the style… e.g. dreamy indie pop, soft female vocals, warm guitars, summer night"
@@ -1705,164 +581,10 @@ function initSongWriter() {
   });
 }
 
-// ---------- reference image slot ----------
-const studioShown = () => !$('[data-screen="studio"]').hidden;
-
-function initRefSlot() {
-  const file = $<HTMLInputElement>("#ref-file");
-  $("#ref-add").addEventListener("click", () => file.click());
-  $("#ref-change").addEventListener("click", () => file.click());
-  file.addEventListener("change", () => {
-    const f = file.files?.[0];
-    file.value = "";
-    if (f) setRef(f);
-  });
-  $("#ref-clear").addEventListener("click", () => setRef(null));
-  $("#ref-character").addEventListener("change", async (e) => {
-    const c = characterById((e.target as HTMLSelectElement).value);
-    if (!c?.face) return;
-    setRefPrefs({ kind: "character" });
-    await setRef(faceBlob(c));
-  });
-  onCharactersChange(() => renderCreate());
-  bindRefChoices($("#ref-picks"));
-  onRefPrefsChange(() => renderCreate());
-  // Drop a picture anywhere on the create bar (a file, or a render dragged from the gallery or chat), or paste one
-  // while Studio is open. A dragged render shows where it can go: the reference, or the picture to edit or animate.
-  const create = $("#create");
-  const choices = $("#drop-choices");
-  create.addEventListener("dragover", (e) => {
-    if (!(hasFiles(e) || hasRender(e) || hasVideoRender(e)) || mode === "webcam") return;
-    e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
-    create.classList.add("drop");
-    if (!hasRender(e) || swapShown()) return;
-    if (choices.hidden) showDropChoices();
-    const over = (e.target as HTMLElement).closest?.("[data-drop]");
-    $$("[data-drop]", choices).forEach((x) => x.classList.toggle("over", x === over));
-  });
-  create.addEventListener("dragleave", (e) => {
-    if (create.contains(e.relatedTarget as Node)) return;
-    create.classList.remove("drop");
-    choices.hidden = true;
-  });
-  create.addEventListener("drop", (e) => {
-    create.classList.remove("drop");
-    // The Swap panel takes what's dropped anywhere on it; a video dropped from the gallery opens it.
-    const vid = videoRenderIn(e.dataTransfer);
-    if (swapShown() || vid) {
-      e.preventDefault();
-      choices.hidden = true;
-      if (mode === "webcam") return;
-      if (!swapShown()) {
-        if (vid) findItem(vid).then(swapCharacter, (err) => deps.toast(errMsg(err), "warn"));
-        return;
-      }
-      swapTake(e.dataTransfer);
-      return;
-    }
-    const to = (e.target as HTMLElement).closest?.<HTMLElement>("[data-drop]:not([hidden])")?.dataset.drop ?? "ref";
-    choices.hidden = true;
-    const path = renderIn(e.dataTransfer);
-    if (path) {
-      e.preventDefault();
-      if (mode === "webcam") return;
-      if (to === "ref") refFromRender(path);
-      else findItem(path).then((a) => startFrom(a, to === "edit" ? "image" : "video"), (err) => deps.toast(errMsg(err), "warn"));
-      return;
-    }
-    const f = imageIn(e.dataTransfer);
-    if (!f || mode === "webcam") return;
-    e.preventDefault();
-    setRef(f);
-  });
-  document.addEventListener("paste", (e) => {
-    if (!studioShown() || mode === "webcam" || (e.target as HTMLElement)?.closest?.("dialog")) return;
-    if (swapShown()) {
-      if ((e.target as HTMLElement)?.closest?.("input, textarea")) return;
-      if (videoIn(e.clipboardData) || imageIn(e.clipboardData)) {
-        e.preventDefault();
-        swapTake(e.clipboardData);
-      }
-      return;
-    }
-    const f = imageIn(e.clipboardData);
-    if (!f) return;
-    e.preventDefault();
-    setRef(f);
-  });
-}
-
-/** Sets (or with null clears) the reference image. `made`: it's a render (see uncensored.ts). */
-async function setRef(src: Blob | null, made = false) {
-  try {
-    const r = src ? await loadReference(src, made) : null;
-    if (ref) URL.revokeObjectURL(ref.url);
-    ref = r;
-    if (r) srcAsset = null; // a reference replaces a picked edit or animate source
-  } catch (e) {
-    deps.toast(errMsg(e), "warn");
-  }
-  renderCreate();
-  if (ref) $("#gen-prompt").focus();
-}
-
-/** "Use as reference image" on a render: Studio's create bar takes it as the reference. */
-async function useAsReference(a: Asset) {
-  deps.show();
-  closeLightbox();
-  try {
-    await setRef(await (await fetch(convertFileSrc(a.path))).blob(), isRender(a.path));
-  } catch (e) {
-    deps.toast(`Couldn't read ${a.name}: ${errMsg(e)}`, "warn");
-  }
-}
-
-/** The drop targets over the create bar for a dragged render: only the ones with their workflows (none when it can
- *  only be the reference, so the whole bar takes it). */
-function showDropChoices() {
-  const has = { ref: !!(workflows.ref || workflows.reffast), edit: !!workflows.edit, animate: !!(workflows.animate || workflows.long) };
-  const choices = $("#drop-choices");
-  $$<HTMLElement>("[data-drop]", choices).forEach((x) => (x.hidden = !has[x.dataset.drop as keyof typeof has]));
-  choices.hidden = !has.edit && !has.animate;
-}
-
-/** A render dropped on the create bar becomes the reference (the full-size file, not its thumbnail). */
-async function refFromRender(path: string) {
-  if (!(workflows.ref || workflows.reffast)) {
-    deps.toast(`Reference images need workflows\\${MODES.ref.file} (update the Workstation).`, "warn");
-    return;
-  }
-  try {
-    await allowRenders();
-    await setRef(await (await fetch(convertFileSrc(path))).blob(), isRender(path));
-  } catch (e) {
-    deps.toast(`Couldn't read ${path.split(/[\\/]/).pop()}: ${errMsg(e)}`, "warn");
-  }
-}
-
-function renderRefSlot(gm: GenMode, webcam: boolean) {
-  const usable = !!(workflows.ref || workflows.reffast);
-  // While editing, the slot holds a second picture for the edit (image 2).
-  $("#ref-slot").hidden = webcam || (!!srcAsset && gm !== "edit") || !usable;
-  $("#ref-add").hidden = !!ref;
-  $("#ref-set").hidden = !ref;
-  // Or one of the characters' faces.
-  const faces = characters().filter((c) => c.face);
-  $("#ref-char-wrap").hidden = !!ref || !faces.length;
-  if (!ref && faces.length) {
-    const sel = $<HTMLSelectElement>("#ref-character");
-    sel.innerHTML = `<option value="">Pick…</option>` + faces.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("");
-  }
-  if (!ref) return;
-  ($("#ref-img") as HTMLImageElement).src = ref.url;
-  $("#ref-what").textContent = refWhat(gm);
-  $("#ref-picks").innerHTML = refChoicesHtml(gm === "refvideo");
-  $("#ref-consent").textContent = CONSENT;
-}
+export const studioShown = () => !$('[data-screen="studio"]').hidden;
 
 /** What happens to the reference in this mode. */
-const refWhat = (gm: GenMode) =>
+export const refWhat = (gm: GenMode) =>
   gm === "edit"
     ? `Image 2 of your edit: say what to take from it ("put the hat from image 2 on her"), with ${mossEdits(gm) ? "MOSS-Image" : modeOf(gm).label}`
     : gm === "refvideo"
@@ -1874,7 +596,7 @@ const refWhat = (gm: GenMode) =>
       : `Reference: ${modeOf(gm).label} puts it in the scene you describe`;
 
 /** The settings as chips: size, steps, length, seed and a time estimate. */
-function summary(gm: GenMode, p: Plan): string[] {
+export function summary(gm: GenMode, p: Plan): string[] {
   const m = modeOf(gm);
   const s = settings()[settingsKey(gm)];
   const out: string[] = [];
@@ -1903,362 +625,12 @@ function summary(gm: GenMode, p: Plan): string[] {
   return out;
 }
 
-const esc = (s: string) => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
-const optionList = (pairs: [string | number, string][], cur: string | number) =>
-  pairs.map(([v, l]) => `<option value="${v}"${String(v) === String(cur) ? " selected" : ""}>${esc(l)}</option>`).join("");
-
-// The diffusion models ComfyUI can load (safetensors and GGUF), for Wan 2.2's model picks (Animate and long video).
-let sviModels: string[] | null = null;
-let sviModelsLoading: Promise<void> | null = null;
-function loadSviModels() {
-  return (sviModelsLoading ??= (async () => {
-    sviModels = await diffusionModels();
-    // Let a later open try again if ComfyUI wasn't running.
-    if (!sviModels.length) {
-      sviModels = null;
-      sviModelsLoading = null;
-    }
-  })());
-}
-
-/** One setting in the form: a pick from a list (Studio's panel, chat's popover and the phone draw it). */
-interface Field {
-  k: string;
-  label: string;
-  options: [string | number, string][];
-  value: string | number;
-  hint?: string;
-}
-
-/** Wan 2.2's high- and low-noise model picks. Auto runs an uncensored pair when one is installed (uncensored.ts). */
-function wanPicks(field: (label: string, k: string, options: Field["options"], value: string | number, hint?: string) => void, v: { high?: string | null; low?: string | null }) {
-  const models = sviModels ?? [];
-  const pick = (label: string, k: "high" | "low", which: string) =>
-    field(
-      label,
-      k,
-      [
-        ["", "Auto · uncensored if installed"],
-        [STOCK, `Stock Wan 2.2 4-step (${which})`],
-        ...models.map((n): [string, string] => [n, n]),
-        ...(v[k] && v[k] !== STOCK && !models.includes(v[k]!) ? [[v[k]!, `${v[k]} (not found)`] as [string, string]] : []),
-      ],
-      v[k] ?? "",
-      k === "high" ? "From ComfyUI's model folders; kept on this PC only. Photos brought in from outside run the stock models on Auto" : "",
-    );
-  pick("High-noise model", "high", "high noise");
-  pick("Low-noise model", "low", "low noise");
-}
-
-/** The settings a mode has, as data. `src` is the picture it starts from (Wan's "Match the picture" and SVI's sizes). */
-function settingsFields(gm: GenMode, src: Source | null = srcAsset): Field[] {
-  const m = modeOf(gm);
-  const s = settings()[settingsKey(gm)];
-  const f: Field[] = [];
-  const field = (label: string, k: string, options: Field["options"], value: string | number, hint = "") => f.push({ k, label, options, value, hint });
-  if (m.family === "image") {
-    const img = settings().image;
-    field("Shape", "aspect", ASPECTS, img.aspect);
-    field("Size", "size", SIZES.map(([v, l]) => [v, `${l} · ${imageDims(img.aspect, v).join(" × ")}`]), img.size);
-    if (workflows.moss && !ref)
-      field(
-        "Background",
-        "transparent",
-        [["off", "Normal"], ["on", "Transparent · MOSS-Image, a PNG with alpha"]],
-        img.transparent ?? "off",
-        "Transparent draws one subject on nothing (a sticker, a sprite, a logo) with MOSS-Image's Alpha LoRA. That LoRA is for non-commercial research and evaluation only",
-      );
-  }
-  if (m.family === "ltx" || m.family === "ltx1") {
-    const v = settings().video;
-    field("Resolution", "res", LTX_RES, v.res);
-    field("Length", "seconds", LTX_SECONDS.map((n) => [n, `${n} seconds`]), v.seconds);
-    field("Frame rate", "fps", LTX_FPS.map((n) => [n, `${n} fps`]), v.fps, `${ltxFrames(v.seconds, v.fps)} frames`);
-  }
-  if (gm === "refvideo" && workflows.animate)
-    field(
-      "Model",
-      "fromPicture",
-      [
-        ["wan", "Wan 2.2 · uncensored, no sound"],
-        ["ltx", "LTX-2.5 · with sound"],
-      ],
-      settings().video.fromPicture ?? "wan",
-      "For a video made from a picture",
-    );
-  if (m.family === "wan") {
-    const v = settings().animate;
-    const auto = wanAuto(src?.width, src?.height).join(" × ");
-    field("Resolution", "res", WAN_RES.map(([r, l]) => [r, r === "auto" ? `${l} (${auto})` : l]), v.res);
-    field("Length", "seconds", WAN_SECONDS.map((n) => [n, `${n} seconds`]), v.seconds, `${wanFrames(v.seconds)} frames at 16 fps, Wan's own rate`);
-  }
-  if (m.family === "wan" || m.family === "svi") wanPicks(field, settings()[m.family === "svi" ? "long" : "animate"]);
-  if (SAGE_FAMILIES.includes(m.family))
-    field("Faster video", "sage", [["on", "On · SageAttention"], ["off", "Off"]], settings().video.sage ?? "on", SAGE_HINT);
-  if (m.family === "svi") {
-    const v = settings().long;
-    const dims = (n: number) => sviDims(n, src?.width, src?.height).join(" × ");
-    field("Size", "size", SVI_SIZES.map((n) => [n, `${dims(n)} · saved at 2×`]), v.size);
-    field("Shots", "shots", SVI_SHOTS.map((n) => [n, n === 1 ? "1 shot" : `${n} shots`]), v.shots, "Each continues the last; split the prompt with | to give each its own");
-    field("Shot length", "frames", SVI_FRAMES.map((n) => [n, `${n} frames · ${sviSeconds(n, 1)} s`]), v.frames, `${sviSeconds(v.frames, v.shots)} s in all, at ${SVI_FPS * 2} fps after FILM`);
-  }
-  if (m.family === "song") {
-    const v = settings().music;
-    field("Length", "seconds", SONG_SECONDS.map((n) => [n, songLength(n)]), v.seconds);
-    field("Tempo", "bpm", SONG_BPMS.map((n) => [n, `${n} bpm`]), v.bpm);
-    field("Key", "key", SONG_KEYS.map((k) => [k, k]), v.key);
-    field("Meter", "meter", SONG_METERS, v.meter);
-    field("Lyrics language", "language", SONG_LANGUAGES, v.language, "Chat's /song picks the tempo, key and language for each song");
-    field("Quality", "quality", [["standard", "Standard · ACE-Step 1.5 turbo"], ["high", "High · ACE-Step 1.5 XL, ~3 min"]], v.quality, "High needs the Workstation's music-xl pack and most of a 12 GB card; the song editor uses it too");
-  }
-  const quality = "quality" in s ? s.quality : "standard";
-  const fast = LIGHTNING_MODES.includes(gm) && settings().image.edits !== "quality";
-  if (MOSS_EDIT_MODES.includes(gm))
-    field(
-      "Edit with",
-      "editModel",
-      [["qwen", "Qwen-Image-2.1"], ["moss", "MOSS-Image · edit LoRA, up to 3 pictures"]],
-      settings().image.editModel ?? "qwen",
-      "For edits, Paint to change and Reference. MOSS-Image Fast is 8 steps, Quality 30; it needs the moss pack",
-    );
-  if (LIGHTNING_MODES.includes(gm))
-    field("Speed", "edits", [["fast", "Fast · Lightning, 4 steps"], ["quality", "Quality · more steps"]], fast ? "fast" : "quality", "Fast is about 4× quicker; Quality keeps a little more colour and fine detail");
-  if (m.family === "ltx") field("Quality", "quality", [["draft", "Draft · half size, one pass"], ["standard", "Standard · upscaled 2×"]], quality === "draft" ? "draft" : "standard");
-  else if (m.steps && !fast) {
-    const q = m.steps[quality] != null ? quality : "standard";
-    field("Quality", "quality", levels(m).map((l) => [l, `${QUALITY_NAMES[l]} · ${m.steps![l]} steps`]), q);
-  }
-  if (gm === "moss")
-    field("MOSS model", "moss", [["sft", "MOSS-Image · best with text and layouts"], ["kromoss", "Kromoss · more natural people"]], settings().image.moss ?? "sft", "Kromoss comes with the Workstation's Kromoss pack");
-  if (m.family === "image") field("How many", "count", [1, 2, 3, 4].map((n) => [n, n === 1 ? "1 image" : `${n} images`]), settings().image.count);
-  // A face or style taught with Fizgig; its trigger word goes into the prompt by itself.
-  if (QWEN_LORA_MODES.includes(gm) && trainedLoras().length) {
-    const cur = settings().image.lora ?? "";
-    field(
-      "Your LoRA",
-      "lora",
-      [["", "None"], ...trainedLoras().map((l): [string, string] => [l.file, `${l.name || l.trigger} · ${l.kind === "style" ? "style" : "face"}`])],
-      cur,
-      "Taught with ✦ Teach a face or style; its word goes into the prompt by itself",
-    );
-  }
-  return f;
-}
-
-/** A picked option as the setting's value. Numbers stay numbers (length, fps, count, the long video's size…); words
- *  stay words. "size" is both: the long video's longest side, and an image's Small / Standard / Large, which Number()
- *  turned into NaN (saved as null). A song's meter is a digit too, but ACE-Step takes it as text ("4", "6"). */
-function fieldValue(k: string, raw: string) {
-  const model = k === "high" || k === "low" || k === "lora";
-  return /^\d+$/.test(raw) && k !== "meter" ? Number(raw) : model ? raw || null : raw;
-}
-
-/** The settings form for a mode (Studio's panel and chat's popover). Changes are saved and shared. */
-function settingsForm(el: HTMLElement, gm: GenMode, withWarn: boolean) {
-  const m = modeOf(gm);
-  const key = settingsKey(gm);
-  const s = settings()[key];
-  const p = plan(gm);
-  const f = settingsFields(gm).map(
-    (x) => `<label class="field">${x.label}<select data-k="${x.k}">${optionList(x.options, x.value)}</select>${x.hint ? `<small>${x.hint}</small>` : ""}</label>`,
-  );
-  if ((m.family === "svi" || m.family === "wan") && !sviModels && !sviModelsLoading) loadSviModels().then(() => sviModels && el.isConnected && settingsForm(el, gm, withWarn));
-  const last = lastSeed(key);
-  f.push(
-    `<label class="field seed">Seed<span class="seed-row"><input type="number" min="0" step="1" data-k="seed" placeholder="random" value="${s.seed ?? ""}" />` +
-      `<button type="button" class="btn mini" data-seed="random" title="A new random seed every time">Random</button>` +
-      (last != null ? `<button type="button" class="btn mini" data-seed="last" title="Keep the seed of the last render">Last · ${last}</button>` : "") +
-      `</span></label>`,
-  );
-  el.innerHTML =
-    `<div class="set-grid">${f.join("")}</div>` +
-    (withWarn && p.warn ? `<p class="vram-warn">${esc(p.warn)}</p>` : "") +
-    (p.cards ? `<p class="credit">VRAM: ${esc(p.cards)}</p>` : "") +
-    `<div class="set-foot"><span class="credit">${m.label} · ${aboutTime(p.secs)} on an RTX 3060 12 GB · shared by Studio and chat</span><button type="button" class="linkish" data-reset>Reset to defaults</button></div>`;
-  $$<HTMLSelectElement>("select", el).forEach((sel) =>
-    sel.addEventListener("change", () => {
-      const k = sel.dataset.k!;
-      update(k === "fromPicture" || k === "sage" ? "video" : key, { [k]: fieldValue(k, sel.value) } as any);
-    }),
-  );
-  const seedIn = $<HTMLInputElement>("input[data-k=seed]", el);
-  seedIn.addEventListener("change", () => {
-    const n = Math.floor(Number(seedIn.value));
-    update(key, { seed: seedIn.value.trim() === "" || !Number.isFinite(n) || n < 0 ? null : n });
-  });
-  $$("[data-seed]", el).forEach((b) => b.addEventListener("click", () => update(key, { seed: b.dataset.seed === "last" ? (lastSeed(key) ?? null) : null })));
-  $("[data-reset]", el).addEventListener("click", () => reset(key));
-}
-
-async function refresh() {
-  try {
-    const res = await invoke<{ dir: string; exists: boolean; items: Asset[] }>("gallery_list", { root: deps.root() });
-    // A reference render's prompt starts with the wording that keeps the subject; show just the scene.
-    items = res.items.map((a) => (a.prompt ? { ...a, prompt: sceneOf(a.prompt) } : a));
-    const paths = new Set(items.map((a) => a.path));
-    for (const p of selected) if (!paths.has(p)) selected.delete(p);
-    $("#gallery-note").textContent = res.exists
-      ? `${items.length} renders in ${res.dir}`
-      : `ComfyUI's output folder (${res.dir}) doesn't exist yet. Renders will appear here.`;
-  } catch (e) {
-    $("#gallery-note").textContent = `Couldn't read the renders: ${errMsg(e)}`;
-  }
-  render();
-}
-
-// Thumbnails are made (or read from cache) only when a tile scrolls into view.
-const io = new IntersectionObserver(
-  (entries) => {
-    for (const en of entries) {
-      if (!en.isIntersecting) continue;
-      io.unobserve(en.target);
-      const fig = en.target as HTMLElement;
-      const a = items.find((x) => x.path === fig.dataset.path);
-      if (!a) continue;
-      invoke<string>("thumbnail", { path: a.path, mtime: a.mtime })
-        .then((t) => {
-          const img = document.createElement("img");
-          img.alt = "";
-          img.src = convertFileSrc(t);
-          $(".pic", fig).prepend(img);
-          fig.classList.remove("pending");
-        })
-        .catch(() => fig.classList.remove("pending"));
-    }
-  },
-  { rootMargin: "300px" },
-);
-
-function render() {
-  const g = $("#gallery");
-  g.innerHTML = "";
-  const list = visible();
-  if (!list.length && !job) g.innerHTML = `<p class="note">${items.length && (query.trim() || filter !== "all") ? "Nothing matches." : "Nothing here yet."}</p>`;
-  if (job) {
-    const p = document.createElement("div");
-    p.className = "thumb pending";
-    const vid = isVideo(job.mode);
-    const n = job.count;
-    const badge = job.mode === "song" ? `<span class="badge song">SONG</span>` : `<span class="badge ${vid ? "vid" : ""}">${vid ? "VIDEO" : n > 1 ? `${n} IMAGES` : "IMAGE"}</span>`;
-    p.innerHTML = `<div class="pic">${badge}</div><figcaption><span class="p"></span><span class="m">rendering…</span></figcaption>`;
-    $(".p", p).textContent = job.prompt;
-    g.appendChild(p);
-  }
-  moreIo.disconnect();
-  shown = 0;
-  more(list);
-  renderSelection();
-}
-
-/** The renders the gallery shows: the filter (a kind, or Starred) and every word in the search box. */
-function visible() {
-  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-  return items.filter((a) => {
-    if (filter === "starred" ? !starred.has(a.path) : filter !== "all" && a.kind !== filter) return false;
-    if (!words.length) return true;
-    const hay = `${a.prompt ?? ""} ${a.name} ${a.model ?? ""} ${a.lyrics ?? ""}`.toLowerCase();
-    return words.every((w) => hay.includes(w));
-  });
-}
-
-// The next page of cards is built when the "Show more" button after the last one comes near the screen.
-const moreIo = new IntersectionObserver(
-  (entries) => {
-    if (!entries.some((en) => en.isIntersecting)) return;
-    moreIo.disconnect();
-    more();
-  },
-  { rootMargin: "600px" },
-);
-
-/** Adds the next page of cards to the gallery, and a "Show more" button while there are more. */
-function more(list = visible()) {
-  const g = $("#gallery");
-  $(".gal-more", g)?.remove();
-  for (const a of list.slice(shown, shown + PAGE)) g.appendChild(card(a));
-  shown = Math.min(list.length, shown + PAGE);
-  if (shown < list.length) {
-    const m = document.createElement("button");
-    m.type = "button";
-    m.className = "gal-more";
-    m.textContent = `Show more (${list.length - shown} left)`;
-    m.addEventListener("click", () => more());
-    g.appendChild(m);
-    moreIo.observe(m);
-  }
-}
-
-/** A gallery card for a render. */
-function card(a: Asset) {
-  const fig = document.createElement("button");
-  const song = a.kind === "audio";
-  const model = a.kind === "model";
-  fig.className = "thumb" + (song ? " song" : model ? " model" : " pending") + (fresh.has(a.name) ? " fresh" : "") + (selected.has(a.path) ? " sel" : "");
-  fig.dataset.path = a.path;
-  // A song has no picture: a note and the first lines of its lyrics instead. A 3D model gets a cube, and a click opens
-  // it in the 3D viewer.
-  const pic = song
-    ? `<span class="song-art" aria-hidden="true">${NOTE_SVG}</span><span class="song-lines"></span>`
-    : model
-      ? `<span class="model-art" aria-hidden="true">${CUBE_SVG}</span>`
-      : "";
-  fig.innerHTML = `<div class="pic">${pic}<span class="badge ${a.kind === "video" ? "vid" : song ? "song" : model ? "m3d" : ""}">${song ? "SONG" : model ? "3D" : a.kind.toUpperCase()}</span></div><figcaption><span class="p"></span><span class="m"></span></figcaption>`;
-  $(".p", fig).textContent = a.prompt || a.name;
-  $(".p", fig).title = a.prompt || a.name;
-  $(".m", fig).textContent = [a.model, a.duration ? songLength(Math.round(a.duration)) : "", age(a.mtime)].filter(Boolean).join(" · ");
-  if (song) $(".song-lines", fig).textContent = lyricLines(a.lyrics, 4);
-  // The star in the corner keeps it in the Starred filter.
-  const star = document.createElement("span");
-  star.className = "star" + (starred.has(a.path) ? " on" : "");
-  star.setAttribute("role", "button");
-  star.title = "Star (keeps it in the Starred filter)";
-  star.textContent = "★";
-  star.addEventListener("click", (e) => {
-    e.stopPropagation();
-    toggleStar(a.path);
-  });
-  $(".pic", fig).appendChild(star);
-  if (a.kind === "video") {
-    // Hovering plays the clip, muted.
-    fig.addEventListener("mouseenter", () => {
-      const v = document.createElement("video");
-      v.src = convertFileSrc(a.path);
-      v.muted = true;
-      v.loop = true;
-      v.playsInline = true;
-      v.addEventListener("playing", () => v.classList.add("playing"));
-      $(".pic", fig).appendChild(v);
-      v.play().catch(() => {});
-    });
-    fig.addEventListener("mouseleave", () => {
-      const v = $("video", fig) as HTMLVideoElement | null;
-      if (v) {
-        v.pause();
-        v.removeAttribute("src");
-        v.load();
-        v.remove();
-      }
-    });
-  }
-  // Ctrl- or Shift-click picks it (and while some are picked, a click does too); otherwise it opens.
-  fig.addEventListener("click", (e) => {
-    if (e.ctrlKey || e.metaKey || e.shiftKey || selected.size) return pick(a, e.shiftKey);
-    if (model) deps.openModel(a.path, a.name);
-    else openLightbox(a);
-  });
-  fig.addEventListener("contextmenu", (e) => showMenu(e, a));
-  // A picture can be dragged up onto the create bar: the reference, or the picture to edit or animate.
-  if (a.kind === "image") dragRender(fig, a.path);
-  // A video can be dragged into the Swap panel (or onto the create bar, which opens it).
-  if (a.kind === "video") dragVideo(fig, a.path);
-  if (!song && !model) io.observe(fig);
-  return fig;
-}
+export const esc = (s: string) => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
 
 // ---------- where a picture came from ----------
 // Uncensored models only take what Prestige made (uncensored.ts). A render made from a photo brought in from outside
 // stays "from outside", so an edit of it can't launder a real photo into the uncensored path.
-const outside = (() => {
+export const outside = (() => {
   try {
     const v = JSON.parse(localStorage.getItem("studio.fromOutside") ?? "[]");
     return new Set<string>(Array.isArray(v) ? v.filter((x) => typeof x === "string") : []);
@@ -2278,1378 +650,6 @@ function madeHere(src: Source | null): boolean {
   if (!src) return true;
   if ("path" in src) return !outside.has(src.path) && (!src.path || items.some((x) => x.path === src.path));
   return !!src.made;
-}
-
-// ---------- stars ----------
-function loadStarred(): string[] {
-  try {
-    const v = JSON.parse(localStorage.getItem("studio.starred") ?? "[]");
-    return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveStarred() {
-  try {
-    localStorage.setItem("studio.starred", JSON.stringify([...starred]));
-  } catch {}
-}
-
-/** Stars a render, or takes its star away (the card, the viewer and the Starred filter follow). */
-function toggleStar(path: string, on = !starred.has(path)) {
-  if (on) starred.add(path);
-  else starred.delete(path);
-  saveStarred();
-  if (filter === "starred") render();
-  else $$<HTMLElement>("#gallery .thumb").forEach((f) => f.dataset.path === path && $(".star", f)?.classList.toggle("on", on));
-  if (lbAsset?.path === path) renderLbStar();
-}
-
-function renderLbStar() {
-  const on = !!lbAsset && starred.has(lbAsset.path);
-  const b = $("#lb-star");
-  b.textContent = on ? "★ Starred" : "☆ Star";
-  b.classList.toggle("on", on);
-}
-
-// ---------- picking several renders (Ctrl- or Shift-click) ----------
-function pick(a: Asset, range: boolean) {
-  const list = visible();
-  const from = range && anchor ? list.findIndex((x) => x.path === anchor) : -1;
-  const to = list.findIndex((x) => x.path === a.path);
-  if (from >= 0 && to >= 0) {
-    for (let i = Math.min(from, to); i <= Math.max(from, to); i++) selected.add(list[i].path);
-  } else if (selected.has(a.path)) selected.delete(a.path);
-  else selected.add(a.path);
-  anchor = a.path;
-  $$<HTMLElement>("#gallery .thumb").forEach((f) => f.classList.toggle("sel", selected.has(f.dataset.path!)));
-  renderSelection();
-}
-
-function clearSelection() {
-  selected.clear();
-  anchor = null;
-  $$<HTMLElement>("#gallery .thumb.sel").forEach((f) => f.classList.remove("sel"));
-  renderSelection();
-}
-
-/** The bar over the gallery while renders are picked: star, copy or delete them all at once. */
-function renderSelection() {
-  const bar = $("#gal-sel");
-  bar.hidden = !selected.size;
-  if (!selected.size) return;
-  $("#sel-count").textContent = `${selected.size} selected`;
-  $("#sel-star").textContent = [...selected].every((p) => starred.has(p)) ? "Unstar" : "Star";
-}
-
-function initSelectionBar() {
-  $("#sel-clear").addEventListener("click", clearSelection);
-  $("#sel-all").addEventListener("click", () => {
-    for (const a of visible()) selected.add(a.path);
-    $$<HTMLElement>("#gallery .thumb").forEach((f) => f.classList.toggle("sel", selected.has(f.dataset.path!)));
-    renderSelection();
-  });
-  $("#sel-star").addEventListener("click", () => {
-    const on = ![...selected].every((p) => starred.has(p));
-    for (const p of selected) on ? starred.add(p) : starred.delete(p);
-    saveStarred();
-    render();
-  });
-  $("#sel-copy").addEventListener("click", async () => {
-    try {
-      await invoke("copy_renders", { root: deps.root(), paths: [...selected] });
-      deps.toast(`${selected.size === 1 ? "File" : `${selected.size} files`} copied. Paste into a folder or a chat app.`);
-    } catch (e) {
-      deps.toast(`Couldn't copy them: ${errMsg(e)}`, "warn");
-    }
-  });
-  $("#sel-delete").addEventListener("click", deleteSelected);
-}
-
-/** Asks once, then moves every picked render to the Recycle Bin. */
-async function deleteSelected() {
-  const picked = items.filter((a) => selected.has(a.path));
-  if (!picked.length) return;
-  if (!(await confirmDelete(picked.length === 1 ? `Delete this ${kindWord(picked[0])}?` : `Delete these ${picked.length} renders?`, picked.length === 1 ? picked[0].name : `${picked.length} files`))) return;
-  let failed = 0;
-  for (const a of picked) {
-    try {
-      await invoke("delete_render", { root: deps.root(), path: a.path, mtime: a.mtime });
-      gone(a.path);
-    } catch {
-      failed++;
-    }
-  }
-  selected.clear();
-  anchor = null;
-  render();
-  const moved = picked.length - failed;
-  deps.toast(failed ? `Moved ${moved} to the Recycle Bin; ${failed} couldn't be deleted.` : `Moved ${moved} ${moved === 1 ? "render" : "renders"} to the Recycle Bin.`, failed ? "warn" : undefined);
-}
-
-const CUBE_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2l9 5v10l-9 5-9-5V7z" /><path d="M3 7l9 5 9-5M12 12v10" /></svg>`;
-
-/** Picture to 3D: queues Pixal3D on a picture (a render, or a reference picture from chat); the .glb opens in the 3D
- *  viewer when it's done. */
-async function toModel(a: Source, from = "Studio", progress?: (pct: number, label: string) => void): Promise<Asset[]> {
-  await ensureWorkflows();
-  if (!workflows.model3d) throw new Error(`workflows\\${MODES.model3d.file} wasn't found (update the Workstation and add the 3d pack)`);
-  return run("model3d", "name" in a ? `3D model of ${a.name}` : "3D model of the picture", a, {}, progress, { from });
-}
-
-function makeModel(a: Asset) {
-  closeLightbox();
-  deps.toast("Making a 3D model: 3 to 8 minutes, longer for detailed subjects. It opens in the 3D viewer when it's done (the render queue shows how far it is).");
-  toModel(a)
-    .then((got) => got[0] && deps.openModel(got[0].path, got[0].name))
-    .catch((e) => errMsg(e) !== "stopped" && deps.toast(`Couldn't make the 3D model: ${errMsg(e)}`, "warn"));
-}
-
-const NOTE_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 18V5l11-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="17" cy="16" r="3" /></svg>`;
-
-/** The first sung lines of a song's lyrics, without the [Verse] / [Chorus] tags. */
-function lyricLines(lyrics: string | null | undefined, n: number) {
-  const lines = (lyrics ?? "").split("\n").map((l) => l.trim()).filter((l) => l && !/^\[.*\]$/.test(l));
-  return lines.length ? lines.slice(0, n).join("\n") : "Instrumental";
-}
-
-// ---------- lightbox ----------
-let lbAsset: Asset | null = null;
-// Pictures zoom with the mouse wheel or the bar under them (zoom.ts).
-let lbZoom: Zoom;
-
-function openLightbox(a: Asset) {
-  closeMenu();
-  lbAsset = a;
-  const media = $("#lb-media");
-  lbZoom.reset();
-  media.innerHTML = "";
-  $("#lb-zoom").hidden = a.kind !== "image";
-  media.oncontextmenu = (e) => showMenu(e, a);
-  if (a.kind === "video") {
-    const v = document.createElement("video");
-    v.src = convertFileSrc(a.path);
-    v.controls = true;
-    v.autoplay = true;
-    v.loop = true;
-    media.appendChild(v);
-  } else if (a.kind === "audio") {
-    // The song plays straight away, with its lyrics to read along.
-    const box = document.createElement("div");
-    box.className = "lb-song";
-    box.innerHTML = `<span class="song-art" aria-hidden="true">${NOTE_SVG}</span><audio controls autoplay></audio><pre class="lb-lyrics"></pre>`;
-    ($("audio", box) as HTMLAudioElement).src = convertFileSrc(a.path);
-    $(".lb-lyrics", box).textContent = a.lyrics?.trim() || "Instrumental (no lyrics)";
-    media.appendChild(box);
-  } else {
-    const img = document.createElement("img");
-    img.src = convertFileSrc(a.path);
-    img.alt = a.prompt || a.name;
-    media.appendChild(img);
-  }
-  $("#lb-p").textContent = a.prompt || "No prompt saved in this file.";
-  const dl = $("#lb-dl");
-  dl.innerHTML = "";
-  const rows: [string, string][] = [
-    ["File", a.name],
-    ["Type", a.kind === "video" ? "Video" : a.kind === "audio" ? "Song" : "Image"],
-    ["Model", a.model || "unknown"],
-    a.kind === "audio" ? ["Length", a.duration ? songLength(Math.round(a.duration)) : "–"] : ["Size", a.width ? `${a.width} × ${a.height}` : "–"],
-    ["Seed", a.seed != null ? String(a.seed) : "–"],
-    ["File size", `${(a.size / 1048576).toFixed(1)} MB`],
-    ["Made", `${new Date(a.mtime).toLocaleString()} (${age(a.mtime)})`],
-  ];
-  for (const [k, v] of rows) {
-    const dt = document.createElement("dt");
-    dt.textContent = k;
-    const dd = document.createElement("dd");
-    dd.textContent = v;
-    dl.append(dt, dd);
-  }
-  ($("#lb-copy") as HTMLButtonElement).disabled = !a.prompt;
-  // A song's prompt is its style, and reusing it brings back its lyrics too.
-  $("#lb-copy").textContent = a.kind === "audio" ? "Copy style" : "Copy prompt";
-  $("#lb-reuse").textContent = a.kind === "audio" ? "Reuse style and lyrics" : "Reuse prompt";
-  ($("#lb-animate") as HTMLButtonElement).hidden = a.kind !== "image" || !(workflows.animate || workflows.long);
-  ($("#lb-edit") as HTMLButtonElement).hidden = a.kind !== "image" || !workflows.edit;
-  $("#lb-edit").onclick = () => startFrom(a, "image");
-  ($("#lb-inpaint") as HTMLButtonElement).hidden = a.kind !== "image" || !workflows.inpaint;
-  $("#lb-inpaint").onclick = () => paintToChange(a);
-  $("#lb-animate").onclick = () => startFrom(a, "video");
-  // One button to sharpen it: 4K for a picture (1080p when that's all it lacks), 1080p for a video.
-  const up = upscaleItems(a).filter((x): x is Exclude<MenuItem, "-"> => x !== "-").pop();
-  ($("#lb-upscale") as HTMLButtonElement).hidden = !up;
-  if (up) {
-    $("#lb-upscale").textContent = up.label;
-    $("#lb-upscale").onclick = up.run;
-  }
-  ($("#lb-songedit") as HTMLButtonElement).hidden = !songEditItems(a).length;
-  $("#lb-songedit").onclick = () => editSong(a, "repaint");
-  ($("#lb-laser") as HTMLButtonElement).hidden = a.kind !== "image";
-  $("#lb-laser").onclick = () => laser(a);
-  ($("#lb-reuse") as HTMLButtonElement).disabled = !a.prompt;
-  $("#lb-reveal").onclick = () => revealFile(a);
-  $("#lb-copy").onclick = () => copy(a.prompt || "");
-  $("#lb-reuse").onclick = () => reusePrompt(a);
-  $("#lb-save").onclick = () => saveAs(a);
-  $("#lb-delete").onclick = () => deleteRender(a);
-  renderLbStar();
-  // Back and next buttons for the gallery around it (the arrow keys do the same).
-  const list = viewable();
-  const i = list.findIndex((x) => x.path === a.path);
-  $("#lb-prev").hidden = i <= 0;
-  $("#lb-next").hidden = i < 0 || i >= list.length - 1;
-  $("#lb").hidden = false;
-}
-
-/** What the viewer steps through: the gallery as filtered and searched, without 3D models (they open in 3D). */
-const viewable = () => visible().filter((a) => a.kind !== "model");
-
-/** Opens the render before (-1) or after (1) the one in the viewer. */
-function stepLightbox(d: number) {
-  if (!lbAsset) return;
-  const list = viewable();
-  const i = list.findIndex((x) => x.path === lbAsset!.path);
-  const next = i >= 0 ? list[i + d] : undefined;
-  if (next) openLightbox(next);
-}
-
-function closeLightbox() {
-  const v = $("#lb-media video, #lb-media audio") as HTMLMediaElement | null;
-  v?.pause();
-  $("#lb-media").innerHTML = "";
-  $("#lb").hidden = true;
-  lbAsset = null;
-}
-
-// ---------- actions on a render (lightbox buttons and the right-click menu) ----------
-/** Edit (Image mode) or animate (Video mode) this image: the create bar takes it as the source. */
-function startFrom(a: Asset, m: "image" | "video") {
-  deps.show();
-  srcAsset = a;
-  mode = m;
-  ($("#gen-prompt") as HTMLInputElement).value = "";
-  closeLightbox();
-  renderCreate();
-  $("#gen-prompt").focus();
-}
-
-/** Paint to change: paint the area on the picture (inpaint.ts) and say what goes there; only that part is redrawn.
- *  With nothing painted it's an instruction edit of the whole picture. The result opens when it's done. */
-function paintToChange(a: Asset, selecting = false) {
-  closeLightbox();
-  const select = workflows.select ? (q: SelectQuery) => segment(a, q) : undefined;
-  const cutout = workflows.cutout ? (mask: Blob, w: number, h: number) => cutOut(a, mask, w, h) : undefined;
-  openInpaint(convertFileSrc(a.path), a.name, async (r) => {
-    deps.show();
-    try {
-      let out: Asset[];
-      if (r.mask) {
-        const bytes = new Uint8Array(await r.mask.arrayBuffer());
-        const hash = new Uint8Array(await crypto.subtle.digest("SHA-1", bytes));
-        const hex = Array.from(hash.slice(0, 6), (b) => b.toString(16).padStart(2, "0")).join("");
-        const name = await invoke<string>("comfy_upload_bytes", bytes, { headers: { "x-name": `prestige-mask-${hex}.png` } });
-        out = await run("inpaint", r.prompt, a, { mask: { name, w: r.width, h: r.height } }, undefined, { from: "Paint to change" });
-      } else out = await run("edit", r.prompt, a, {}, undefined, { from: "Paint to change" });
-      deps.toast(r.mask ? "Changed the painted area." : "Edited the picture.");
-      if (out[0]) openRender(out[0].path);
-    } catch (e) {
-      if (errMsg(e) !== "stopped") deps.toast(`Couldn't change it: ${errMsg(e)}`, "warn");
-    }
-  }, { select, cutout, selecting });
-}
-
-/** The Upscale menu items a render gets: 1080p and 4K for a picture smaller than that, 1080p for a video. */
-function upscaleItems(a: Asset): MenuItem[] {
-  const short = a.width && a.height ? Math.min(a.width, a.height) : 0;
-  const out: MenuItem[] = [];
-  if (a.kind === "image" && workflows.upimage) {
-    if (short < 1080) out.push({ label: "Upscale to 1080p", run: () => upscale(a, 1080), key: "SeedVR2" });
-    if (short < 2160) out.push({ label: "Upscale to 4K", run: () => upscale(a, 2160), key: "SeedVR2" });
-  }
-  // Redraw: Qwen-Image redraws the picture in tiles at 4 or 8 MP (new detail, where SeedVR2 sharpens what's there).
-  const mp = a.width && a.height ? (a.width * a.height) / MP : 0;
-  if (a.kind === "image" && workflows.redraw4 && mp) {
-    if (mp < 3.5) out.push({ label: "Redraw at 4 MP", run: () => redraw(a, "redraw4"), key: "Qwen-Image" });
-    if (mp < 7) out.push({ label: "Redraw at 8 MP", run: () => redraw(a, "redraw8"), key: "Qwen-Image" });
-  }
-  if (a.kind === "video" && workflows.upvideo && short < 1080) out.push({ label: "Upscale to 1080p", run: () => upscale(a, 1080), key: "SeedVR2" });
-  return out;
-}
-
-/** Upscale and enhance: SeedVR2 redraws the picture (or every frame of the video) at 1080p or 4K. The result goes into
- *  the gallery next to the original and opens when it's done. */
-async function upscale(a: Asset, size: UpscaleSize) {
-  closeLightbox();
-  const video = a.kind === "video";
-  const name = size === 1080 ? "1080p" : "4K";
-  const secs = video ? MODES.upvideo.secs * Math.max(1, await videoSeconds(a.path)) : MODES.upimage.secs;
-  deps.toast(`Upscaling to ${name}: ${aboutTime(secs)}. It opens when it's done.`);
-  try {
-    const out = await run(video ? "upvideo" : "upimage", `${a.prompt || a.name}`, a, { upscale: size }, undefined, {
-      from: "Upscale",
-      title: `${a.name} to ${name}`,
-    });
-    if (out[0]) openRender(out[0].path);
-  } catch (e) {
-    if (errMsg(e) !== "stopped") deps.toast(`Couldn't upscale it: ${errMsg(e)}`, "warn");
-  }
-}
-
-/** Redraw upscale: Qwen-Image redraws the picture a tile at a time at 4 or 8 MP. It goes into the gallery next to the
- *  original and opens when it's done. */
-async function redraw(a: Asset, gm: "redraw4" | "redraw8") {
-  closeLightbox();
-  const p = plan(gm, a);
-  deps.toast(`Redrawing at ${REDRAW_MP[gm]} MP: ${aboutTime(p.secs)}. It opens when it's done.`);
-  try {
-    const out = await run(gm, a.prompt || a.name, a, {}, undefined, { from: "Upscale", title: `${a.name} redrawn at ${REDRAW_MP[gm]} MP` });
-    if (out[0]) openRender(out[0].path);
-  } catch (e) {
-    if (errMsg(e) !== "stopped") deps.toast(`Couldn't redraw it: ${errMsg(e)}`, "warn");
-  }
-}
-
-/** The song editor's items for a song: redo a part, extend it, or cover it in a new style. */
-function songEditItems(a: Asset): MenuItem[] {
-  if (a.kind !== "audio" || !workflows.songedit) return [];
-  return [
-    { label: "Redo a part…", run: () => editSong(a, "repaint"), key: "new words or a new take" },
-    { label: "Extend…", run: () => editSong(a, "extend"), key: "up to 4 min more" },
-    { label: "Cover in a new style…", run: () => editSong(a, "cover") },
-    { label: "Stems…", run: () => editSong(a, "stems"), key: "vocals, instrumental, drums…" },
-  ];
-}
-
-/** Opens the song editor on a gallery song or one from the PC, then renders the edit in the queue. The new song goes
- *  into the gallery next to the original and opens when it's done. */
-async function editSong(a: Asset | File, task: EditTask) {
-  closeLightbox();
-  if (!workflows.songedit) return deps.toast(`Editing songs needs workflows\\${MODES.songedit.file} (update the Workstation).`, "warn");
-  const file = a instanceof File ? a : null;
-  const asset = file ? null : (a as Asset);
-  const src: SongSource = file
-    ? { name: file.name, url: URL.createObjectURL(file), blob: file, style: "", lyrics: "" }
-    : {
-        name: asset!.name,
-        url: convertFileSrc(asset!.path),
-        path: asset!.path,
-        style: asset!.prompt ?? "",
-        lyrics: isInstrumental(asset!.lyrics) ? "" : (asset!.lyrics ?? ""),
-        music: asset!.music,
-      };
-  try {
-    const e = await askSongEdit(src, task, deps.toast);
-    if (!e) return;
-    e.quality = settings().music.quality;
-    const what = { repaint: "Redoing the part", extend: "Extending the song", cover: "Making the cover", stems: "Taking out the stems" }[e.task];
-    const secs = e.task === "stems" ? stemSecs(e.source, e.stems) : e.quality === "high" ? XL_FIXED_SECS + XL_SECS_PER_SECOND * e.seconds : editSecs(e.seconds);
-    deps.toast(`${what}: about ${aboutTime(secs)}. ${e.task === "stems" ? "The first opens" : "It opens"} when it's done.`);
-    const title = `${{ repaint: "Redo", extend: "Extend", cover: "Cover of", stems: "Stems of" }[e.task]} ${src.name}`;
-    const out = await run("songedit", e.style, asset, { edit: e, audio: file ?? undefined }, undefined, { from: "Song editor", title });
-    if (out[0]) openRender(out[0].path);
-  } catch (err) {
-    if (errMsg(err) !== "stopped") deps.toast(`Couldn't edit the song: ${errMsg(err)}`, "warn");
-  } finally {
-    if (file) URL.revokeObjectURL(src.url);
-  }
-}
-
-/** The song editor's job in the edit workflow: what's done where, and the music settings the new song keeps. */
-function songEditGraph(g: any, e: SongEdit) {
-  if (e.task === "stems") return stemsGraph(g, e);
-  if (e.quality === "high") g["1"].inputs.unet_name = ACE_MODELS.high;
-  const lyrics = isInstrumental(e.lyrics) ? INSTRUMENTAL : e.lyrics;
-  Object.assign(g["4"].inputs, {
-    task: e.task,
-    lyrics,
-    bpm: e.bpm,
-    duration: e.seconds,
-    timesignature: e.meter,
-    language: e.language,
-    keyscale: e.key,
-  });
-  Object.assign(g["22"].inputs, {
-    task: e.task,
-    start: e.start,
-    end: e.end,
-    extend_before: 0,
-    extend_after: e.task === "extend" ? e.add : 0,
-    // Carrying on from the very end keeps it all (0); from earlier leaves out what comes after.
-    keep_until: e.task === "extend" && e.keepUntil < e.source - 0.05 ? e.keepUntil : 0,
-    strength: e.strength,
-    // An extension has nothing of its own to blend into; a redone part blends over 0.4 s.
-    crossfade: e.task === "extend" ? 0 : 0.4,
-    // The gallery shows the whole song's words: an extension's are the original's then the new part's.
-    song_lyrics: e.task === "extend" ? [e.sourceLyrics, e.lyrics].filter((x) => x.trim()).join("\n\n") || lyrics : lyrics,
-  });
-  g["10"].inputs.filename_prefix = `ace-step-${e.task === "repaint" ? "redo" : e.task}`;
-}
-
-/** Stems: ACE-Step's base model listens to the whole song and makes one part of it at a time ("extract"), 32 steps
- *  with guidance, each saved as its own MP3. It's told the song's style, and the vocals its words: with them a vocal
- *  stem came out with the right words and half the drum bleed (percussive/tonal 0.37 against 0.72 without). The instrumental is the drums, bass, guitar, keys and synth mixed.
- *  (Measured on a 60 s song: the vocal stem had the words and 38% silence between lines, the bass 59% of its
- *  energy under 150 Hz, the drums twice as much percussive as tonal energy, and the instrumental mix no words and
- *  the original's chords: chroma similarity 0.94.) */
-function stemsGraph(g: any, e: SongEdit) {
-  const enc = g["4"], edit = g["22"], ks = g["7"], dec = g["9"], save = g["10"];
-  for (const id of ["4", "5", "22", "7", "9", "10"]) delete g[id];
-  g["1"].inputs.unet_name = ACE_MODELS.stems;
-  const seed = ks.inputs.seed;
-  const part = (track: string, i: number) => {
-    const n = `s${i}`;
-    g[`${n}e`] = { class_type: enc.class_type, inputs: { ...enc.inputs, task: "extract", track, tags: e.style, lyrics: /vocals/.test(track) ? e.sourceLyrics : "", bpm: e.bpm, keyscale: e.key, timesignature: e.meter, language: e.language, duration: e.source } };
-    g[`${n}z`] = { class_type: "ConditioningZeroOut", inputs: { conditioning: [`${n}e`, 0] } };
-    g[`${n}m`] = { class_type: edit.class_type, inputs: { ...edit.inputs, task: "extract", song_lyrics: track === "vocals" ? e.sourceLyrics : "" } };
-    g[`${n}k`] = { class_type: ks.class_type, inputs: { ...ks.inputs, model: [`${n}m`, 0], positive: [`${n}e`, 0], negative: [`${n}z`, 0], latent_image: [`${n}m`, 1], seed: seed + i, steps: 32, cfg: 7 } };
-    g[`${n}d`] = { class_type: dec.class_type, inputs: { ...dec.inputs, samples: [`${n}k`, 0] } };
-    return `${n}d`;
-  };
-  let i = 0;
-  for (const stem of e.stems) {
-    let out: string;
-    if (stem === "instrumental") {
-      const parts = INSTRUMENTAL_PARTS.map((t) => part(t, i++));
-      out = parts[0];
-      parts.slice(1).forEach((p, k) => {
-        g[`mix${k}`] = { class_type: "AudioMerge", inputs: { audio1: [out, 0], audio2: [p, 0], merge_method: "add" } };
-        out = `mix${k}`;
-      });
-      // Five parts added together peaked at 0.95 of full scale; 2 dB down leaves room so the MP3 doesn't clip.
-      g["mixv"] = { class_type: "AudioAdjustVolume", inputs: { audio: [out, 0], volume: -2 } };
-      out = "mixv";
-    } else out = part(stem, i++);
-    g[`save-${stem}`] = { class_type: save.class_type, inputs: { ...save.inputs, audio: [out, 0], filename_prefix: `stem-${stem.replace("_", "-")}` } };
-  }
-}
-
-/** Laser: a PNG to engrave or an SVG to cut from this picture (laser.ts). */
-function laser(a: Asset) {
-  closeLightbox();
-  openLaser(a.path, a.name, a.prompt ?? "");
-}
-
-/** Puts a mask in ComfyUI's input folder (named from its content). */
-async function uploadMask(mask: Blob): Promise<string> {
-  const bytes = new Uint8Array(await mask.arrayBuffer());
-  const hash = new Uint8Array(await crypto.subtle.digest("SHA-1", bytes));
-  const hex = Array.from(hash.slice(0, 6), (b) => b.toString(16).padStart(2, "0")).join("");
-  return invoke<string>("comfy_upload_bytes", bytes, { headers: { "x-name": `prestige-mask-${hex}.png` } });
-}
-
-/** Cut out: the selection on a transparent background, saved as a new PNG next to the picture in the gallery. */
-async function cutOut(a: Asset, mask: Blob, w: number, h: number) {
-  deps.show();
-  try {
-    const name = await uploadMask(mask);
-    const out = await run("cutout", `Cut-out from ${a.name}`, a, { mask: { name, w, h } }, undefined, { from: "Cut out" });
-    deps.toast("Cut out on a transparent background.");
-    if (out[0]) openRender(out[0].path);
-  } catch (e) {
-    if (errMsg(e) !== "stopped") deps.toast(`Couldn't cut it out: ${errMsg(e)}`, "warn");
-  }
-}
-
-/** Remove background: BiRefNet finds the subject, and it's saved on a transparent background as a new PNG. */
-async function removeBackground(a: Asset) {
-  closeLightbox();
-  deps.toast("Removing the background…");
-  try {
-    const out = await run("cutout", `${a.name} without its background`, a, {}, undefined, { from: "Remove background" });
-    if (out[0]) openRender(out[0].path);
-  } catch (e) {
-    if (errMsg(e) !== "stopped") deps.toast(`Couldn't remove the background: ${errMsg(e)}`, "warn");
-  }
-}
-
-/** New camera angle: asks where the camera goes (one of the LoRA's 12 azimuths and 4 heights, or a close-up), then
- *  Qwen-Image-2.1 reshoots the picture from there. Every view picked is its own render. */
-async function newAngle(a: Asset) {
-  closeLightbox();
-  const dlg = $("#reshoot") as HTMLDialogElement;
-  const az = $("#rs-az") as HTMLSelectElement;
-  const el = $("#rs-el") as HTMLSelectElement;
-  const close = $("#rs-close") as HTMLInputElement;
-  const turn = $("#rs-turn") as HTMLInputElement;
-  ($("#rs-pic") as HTMLImageElement).src = convertFileSrc(a.path);
-  if (!az.options.length) {
-    az.innerHTML = ANGLES.map(([, label], i) => `<option value="${i}">${label} · ${i * 30}°</option>`).join("");
-    el.innerHTML = ELEVATIONS.map(([, label], i) => `<option value="${i}">${label}</option>`).join("");
-    // The right side: on portraits, side, back and high views turn the camera the furthest (a three-quarter view
-    // often stays close to the original).
-    az.value = "3";
-  }
-  const est = () => {
-    const n = turn.checked ? 4 : 1;
-    az.disabled = turn.checked;
-    $("#rs-est").textContent = `${n > 1 ? "4 renders (front, right, back, left)" : "1 render"}, ${aboutTime(plan("angle", a).secs * n)}.`;
-  };
-  turn.onchange = est;
-  est();
-  dlg.returnValue = "";
-  dlg.showModal();
-  await new Promise((r) => dlg.addEventListener("close", r, { once: true }));
-  if (dlg.returnValue !== "go") return;
-  const views = turn.checked ? [0, 3, 6, 9] : [Number(az.value)];
-  deps.toast(views.length > 1 ? "Reshooting from 4 sides. The first opens when it's done." : "Reshooting from the new angle. It opens when it's done.");
-  try {
-    const outs = views.map((v) =>
-      run("angle", anglePrompt(v, Number(el.value), close.checked), a, {}, undefined, { from: "New camera angle", title: `${a.name} · ${ANGLES[v][1].toLowerCase()}` }),
-    );
-    const [first] = await outs[0];
-    if (first) openRender(first.path);
-    await Promise.all(outs);
-  } catch (e) {
-    if (errMsg(e) !== "stopped") deps.toast(`Couldn't reshoot it: ${errMsg(e)}`, "warn");
-  }
-}
-
-/** Try on outfit: the person in this picture, dressed in the outfit from another picture (a photo of someone wearing
- *  it, a flat lay or a product shot). Everything but the clothes stays where it was. */
-async function tryOnOutfit(a: Asset) {
-  closeLightbox();
-  const dlg = $("#outfit") as HTMLDialogElement;
-  const file = $("#of-file") as HTMLInputElement;
-  const pic = $("#of-outfit") as HTMLImageElement;
-  const what = $("#of-what") as HTMLInputElement;
-  const go = $("#of-go") as HTMLButtonElement;
-  ($("#of-pic") as HTMLImageElement).src = convertFileSrc(a.path);
-  let outfit: File | null = null;
-  let url = "";
-  const show = () => {
-    if (url) URL.revokeObjectURL(url);
-    url = outfit ? URL.createObjectURL(outfit) : "";
-    pic.hidden = !outfit;
-    pic.src = url;
-    $("#of-name").textContent = outfit ? outfit.name : "";
-    go.disabled = !outfit;
-  };
-  file.value = "";
-  file.onchange = () => {
-    outfit = file.files?.[0] ?? null;
-    show();
-  };
-  $("#of-pick").onclick = () => file.click();
-  // An outfit picture dropped on the dialog from Explorer or a browser works too.
-  dlg.ondragover = (e) => e.preventDefault();
-  dlg.ondrop = (e) => {
-    e.preventDefault();
-    const f = imageIn(e.dataTransfer);
-    if (f) {
-      outfit = f;
-      show();
-    }
-  };
-  what.value = "";
-  ($("#of-shoes") as HTMLInputElement).checked = false;
-  $("#of-est").textContent = `Takes ${aboutTime(plan("outfit", a).secs)}.`;
-  show();
-  dlg.returnValue = "";
-  dlg.showModal();
-  await new Promise((r) => dlg.addEventListener("close", r, { once: true }));
-  if (url) URL.revokeObjectURL(url);
-  // (Set by the handlers above, which TypeScript doesn't follow.)
-  const picked = outfit as File | null;
-  if (dlg.returnValue !== "go" || !picked) return;
-  deps.toast("Trying on the outfit. It opens when it's done.");
-  try {
-    const name = await uploadImage(picked, "outfit");
-    const prompt = outfitPrompt(what.value, ($("#of-shoes") as HTMLInputElement).checked);
-    const out = await run("outfit", prompt, a, { outfit: name }, undefined, { from: "Try on outfit", title: `${a.name} in ${what.value.trim() || picked.name}` });
-    if (out[0]) openRender(out[0].path);
-  } catch (e) {
-    if (errMsg(e) !== "stopped") deps.toast(`Couldn't try it on: ${errMsg(e)}`, "warn");
-  }
-}
-
-/** Restore photo: a small, compressed, blurry or worn picture redrawn at about 2 MP with the Restore LoRA, keeping the
- *  people and the framing. One pass is enough (a second came back crunchy, its author found). */
-async function restorePhoto(a: Asset) {
-  closeLightbox();
-  const dlg = $("#restore") as HTMLDialogElement;
-  const kind = $("#rp-kind") as HTMLSelectElement;
-  const fast = $("#rp-fast") as HTMLInputElement;
-  ($("#rp-pic") as HTMLImageElement).src = convertFileSrc(a.path);
-  fast.checked = settings().image.edits !== "quality";
-  const est = () => ($("#rp-est").textContent = `Comes out at about 2 megapixels. Takes ${aboutTime(plan("restore", a).secs)}.`);
-  fast.onchange = () => {
-    update("image", { edits: fast.checked ? "fast" : "quality" });
-    est();
-  };
-  est();
-  dlg.returnValue = "";
-  dlg.showModal();
-  await new Promise((r) => dlg.addEventListener("close", r, { once: true }));
-  if (dlg.returnValue !== "go") return;
-  const k = kind.value as RestoreKind;
-  deps.toast("Restoring the photo. It opens when it's done.");
-  try {
-    const out = await run("restore", restorePrompt(k), a, { restore: k }, undefined, { from: "Restore photo", title: `${a.name}, restored` });
-    if (out[0]) openRender(out[0].path);
-  } catch (e) {
-    if (errMsg(e) !== "stopped") deps.toast(`Couldn't restore it: ${errMsg(e)}`, "warn");
-  }
-}
-
-/** Make it manga: the picture as a black-and-white manga panel with screentone, as a new render. */
-async function makeManga(a: Asset) {
-  closeLightbox();
-  deps.toast(`Making it manga (${aboutTime(plan("manga", a).secs)}). It opens when it's done.`);
-  try {
-    const out = await run("manga", "Make it manga", a, {}, undefined, { from: "Make it manga", title: `${a.name} as manga` });
-    if (out[0]) openRender(out[0].path);
-  } catch (e) {
-    if (errMsg(e) !== "stopped") deps.toast(`Couldn't make it manga: ${errMsg(e)}`, "warn");
-  }
-}
-
-/** Puts a picture in ComfyUI's input folder (named from its content, so a retry reuses it). */
-async function uploadImage(img: Blob, prefix: string): Promise<string> {
-  const bytes = new Uint8Array(await img.arrayBuffer());
-  const hash = new Uint8Array(await crypto.subtle.digest("SHA-1", bytes));
-  const hex = Array.from(hash.slice(0, 6), (b) => b.toString(16).padStart(2, "0")).join("");
-  const ext = img.type.includes("jpeg") ? "jpg" : img.type.includes("webp") ? "webp" : "png";
-  return invoke<string>("comfy_upload_bytes", bytes, { headers: { "x-name": `prestige-${prefix}-${hex}.${ext}` } });
-}
-
-/** Cut out a subject from a video: SAM 3.1 tracks what's named through every frame, and the rest turns green (with
- *  the sound kept), ready to key out in a video editor. */
-async function videoCutout(a: Asset) {
-  closeLightbox();
-  const what = await ask("Cut out a subject", "What should stay? The rest of the video turns green, so it can be keyed out in any video editor.", "e.g. the woman, the dog, the red car");
-  if (!what) return;
-  const secs = MODES.vidcut.secs * Math.max(2, await videoSeconds(a.path));
-  deps.toast(`Tracking ${what}: ${aboutTime(secs)}. It opens when it's done.`);
-  try {
-    const out = await run("vidcut", what, a, {}, undefined, { from: "Cut out", title: `${what}, cut out of ${a.name}` });
-    if (out[0]) openRender(out[0].path);
-  } catch (e) {
-    if (errMsg(e) !== "stopped") deps.toast(`Couldn't cut it out: ${errMsg(e)}`, "warn");
-  }
-}
-
-/** What Cut out a person makes: a transparent WebM, the PNG frames, a green-screen MP4, or an MP4 on a new background. */
-type PersonOut = "webm" | "png" | "green" | "background";
-
-/** Cut out a person: click them on the first frame (SAM 3.1), pick what to make, and MatAnyone2 mattes them through
- *  the whole video, hair and all. The result opens when it's done (the PNG frames' folder is shown in Explorer). */
-async function personCutout(a: Asset) {
-  closeLightbox();
-  let frame: string;
-  try {
-    frame = await invoke<string>("video_first_frame", { root: deps.root(), video: a.path });
-  } catch (e) {
-    return deps.toast(`Couldn't read the video: ${errMsg(e)}`, "warn");
-  }
-  const still = { ...a, path: frame, kind: "image" as const };
-  const picked = await new Promise<{ mask: Blob; w: number; h: number } | null>((res) => {
-    let done = false;
-    openInpaint(
-      convertFileSrc(frame),
-      a.name,
-      () => {},
-      {
-        select: (q) => segment(still, q),
-        cutout: (mask, w, h) => {
-          done = true;
-          res({ mask, w, h });
-        },
-        selecting: true,
-        pick: { title: "Click the person to cut out", button: "Cut out this person" },
-      },
-    );
-    // Closing the overlay without picking anyone cancels.
-    const overlay = $("#inpaint");
-    const watch = new MutationObserver(() => {
-      if (overlay.hidden && !done) {
-        watch.disconnect();
-        res(null);
-      } else if (done) watch.disconnect();
-    });
-    watch.observe(overlay, { attributes: true, attributeFilter: ["hidden"] });
-  });
-  if (!picked) return;
-  const dlg = $("#person") as HTMLDialogElement;
-  const bgBtn = $("#pc-bg") as HTMLButtonElement;
-  let background: string | null = null;
-  const sync = () => {
-    const out = (dlg.querySelector("input[name=pc-out]:checked") as HTMLInputElement).value as PersonOut;
-    bgBtn.hidden = out !== "background";
-    $("#pc-bg-name").textContent = out === "background" ? (background ? background.split(/[\\/]/).pop()! : "none picked yet") : "";
-    ($("#pc-go") as HTMLButtonElement).disabled = out === "background" && !background;
-  };
-  dlg.querySelectorAll("input[name=pc-out]").forEach((r) => ((r as HTMLInputElement).onchange = sync));
-  bgBtn.onclick = async () => {
-    background = (await invoke<string | null>("pick_background").catch(() => null)) ?? background;
-    sync();
-  };
-  const seconds = await videoSeconds(a.path);
-  $("#pc-est").textContent = `Takes ${aboutTime(MODES.person.secs * Math.max(2, seconds) + 15)} on an RTX 3060.`;
-  sync();
-  dlg.returnValue = "";
-  dlg.showModal();
-  await new Promise((r) => dlg.addEventListener("close", r, { once: true }));
-  if (dlg.returnValue !== "go") return;
-  const out = (dlg.querySelector("input[name=pc-out]:checked") as HTMLInputElement).value as PersonOut;
-  deps.toast("Cutting the person out. It opens when it's done.");
-  try {
-    const name = await uploadImage(picked.mask, "person-mask");
-    const stem = a.name.replace(/\.[^.]+$/, "").replace(/[^\w-]+/g, "-").slice(0, 40);
-    const frames = `${stem}-person-${Date.now().toString(36)}.frames`;
-    const res = await run("person", "Cut out a person", a, { mask: { name, w: picked.w, h: picked.h }, frames }, undefined, { from: "Cut out a person", title: `A person cut out of ${a.name}` });
-    const matte = res.find((x) => x.kind === "video");
-    if (!matte) throw new Error("no matte came back");
-    const dir = `${matte.path.replace(/[\\/][^\\/]+$/, "")}\\${frames}`;
-    const made = await invoke<string>("person_video", { root: deps.root(), frames: dir, source: a.path, out, background });
-    await refresh();
-    if (out === "png") await invoke("reveal", { path: `${made}\\frame_00001_.png` });
-    else openRender(made);
-  } catch (e) {
-    if (errMsg(e) !== "stopped") deps.toast(`Couldn't cut them out: ${errMsg(e)}`, "warn");
-  }
-}
-
-/** Add sound: LTX-2.3 with Lightricks' Foley LoRA watches the video and makes its sound effects (no speech, no
- *  music), then the sound goes onto the original video, saved as a new file next to it. Any sound it had is replaced. */
-async function addSound(a: Asset) {
-  closeLightbox();
-  const secs = await videoSeconds(a.path);
-  const what = await ask(
-    "Add sound",
-    `Say what should be heard, tied to what happens in the video: the sources and how they sound. Any sound it has now is replaced.${secs > FOLEY_MAX_SECONDS ? ` Only the first ${FOLEY_MAX_SECONDS} s get sound.` : ""}`,
-    "e.g. footsteps on gravel, a dog barking twice, wind in the trees",
-  );
-  if (!what) return;
-  deps.toast(`Making the sound: about ${aboutTime(foleySecs(secs))} on an RTX 3060. It opens when it's done.`);
-  try {
-    openRender(await foleyFor(a, secs, what));
-  } catch (e) {
-    if (errMsg(e) !== "stopped") deps.toast(`Couldn't add sound: ${errMsg(e)}`, "warn");
-  }
-}
-
-/** How long Add sound takes for a video this long, in seconds (on the RTX 3060). */
-const foleySecs = (secs: number) => FOLEY_LOAD_SECS + Math.ceil(Math.max(9, Math.floor(Math.min(secs, FOLEY_MAX_SECONDS) * 24)) / FOLEY_WINDOW) * FOLEY_WINDOW_SECS;
-
-/** The sound itself: LTX-2.3 Foley makes it for the video's first 15 s, and it goes onto the original as a new file.
- *  Resolves with that file's path. */
-async function foleyFor(a: Asset, secs: number, what: string, progress?: (pct: number, label: string) => void, from = "Add sound") {
-  const frames = Math.max(9, Math.floor(Math.min(secs, FOLEY_MAX_SECONDS) * 24));
-  // LTX hears the frames at about 832×480 (what the LoRA was made at), the video's shape kept, in multiples of 32.
-  const ratio = a.width && a.height ? a.width / a.height : 16 / 9;
-  const area = 832 * 480;
-  const w = Math.max(256, Math.round(Math.sqrt(area * ratio) / 32) * 32);
-  const h = Math.max(256, Math.round(Math.sqrt(area / ratio) / 32) * 32);
-  const out = await run("foley", what, a, { foley: { frames, w, h } }, progress, { from, title: `Sound for ${a.name}: ${what}` });
-  const track = out.find((x) => x.kind === "audio");
-  if (!track) throw new Error("no sound came back");
-  const video = await invoke<string>("mux_foley", { root: deps.root(), video: a.path, audio: track.path });
-  await refresh();
-  return video;
-}
-
-/** What ffprobe reads of a video (video_info). */
-interface VideoInfo {
-  width: number;
-  height: number;
-  fps: number;
-  frames: number;
-  seconds: number;
-  audio: boolean;
-}
-
-/** A swap's time on the RTX 3060: loading, then each segment's sampling and the rest, a short last one by its frames. */
-function swapSecs(frames: number, q: SwapQuality) {
-  let t = SWAP.loadSecs;
-  for (let start = 0; start === 0 || start + SWAP.overlap < frames; start += SWAP.step) {
-    const k = Math.min(SWAP.part, frames - start) / SWAP.part;
-    t += SWAP.partSecs * k + SWAP.stepSecs * SWAP_STEPS[q] * k ** 1.8;
-  }
-  return t;
-}
-
-// ---------- the Swap panel ----------
-// Swap a character in Studio's create bar (Film's and Video's Swap chip, or a video's "Swap a character…"): the video
-// on the left, who goes in on the right, each dropped from Explorer or the gallery, pasted or picked; then the swap
-// joins the render queue like any render, so another can be set up while it runs.
-let swapOpen = false;
-const sw: { video: Asset | null; info: VideoInfo | null; picture: Blob | null; picName: string; picUrl: string; done: string | null } = {
-  video: null,
-  info: null,
-  picture: null,
-  picName: "",
-  picUrl: "",
-  done: null,
-};
-
-/** Whether the Swap panel is showing (Film and Video modes, with the Swap a character pack). */
-const swapShown = () => swapOpen && (mode === "film" || mode === "video") && !!workflows.swap;
-
-/** The Swap chip beside the other chips: it shows and hides the panel. */
-const swapChip = () =>
-  workflows.swap
-    ? `<button type="button" class="opt pick swap${swapOpen ? " on" : ""}" aria-expanded="${swapOpen}" title="Put the person in a picture in place of a person in a video, moving as they did (SCAIL-2)">⇆ ${mode === "film" ? "<b>Swap</b>" : "Swap a character"}</button>`
-    : "";
-
-/** Opens the Swap panel (in Video mode, unless Film is showing), with this video in it when there's one. */
-async function swapCharacter(a?: Asset) {
-  closeLightbox();
-  deps.show();
-  await ensureWorkflows();
-  if (!workflows.swap) return deps.toast(`workflows\\${MODES.swap.file} wasn't found: add the Swap a character pack in Packs`, "warn");
-  if (mode !== "film" && mode !== "video") {
-    mode = "video";
-    srcAsset = null;
-  }
-  swapOpen = true;
-  renderCreate();
-  if (a) await setSwapVideo(a);
-  $("#swap-panel").scrollIntoView({ block: "nearest", behavior: "smooth" });
-}
-
-/** The video to swap in (null clears it): ffprobe reads its size, frame rate and length first. */
-async function setSwapVideo(a: Asset | null) {
-  const info = a
-    ? await invoke<VideoInfo>("video_info", { path: a.path }).catch((e) => {
-        deps.toast(`Couldn't read the video: ${errMsg(e)}`, "warn");
-        return null;
-      })
-    : null;
-  if (a && !info) return;
-  sw.video = a;
-  sw.info = info;
-  sw.done = null;
-  renderSwap();
-}
-
-/** A video file dropped or pasted from outside: the page gets its bytes, so it's saved first (swap_video_save). */
-async function swapVideoFile(f: File) {
-  try {
-    const body = new Uint8Array(await f.arrayBuffer());
-    const path = await invoke<string>("swap_video_save", body, { headers: { "x-name": encodeURIComponent(f.name), "x-root": encodeURIComponent(deps.root() ?? "") } });
-    await setSwapVideo({ path, name: f.name, kind: "video", mtime: 0, size: f.size });
-  } catch (e) {
-    deps.toast(`Couldn't take ${f.name}: ${errMsg(e)}`, "warn");
-  }
-}
-
-/** Who goes in (null clears it): any picture, or a saved Character's face. */
-function setSwapPicture(b: Blob | null, name = "") {
-  if (sw.picUrl) URL.revokeObjectURL(sw.picUrl);
-  sw.picture = b;
-  sw.picName = b ? name : "";
-  sw.picUrl = b ? URL.createObjectURL(b) : "";
-  sw.done = null;
-  if (!b || !name.endsWith("'s face")) ($("#sp-char") as HTMLSelectElement).value = "";
-  renderSwap();
-}
-
-/** A drop or paste while the panel shows: a video (a render or a file) goes in the Video box, a picture in Person.
- *  False when there's neither. */
-async function swapTake(data: DataTransfer | null): Promise<boolean> {
-  const vid = videoRenderIn(data);
-  if (vid) {
-    findItem(vid).then(setSwapVideo, (e) => deps.toast(errMsg(e), "warn"));
-    return true;
-  }
-  const pic = renderIn(data);
-  if (pic) {
-    const b = await fetch(convertFileSrc(pic))
-      .then((r) => (r.ok ? r.blob() : null))
-      .catch(() => null);
-    if (b) setSwapPicture(b, pic.split(/[\\/]/).pop());
-    return true;
-  }
-  const v = videoIn(data);
-  if (v) {
-    swapVideoFile(v);
-    return true;
-  }
-  const f = imageIn(data);
-  if (f) {
-    setSwapPicture(f, f.name && f.name !== "image.png" ? f.name : "a pasted picture");
-    return true;
-  }
-  return false;
-}
-
-function initSwapPanel() {
-  const vbox = $("#sp-video");
-  const pbox = $("#sp-person");
-  const vfile = $("#sp-video-file") as HTMLInputElement;
-  const pfile = $("#sp-person-file") as HTMLInputElement;
-  const video = $("video", vbox) as HTMLVideoElement;
-  // Click a box to pick (the PC's own file dialog for a video, so it's read where it is); × clears it.
-  vbox.addEventListener("click", async (e) => {
-    if ((e.target as HTMLElement).closest(".swap-clear")) return setSwapVideo(null);
-    if (!("__TAURI_INTERNALS__" in window)) return vfile.click();
-    const path = await invoke<string | null>("pick_video").catch(() => null);
-    if (path) setSwapVideo({ path, name: path.split(/[\\/]/).pop()!, kind: "video", mtime: 0, size: 0 });
-  });
-  pbox.addEventListener("click", (e) => {
-    if ((e.target as HTMLElement).closest(".swap-clear")) return setSwapPicture(null);
-    if ((e.target as HTMLElement).closest("select")) return;
-    pfile.click();
-  });
-  for (const box of [vbox, pbox]) {
-    box.addEventListener("keydown", (e) => {
-      if (e.target !== box || (e.key !== "Enter" && e.key !== " ")) return;
-      e.preventDefault();
-      box.click();
-    });
-    box.addEventListener("dragover", () => box.classList.add("over"));
-    box.addEventListener("dragleave", (e) => !box.contains(e.relatedTarget as Node) && box.classList.remove("over"));
-    box.addEventListener("drop", () => box.classList.remove("over"));
-  }
-  vfile.addEventListener("change", () => {
-    const f = vfile.files?.[0];
-    vfile.value = "";
-    if (f) swapVideoFile(f);
-  });
-  pfile.addEventListener("change", () => {
-    const f = pfile.files?.[0];
-    pfile.value = "";
-    if (f) setSwapPicture(f, f.name);
-  });
-  // The video plays (muted) while the pointer is over it.
-  vbox.addEventListener("mouseenter", () => sw.video && video.play().catch(() => {}));
-  vbox.addEventListener("mouseleave", () => video.pause());
-  $("#sp-char").addEventListener("change", (e) => {
-    const c = characterById((e.target as HTMLSelectElement).value);
-    if (c?.face) setSwapPicture(faceBlob(c), `${c.name}'s face`);
-  });
-  $("#sp-quality").addEventListener("change", renderSwap);
-  ($("#sp-who") as HTMLInputElement).value = "person";
-  $("#sp-consent").textContent = `${CONSENT} Never make sexual content of anyone under 18.`;
-  onCharactersChange(() => swapShown() && renderSwap());
-  $("#sp-go").addEventListener("click", runSwap);
-  $("#sp-add").addEventListener("click", async () => {
-    const path = sw.done;
-    if (!path) return;
-    const add = $("#sp-add") as HTMLButtonElement;
-    add.disabled = true;
-    try {
-      await deps.film.addClip(path, sw.picName.endsWith("'s face") ? `${sw.picName.slice(0, -7)} swapped in` : `Swapped in from ${sw.picName || "a picture"}`);
-    } catch (e) {
-      deps.toast(`Couldn't add it to the film: ${errMsg(e)}`, "warn");
-    }
-    add.disabled = false;
-  });
-}
-
-/** Draws the panel from what's in it. */
-function renderSwap() {
-  const vbox = $("#sp-video");
-  const pbox = $("#sp-person");
-  const video = $("video", vbox) as HTMLVideoElement;
-  const src = sw.video ? convertFileSrc(sw.video.path) : "";
-  if (video.dataset.src !== src) {
-    video.dataset.src = src;
-    if (src) video.src = src;
-    else {
-      video.removeAttribute("src");
-      video.load();
-    }
-  }
-  vbox.classList.toggle("full", !!sw.video);
-  video.hidden = !sw.video;
-  $(".swap-empty", vbox).hidden = !!sw.video;
-  $(".swap-clear", vbox).hidden = !sw.video;
-  $(".swap-name", vbox).textContent = sw.video ? `${sw.video.name}${sw.info ? ` · ${sw.info.seconds.toFixed(1)} s · ${sw.info.width}×${sw.info.height}` : ""}` : "";
-  const img = $("img", pbox) as HTMLImageElement;
-  if (img.getAttribute("src") !== sw.picUrl) {
-    if (sw.picUrl) img.src = sw.picUrl;
-    else img.removeAttribute("src");
-  }
-  pbox.classList.toggle("full", !!sw.picture);
-  img.hidden = !sw.picture;
-  $(".swap-empty", pbox).hidden = !!sw.picture;
-  $(".swap-clear", pbox).hidden = !sw.picture;
-  $(".swap-name", pbox).textContent = sw.picName;
-  // A saved Character's face can go in instead.
-  const sel = $("#sp-char") as HTMLSelectElement;
-  const faces = characters().filter((c) => c.face);
-  const was = sel.value;
-  sel.innerHTML = `<option value="">${faces.length ? "Pick one…" : "none saved yet"}</option>` + faces.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("");
-  sel.value = faces.some((c) => c.id === was) ? was : "";
-  sel.disabled = !faces.length;
-  // How long it takes, and how much of the video is swapped.
-  const q = ($("#sp-quality") as HTMLSelectElement).value as SwapQuality;
-  const info = sw.info;
-  if (info) {
-    const frames = Math.min(info.frames, Math.floor(SWAP.maxSeconds * info.fps));
-    const parts = swapParts(frames);
-    const over = info.seconds > SWAP.maxSeconds + 0.05 ? ` Only the first ${SWAP.maxSeconds} s are swapped.` : "";
-    $("#sp-est").textContent = `Takes ${aboutTime(swapSecs(frames, q))} on an RTX 3060 (${parts} part${parts > 1 ? "s" : ""} of up to ${(SWAP.part / info.fps).toFixed(1)} s). The chat model is unloaded while it runs.${over}`;
-  } else $("#sp-est").textContent = `Up to the first ${SWAP.maxSeconds} s of a video is swapped; 5 s at Draft takes about 12 min on an RTX 3060.`;
-  const go = $("#sp-go") as HTMLButtonElement;
-  go.disabled = !sw.video || !sw.picture;
-  go.textContent = job || starting || current ? "Swap (add to queue)" : "Swap";
-  go.title = !sw.video ? "Put a video in the left box first" : !sw.picture ? "Put a picture of who goes in in the right box first" : "";
-  // When it's done: open it, or put it in the film.
-  const film = sw.done ? deps.film.target() : null;
-  const add = $("#sp-add") as HTMLButtonElement;
-  add.hidden = !film;
-  if (film) add.textContent = `Add to “${film.name}”`;
-  const done = $("#sp-done");
-  done.innerHTML = sw.done ? `Done: <button type="button" class="linkish" id="sp-open">${esc(sw.done.split(/[\\/]/).pop() ?? "")}</button> is in Renders.` : "";
-  if (sw.done) $("#sp-open").onclick = () => sw.done && openRender(sw.done);
-}
-
-/** The Swap button: the swap joins the render queue (the chat model is unloaded for it, the video's sound kept). */
-async function runSwap() {
-  const a = sw.video;
-  const info = sw.info;
-  const picture = sw.picture;
-  if (!a || !info || !picture) return;
-  const q = ($("#sp-quality") as HTMLSelectElement).value as SwapQuality;
-  const target = ($("#sp-who") as HTMLInputElement).value.trim() || "person";
-  const frames = Math.min(info.frames, Math.floor(SWAP.maxSeconds * info.fps));
-  deps.toast(`Swapping ${sw.picName || "the character"} in: ${aboutTime(swapSecs(frames, q))} on an RTX 3060. It's in the render queue.`);
-  try {
-    const path = await swapInto(a, info, picture, target, q);
-    sw.done = path;
-    if (swapShown()) renderSwap();
-    deps.toast(`The swap is done: ${path.split(/[\\/]/).pop()} is in Renders.`);
-  } catch (e) {
-    if (errMsg(e) !== "stopped") deps.toast(`Couldn't swap the character: ${errMsg(e)}`, "warn");
-  }
-}
-
-/** The swap itself: SCAIL-2 puts the character from `picture` in place of `target` in the video (its first 20 s), then
- *  the video's own sound goes back on. Resolves with the new video's path. */
-async function swapInto(a: Asset, info: VideoInfo, picture: Blob, target: string, q: SwapQuality, progress?: (pct: number, label: string) => void, from = "Swap a character") {
-  const frames = Math.min(info.frames, Math.floor(SWAP.maxSeconds * info.fps));
-  // The video's shape at about 832×480 (what SCAIL-2 and the distill LoRA were made at), in multiples of 32.
-  const ratio = info.width && info.height ? info.width / info.height : 16 / 9;
-  const w = Math.max(256, Math.round(Math.sqrt(SWAP.area * ratio) / 32) * 32);
-  const h = Math.max(256, Math.round(Math.sqrt(SWAP.area / ratio) / 32) * 32);
-  // As a reference: scaled to at most 2048 px and kept as a JPEG.
-  const r = await loadReference(picture);
-  URL.revokeObjectURL(r.url);
-  const ref = await uploadReference(r);
-  const job: SwapJob = { ref, who: target, steps: SWAP_STEPS[q], frames, w, h };
-  const out = await run("swap", target, a, { swap: job }, progress, { from, title: `${a.name}: ${target} swapped` });
-  const made = out.find((x) => x.kind === "video" && x.path !== a.path);
-  if (!made) throw new Error("no video came back");
-  const swapped = await invoke<string>("mux_swap", { root: deps.root(), video: made.path, source: a.path });
-  await refresh();
-  return swapped;
-}
-
-/** A video's length in seconds, from its own metadata (8 when it can't be read). */
-function videoSeconds(path: string): Promise<number> {
-  return new Promise((res) => {
-    const v = document.createElement("video");
-    v.preload = "metadata";
-    v.onloadedmetadata = () => res(Number.isFinite(v.duration) ? v.duration : 8);
-    v.onerror = () => res(8);
-    setTimeout(() => res(8), 5000);
-    v.src = convertFileSrc(path);
-  });
-}
-
-/** A one-line question in a small dialog; resolves with the answer (null when cancelled). */
-function ask(title: string, text: string, placeholder: string): Promise<string | null> {
-  const dlg = $("#ask") as HTMLDialogElement;
-  const inp = $("#ask-input") as HTMLInputElement;
-  $("#ask-title").textContent = title;
-  $("#ask-text").textContent = text;
-  inp.placeholder = placeholder;
-  inp.value = "";
-  // Enter answers (the form's first button is Cancel, which Enter would otherwise press).
-  inp.onkeydown = (e) => {
-    if (e.key !== "Enter") return;
-    e.preventDefault();
-    dlg.close("ok");
-  };
-  dlg.returnValue = "";
-  dlg.showModal();
-  inp.focus();
-  return new Promise((res) =>
-    dlg.addEventListener("close", () => res(dlg.returnValue === "ok" && inp.value.trim() ? inp.value.trim() : null), { once: true }),
-  );
-}
-
-// ---------- click to select ----------
-// SAM 3.1 answers a click in ~3 s, so it's run straight away instead of waiting in the render queue. A second ComfyUI on
-// the small card (start-all.ps1 with "comfyQuick": "on" in data\gpu-settings.json, port 8189) takes it when it runs:
-// selecting then doesn't wait for a render on the big card, nor unload anything. Measured: 3 s a selection on the
-// RTX 2060 (2.0 GB peak) and on the 3060 (1.7 GB).
-const COMFY_QUICK = "http://127.0.0.1:8189";
-let quickAt = 0;
-let quick: string | null = null;
-
-/** The ComfyUI to select with: the quick one on the small card if it's running (checked every 30 s), else the main one. */
-async function selectComfy(): Promise<string> {
-  if (Date.now() - quickAt < 30_000) return quick ?? COMFY;
-  quickAt = Date.now();
-  try {
-    quick = (await http(`${COMFY_QUICK}/system_stats`)).ok ? COMFY_QUICK : null;
-  } catch {
-    quick = null;
-  }
-  return quick ?? COMFY;
-}
-
-/** SAM 3.1's mask for a picture: what's under the clicks (and not under the negative ones), or what's named. White is
- *  selected, at the picture's own size. */
-async function segment(src: Source, q: SelectQuery): Promise<Blob> {
-  await ensureWorkflows();
-  if (!workflows.select) throw new Error(`workflows\\${MODES.select.file} wasn't found (update the Workstation and add the select pack)`);
-  const base = await selectComfy();
-  const g = structuredClone(workflows.select);
-  g["2"].inputs.image = "path" in src ? await invoke<string>("comfy_upload", { path: src.path }) : await uploadReference(src);
-  if (q.text) g["3"].inputs.text = q.text;
-  else {
-    delete g["3"];
-    delete g["4"].inputs.conditioning;
-    g["4"].inputs.positive_coords = JSON.stringify(q.points);
-    g["4"].inputs.negative_coords = JSON.stringify(q.negative);
-  }
-  // On the main ComfyUI, a chat model filling its card is unloaded first (SAM needs ~2 GB). It waits for a running render.
-  if (base === COMFY) {
-    try {
-      const free = (await (await http(`${COMFY}/system_stats`)).json()).devices?.[0]?.vram_free ?? 0;
-      if (free < 2.5 * 2 ** 30) await deps.freeGpu();
-    } catch {
-      /* ComfyUI answers the prompt below or says why not */
-    }
-  }
-  let r: Response;
-  try {
-    r = await http(`${base}/prompt`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: g, client_id: clientId, front: true }) });
-  } catch (e) {
-    throw new Error(errMsg(e) === "not reachable" ? "ComfyUI isn't running" : errMsg(e));
-  }
-  const body = await r.json().catch(() => ({}));
-  if (!r.ok || !body.prompt_id) throw new Error(body.error?.message ?? `ComfyUI answered ${r.status}`);
-  for (let t0 = Date.now(); Date.now() - t0 < 20 * 60_000; await new Promise((res) => setTimeout(res, 400))) {
-    const h = (await (await http(`${base}/history/${body.prompt_id}`)).json())[body.prompt_id];
-    if (!h) continue;
-    if (h.status?.status_str === "error") {
-      const err = (h.status.messages ?? []).find((m: any) => m[0] === "execution_error")?.[1]?.exception_message;
-      throw new Error(String(err ?? "SAM 3.1 failed").split("\n")[0]);
-    }
-    const f = h.outputs?.["6"]?.images?.[0];
-    if (!f) throw new Error("SAM 3.1 returned no mask");
-    const url = `${base}/view?filename=${encodeURIComponent(f.filename)}&subfolder=${encodeURIComponent(f.subfolder ?? "")}&type=${f.type ?? "temp"}`;
-    return await (await http(url)).blob();
-  }
-  throw new Error("SAM 3.1 took too long");
-}
-
-function reusePrompt(a: Asset) {
-  deps.show();
-  ($("#gen-prompt") as HTMLInputElement).value = a.prompt || "";
-  // A song's style and its lyrics both come back.
-  if (a.kind === "audio") ($("#song-lyrics-text") as HTMLTextAreaElement).value = isInstrumental(a.lyrics) ? "" : (a.lyrics ?? "");
-  srcAsset = null;
-  mode = a.kind === "video" ? "video" : a.kind === "audio" ? "music" : "image";
-  renderCreate();
-  closeLightbox();
-  $("#gen-prompt").focus();
-}
-
-/** Fixes the seed for the next render of this kind, to vary a render you liked. */
-function reuseSeed(a: Asset) {
-  deps.toast(fixSeed(a));
-}
-
-/** Fixes the next render's seed to this render's, and says so. */
-function fixSeed(a: Asset) {
-  const key: SettingsKey =
-    a.kind === "image" ? "image" : a.kind === "audio" ? "music" : /svi-long/i.test(a.name) ? "long" : /wan/i.test(a.model ?? a.name) ? "animate" : "video";
-  update(key, { seed: a.seed ?? null });
-  return `The next ${key === "image" ? "image" : key === "music" ? "song" : "video"} uses seed ${a.seed}. Pick Random in Settings to go back.`;
-}
-
-const revealFile = (a: Asset) => invoke("reveal", { path: a.path }).catch((e) => deps.toast(errMsg(e), "warn"));
-
-/** Runs a Studio command on a render's file and toasts the outcome. */
-async function fileAction(cmd: string, a: Asset, args: Record<string, unknown>, done?: string) {
-  try {
-    await invoke(cmd, { root: deps.root(), path: a.path, ...args });
-    if (done) deps.toast(done);
-  } catch (e) {
-    deps.toast(errMsg(e), "warn");
-  }
-}
-
-async function saveAs(a: Asset) {
-  try {
-    const dest = await invoke<string | null>("save_render_as", { root: deps.root(), path: a.path });
-    if (dest) deps.toast(`Saved a copy as ${dest}`);
-  } catch (e) {
-    deps.toast(`Couldn't save it: ${errMsg(e)}`, "warn");
-  }
-}
-
-/** Asks first, then moves the file to the Recycle Bin and takes it out of the gallery and chats. */
-async function deleteRender(a: Asset) {
-  closeMenu();
-  if (!(await confirmDelete(`Delete this ${kindWord(a)}?`, a.name))) return;
-  try {
-    await removeRender(a);
-  } catch (e) {
-    deps.toast(`Couldn't delete ${a.name}: ${errMsg(e)}`, "warn");
-    return;
-  }
-  deps.toast(`Moved ${a.name} to the Recycle Bin.`);
-}
-
-const kindWord = (a: Asset) => (a.kind === "audio" ? "song" : a.kind === "model" ? "3D model" : a.kind);
-
-/** The "goes to the Recycle Bin" question; true when it's answered Delete. */
-async function confirmDelete(title: string, name: string) {
-  const dlg = $("#del-confirm") as HTMLDialogElement;
-  $("#del-title").textContent = title;
-  $("#del-name").textContent = name;
-  dlg.returnValue = "";
-  dlg.showModal();
-  await new Promise((r) => dlg.addEventListener("close", r, { once: true }));
-  return dlg.returnValue === "delete";
-}
-
-/** Moves a render to the Recycle Bin and takes it out of the gallery and chats (asked first, here or on the phone). */
-async function removeRender(a: Asset) {
-  await invoke("delete_render", { root: deps.root(), path: a.path, mtime: a.mtime });
-  gone(a.path);
-  render();
-}
-
-/** Forgets a deleted render: the viewer, the gallery, its star and pick, and chat messages that showed it. */
-function gone(path: string) {
-  if (lbAsset?.path === path) closeLightbox();
-  items = items.filter((x) => x.path !== path);
-  selected.delete(path);
-  if (starred.delete(path)) saveStarred();
-  // Chat messages that showed it say it's gone instead of a broken picture.
-  $$<HTMLElement>("figure.chat-render").forEach((f) => f.dataset.path === path && f.classList.add("missing"));
-}
-
-// ---------- right-click menu ----------
-type MenuItem = { label: string; run: () => void; key?: string; danger?: boolean } | "-";
-let menuEl: HTMLElement | null = null;
-
-function closeMenu() {
-  menuEl?.remove();
-  menuEl = null;
-}
-
-function showMenu(e: MouseEvent, a: Asset) {
-  e.preventDefault();
-  e.stopPropagation();
-  closeMenu();
-  const image = a.kind === "image";
-  const model = a.kind === "model";
-  const list: MenuItem[] = [
-    ...(model ? [{ label: "Open in 3D viewer", run: () => deps.openModel(a.path, a.name) }] : []),
-    { label: image ? "Open" : model ? "Open in default app" : "Play", run: () => fileAction("open_render", a, {}), key: model ? "3D Viewer, Blender…" : "in default app" },
-    { label: "Show info", run: () => openLightbox(a) },
-    { label: starred.has(a.path) ? "Unstar" : "Star", run: () => toggleStar(a.path), key: "Starred filter" },
-    { label: "Open in folder", run: () => revealFile(a) },
-    "-",
-    ...(image && workflows.edit ? [{ label: "Edit with Qwen-Image…", run: () => startFrom(a, "image") }] : []),
-    ...(image && workflows.inpaint ? [{ label: "Paint to change…", run: () => paintToChange(a) }] : []),
-    ...(image && workflows.select ? [{ label: "Select to change or cut out…", run: () => paintToChange(a, true), key: "SAM 3.1" }] : []),
-    ...(image && workflows.cutout ? [{ label: "Remove background", run: () => removeBackground(a), key: "transparent PNG" }] : []),
-    ...(image && workflows.angle ? [{ label: "New camera angle…", run: () => newAngle(a), key: "reshoot" }] : []),
-    ...(image && workflows.outfit ? [{ label: "Try on outfit…", run: () => tryOnOutfit(a), key: "dress up" }] : []),
-    ...(image && workflows.restore ? [{ label: "Restore photo…", run: () => restorePhoto(a), key: "blur, noise, old prints" }] : []),
-    ...(image && workflows.manga ? [{ label: "Make it manga", run: () => makeManga(a), key: "black & white page" }] : []),
-    ...(image && ocrReady() ? [{ label: "Read the text", run: () => (closeLightbox(), readText(a.path, a.name)), key: "Unlimited-OCR" }] : []),
-    ...(image && translateReady() ? [{ label: "Translate the text…", run: () => (closeLightbox(), openTranslate("", a.path)), key: "Index-Translate" }] : []),
-    ...(a.kind === "video" && workflows.person && workflows.select ? [{ label: "Cut out a person…", run: () => personCutout(a), key: "click, MatAnyone2" }] : []),
-    ...(a.kind === "video" && workflows.vidcut ? [{ label: "Cut out a subject…", run: () => videoCutout(a), key: "green screen" }] : []),
-    ...(a.kind === "video" && workflows.foley ? [{ label: "Add sound…", run: () => addSound(a), key: "Foley" }] : []),
-    ...(a.kind === "video" && workflows.swap ? [{ label: "Swap a character…", run: () => swapCharacter(a), key: "SCAIL-2" }] : []),
-    ...upscaleItems(a),
-    ...songEditItems(a),
-    ...(image && (workflows.animate || workflows.long) ? [{ label: "Animate (image → video)…", run: () => startFrom(a, "video") }] : []),
-    ...(image && (workflows.ref || workflows.reffast) ? [{ label: "Use as reference image", run: () => useAsReference(a) }] : []),
-    ...(image && workflows.model3d ? [{ label: "Make a 3D model", run: () => makeModel(a), key: "Pixal3D" }] : []),
-    ...(image && workflows.talk ? [{ label: "Make it talk…", run: () => deps.makeTalk(a.path), key: "InfiniteTalk" }] : []),
-    ...(image && workflows.song ? [{ label: "Make a song about it", run: () => deps.songFromPicture(a.path), key: "in chat" }] : []),
-    ...(image ? [{ label: "Make a laser file…", run: () => laser(a), key: "engrave or cut" }] : []),
-    ...(a.prompt ? [{ label: a.kind === "audio" ? "Reuse style and lyrics" : "Reuse prompt", run: () => reusePrompt(a) }] : []),
-    ...(a.seed != null ? [{ label: "Reuse seed", run: () => reuseSeed(a), key: String(a.seed) }] : []),
-    "-",
-    ...(image ? [{ label: "Copy image", run: () => fileAction("copy_render", a, { asImage: true }, "Image copied.") }] : []),
-    { label: "Copy file", run: () => fileAction("copy_render", a, { asImage: false }, "File copied. Paste it into a folder or a chat app."), key: "to paste elsewhere" },
-    ...(a.prompt ? [{ label: a.kind === "audio" ? "Copy style" : "Copy prompt", run: () => copy(a.prompt || "", a.kind === "audio" ? "Style" : "Prompt") }] : []),
-    ...(a.kind === "audio" && a.lyrics && !isInstrumental(a.lyrics) ? [{ label: "Copy lyrics", run: () => copy(a.lyrics || "", "Lyrics") }] : []),
-    { label: "Copy file path", run: () => copy(a.path, "Path") },
-    { label: "Save a copy as…", run: () => saveAs(a) },
-    "-",
-    { label: "Delete…", run: () => deleteRender(a), key: "Recycle Bin", danger: true },
-  ];
-  const m = document.createElement("div");
-  m.className = "ctx-menu";
-  m.setAttribute("role", "menu");
-  let prev: MenuItem | null = "-";
-  for (const it of list) {
-    if (it === "-") {
-      if (prev !== "-") m.appendChild(document.createElement("hr"));
-    } else {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.setAttribute("role", "menuitem");
-      if (it.danger) b.className = "danger";
-      b.innerHTML = `<span></span>${it.key ? "<kbd></kbd>" : ""}`;
-      $("span", b).textContent = it.label;
-      if (it.key) $("kbd", b).textContent = it.key;
-      b.addEventListener("click", () => {
-        closeMenu();
-        it.run();
-      });
-      m.appendChild(b);
-    }
-    prev = it;
-  }
-  if (m.lastElementChild?.tagName === "HR") m.lastElementChild.remove();
-  document.body.appendChild(m);
-  // Keep it on screen: open up or left when there's no room.
-  const r = m.getBoundingClientRect();
-  m.style.left = `${Math.max(4, Math.min(e.clientX, innerWidth - r.width - 4))}px`;
-  m.style.top = `${Math.max(4, Math.min(e.clientY, innerHeight - r.height - 4))}px`;
-  menuEl = m;
-  ($("button", m) as HTMLButtonElement | null)?.focus();
-}
-
-document.addEventListener("mousedown", (e) => {
-  if (menuEl && !menuEl.contains(e.target as Node)) closeMenu();
-});
-document.addEventListener("keydown", (e) => {
-  if (!menuEl) return;
-  if (e.key === "Escape") {
-    e.stopPropagation();
-    closeMenu();
-  } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-    e.preventDefault();
-    const bs = $$<HTMLButtonElement>("button", menuEl);
-    const i = bs.indexOf(document.activeElement as HTMLButtonElement);
-    bs[(i + (e.key === "ArrowDown" ? 1 : bs.length - 1)) % bs.length]?.focus();
-  }
-}, true);
-addEventListener("blur", closeMenu);
-addEventListener("resize", closeMenu);
-addEventListener("scroll", closeMenu, true);
-
-async function copy(text: string, what = "Prompt") {
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand("copy");
-    ta.remove();
-  }
-  deps.toast(`${what} copied.`);
 }
 
 // ---------- generation ----------
@@ -3700,7 +700,7 @@ async function generate() {
 
 /** Adds a render to the queue and resolves with its files when it's done (rejects if it fails or is stopped).
  *  `front`: straight after the running one (a chain's second step); `note`: shown before its progress. */
-function run(
+export function run(
   gm: GenMode,
   prompt: string,
   src: Source | null,
@@ -3754,7 +754,7 @@ async function layoutScene(prompt: string, r: Reference, gm: GenMode) {
 }
 
 /** A video featuring the reference: Qwen-Image puts it in a first frame at the video's shape, then LTX animates it. */
-async function refVideo(prompt: string, r: Reference, kind: RefKind, progress?: (pct: number, label: string) => void, from?: string) {
+export async function refVideo(prompt: string, r: Reference, kind: RefKind, progress?: (pct: number, label: string) => void, from?: string) {
   const first = refImageMode();
   const [frame] = await run(first, prompt, r, { kind, override: frameSize() }, progress, { note: "Step 1 of 2 · first frame · ", from });
   return run("refvideo", prompt, frame, {}, progress, { front: true, note: "Step 2 of 2 · video · ", from });
@@ -3787,8 +787,8 @@ interface QueueOpts {
 }
 
 /** ACE-Step's way of asking for no vocals. */
-const INSTRUMENTAL = "[Instrumental]";
-const isInstrumental = (l: string | null | undefined) => !l?.trim() || /^\[(instrumental|inst)\]$/i.test(l.trim());
+export const INSTRUMENTAL = "[Instrumental]";
+export const isInstrumental = (l: string | null | undefined) => !l?.trim() || /^\[(instrumental|inst)\]$/i.test(l.trim());
 
 /** What Qwen-Image is asked: it's an edit model, so it redraws the picture it's given unless told what to change, and
  *  it can't see the mask. The painted area is greyed out in its copy and it's told to fill the grey. */
@@ -3873,10 +873,10 @@ function mossGraph(g: any, prompt: string, alpha = false) {
  * the restore request, and Tiled Upscale Stitch blends them back, each tile's colours matched to the same tile of the
  * picture. A picture is redrawn at no more than 8 times its own megapixels and enlarged plainly from there, as the
  * node's max_growth does, so a small picture isn't invented past its detail. */
-const REDRAW_MP: Partial<Record<GenMode, number>> = { redraw4: 4, redraw8: 8 };
-const REDRAW = { tileMp: 2, overlap: 128, growth: 8 };
+export const REDRAW_MP: Partial<Record<GenMode, number>> = { redraw4: 4, redraw8: 8 };
+export const REDRAW = { tileMp: 2, overlap: 128, growth: 8 };
 /** The megapixels a redraw makes of this picture. */
-const redrawMp = (gm: GenMode, src: Source | null) => {
+export const redrawMp = (gm: GenMode, src: Source | null) => {
   const own = src?.width && src.height ? (src.width * src.height) / MP : 1;
   return Math.min(REDRAW_MP[gm] ?? 4, own * REDRAW.growth);
 };
@@ -3939,7 +939,7 @@ async function checkAlpha(graph: any) {
  * came out smaller and moved, so the picture goes in at about 1 MP; further pictures at 1 MP bled into it (a red knit
  * texture over the cabin), so they go in at 0.25 MP.
  * MOSS-Image has no filter, so the uncensored rule needs nothing here. */
-const MOSS_EDIT = {
+export const MOSS_EDIT = {
   unet: "moss\\moss_image_sft_int8_convrot.safetensors",
   clip: "moss\\qwen3.5_9b_w4a8_gptq.safetensors",
   vae: "moss\\flux2-vae_small.safetensors",
@@ -3950,8 +950,8 @@ const MOSS_EDIT = {
   refs: 3,
   moreMp: 0.25,
 };
-const MOSS_EDIT_MODES: GenMode[] = ["edit", "inpaint", "ref", "reffast"];
-const mossEdits = (gm: GenMode) => MOSS_EDIT_MODES.includes(gm) && settings().image.editModel === "moss";
+export const MOSS_EDIT_MODES: GenMode[] = ["edit", "inpaint", "ref", "reffast"];
+export const mossEdits = (gm: GenMode) => MOSS_EDIT_MODES.includes(gm) && settings().image.editModel === "moss";
 
 /** Turns a finished Qwen-Image edit, Paint to change or Reference graph into the same render on MOSS-Image: the same
  *  pictures as references (each at about 1 MP; an inpaint's is the greyed copy at the size it's sampled at) and the
@@ -4043,8 +1043,8 @@ async function hasNode(name: string): Promise<boolean> {
  * 1,525 s. Not LTX-2.5: its steps took 7.9 s with and without (KJNodes' LTX-2 patch too), and most of its time isn't
  * sampling. TeaCache and EasyCache were left out: at 4 and 8 distilled steps EasyCache skipped none on LTX, and TeaCache
  * saved 28 s of 368 on a Wan clip. */
-const SAGE_FAMILIES: Family[] = ["wan", "svi"];
-const SAGE_HINT = "SageAttention for Wan 2.2 on RTX 30-series and newer cards (a long video ~14% quicker); it does nothing where it can't run";
+export const SAGE_FAMILIES: Family[] = ["wan", "svi"];
+export const SAGE_HINT = "SageAttention for Wan 2.2 on RTX 30-series and newer cards (a long video ~14% quicker); it does nothing where it can't run";
 const MODEL_LOADERS = ["UNETLoader", "UnetLoaderGGUF"];
 
 /** Puts Workstation Sage Attention between each diffusion-model loader and everything that uses its model. */
@@ -4183,7 +1183,7 @@ function foleyGraph(g: any, f: NonNullable<QueueOpts["foley"]>, seed: number) {
 }
 
 /** A Swap a character render: the uploaded picture, who's replaced, the source's frames to swap and the size. */
-interface SwapJob {
+export interface SwapJob {
   ref: string; // the character's picture in ComfyUI's input folder
   who: string; // what SAM 3.1 looks for in the video ("person", "the man in the red jacket")
   steps: number;
@@ -4291,7 +1291,7 @@ async function checkSwap(graph: any) {
 // ---------- the render queue ----------
 // Every render (Studio, chat, Paint to change) goes through here and they run one at a time. A render's settings,
 // seed and workflow are fixed when it's added, so changing the settings afterwards only affects new ones.
-interface QJob {
+export interface QJob {
   id: number;
   gm: GenMode;
   prompt: string;
@@ -4313,16 +1313,114 @@ interface QJob {
   waiter?: { progress: (pct: number, label: string) => void; resolve: (a: Asset[]) => void; reject: (e: Error) => void };
   cancelled?: boolean; // stopped while it was getting ready
   audio?: Blob; // a talking video's voice recording, uploaded with the picture
+  promptId?: string; // ComfyUI's id once it has the render, and when it started there
+  started?: number;
+  held?: boolean; // saved from before the page reloaded: waits for Resume
 }
-const rq: QJob[] = [];
-let current: QJob | null = null;
+export const rq: QJob[] = [];
+export let current: QJob | null = null;
 let jobIds = 1;
+
+// ---------- the queue kept on disk (queuestore.ts) ----------
+// Not "" (an empty queue): the first save always writes, so what was restored and has since finished is cleared.
+let savedKey: string | null = null;
+let saving = Promise.resolve();
+/** Saves the waiting and running renders when that changes (not on every progress tick). */
+function persistQueue() {
+  const live = rq.filter((j) => j.state === "waiting" || j.state === "running");
+  const key = live.map((j) => `${j.id}${j.state}${j.promptId ?? ""}${j.held ? "h" : ""}`).join(",");
+  if (key === savedKey) return;
+  savedKey = key;
+  const rows = live.map((j, pos) => {
+    const { waiter: _w, result: _r, src, ...rest } = j;
+    // A reference's object URL dies with the page; its picture (the Blob) is kept and the URL made again.
+    return { ...rest, pos, src: src && "blob" in src ? { ...src, url: "" } : src };
+  });
+  saving = saving.then(() => saveJobs(rows)).catch(() => {});
+}
+
+/** After a reload: the render that was running is picked up from ComfyUI (still going, or already finished), or put
+ *  back first in the queue if ComfyUI lost it. The waiting ones come back paused, for Resume or Clear. */
+async function restoreQueue() {
+  let saved: (QJob & { pos: number })[] = [];
+  try {
+    saved = (await loadJobs<QJob & { pos: number }>()).sort((a, b) => a.pos - b.pos);
+  } catch {
+    return;
+  }
+  if (!saved.length) return;
+  for (const j of saved) {
+    if (j.src && "blob" in j.src) j.src.url = URL.createObjectURL(j.src.blob);
+    jobIds = Math.max(jobIds, j.id + 1);
+  }
+  const running = saved.find((j) => j.state === "running");
+  let picked = false;
+  if (running?.promptId) {
+    const where = await comfyHas(running.promptId);
+    if (where === "queued") {
+      current = running;
+      stepNote = running.note;
+      job = { id: running.promptId, mode: running.gm, started: running.started ?? Date.now(), prompt: running.prompt, nodes: running.nodes, outputs: [], seed: running.seed, count: running.count };
+      $("#job-what").textContent = running.prompt;
+      $("#job").hidden = false;
+      setJob(running.pct || 5, "Picked up after the reload…");
+      picked = true;
+    } else if (where === "done") {
+      await refresh();
+      const names = await comfyOutputs(running.promptId);
+      Object.assign(running, { state: "done", result: items.filter((a) => names.includes(a.name)), took: Math.round((Date.now() - (running.started ?? Date.now())) / 1000) });
+      picked = true;
+    }
+  }
+  for (const j of saved) {
+    if (j === running && picked) continue;
+    Object.assign(j, { state: "waiting", pct: 0, status: "Waiting", held: true, promptId: undefined });
+  }
+  rq.unshift(...saved);
+  if (picked && running) deps.toast(running.state === "done" ? `The render that was going finished while Prestige reloaded: ${running.prompt.slice(0, 60)}` : `Picked up the render that was going: ${running.prompt.slice(0, 60)}`);
+  renderQueue();
+  renderCreate();
+}
+
+/** Whether ComfyUI still has a render ("queued": running or waiting there), has finished it, or doesn't know it. */
+async function comfyHas(id: string): Promise<"queued" | "done" | "gone"> {
+  try {
+    const q = await (await http(`${COMFY}/queue`)).json();
+    const ids = [...(q.queue_running ?? []), ...(q.queue_pending ?? [])].map((x: any[]) => x[1]);
+    if (ids.includes(id)) return "queued";
+    return Object.keys(await (await http(`${COMFY}/history/${id}`)).json()).length ? "done" : "gone";
+  } catch {
+    return "gone";
+  }
+}
+
+/** The files a finished ComfyUI render saved. */
+async function comfyOutputs(id: string): Promise<string[]> {
+  try {
+    const h = (await (await http(`${COMFY}/history/${id}`)).json())[id];
+    if (h?.status?.status_str === "error") return [];
+    return Object.values<any>(h?.outputs ?? {}).flatMap((o) => Object.values<any>(o).flat()).filter((f) => f?.filename && f.type === "output").map((f) => f.filename);
+  } catch {
+    return [];
+  }
+}
+
+/** Resume (or Clear) the renders that came back from before the reload. */
+function releaseHeld(run: boolean) {
+  for (let i = rq.length - 1; i >= 0; i--) {
+    if (!rq[i].held) continue;
+    if (run) rq[i].held = false;
+    else rq.splice(i, 1);
+  }
+  renderQueue();
+  pump();
+}
 
 /** Renders whose workflow has no Studio settings (and so no seed setting of their own). */
 const NO_SETTINGS: Family[] = ["talk", "select", "cutout", "vidcut", "upscale", "songedit", "foley", "person", "world", "swap"];
 
 /** The modes that render with Qwen-Image-2.1, so a face or style taught with Fizgig can join them. */
-const QWEN_LORA_MODES: GenMode[] = ["image", "fast", "edit", "inpaint", "ref", "reffast"];
+export const QWEN_LORA_MODES: GenMode[] = ["image", "fast", "edit", "inpaint", "ref", "reffast"];
 
 /** The taught face or style picked in the image settings, if this mode can use it and it's still there. */
 function activeLora(gm: GenMode): TrainedLora | null {
@@ -4422,7 +1520,7 @@ function prepare(gm: GenMode, prompt: string, src: Source | null, opts: QueueOpt
 }
 
 /** Adds a render to the queue (throws when its workflow is missing). */
-function enqueue(
+export function enqueue(
   gm: GenMode,
   prompt: string,
   src: Source | null,
@@ -4455,7 +1553,7 @@ function enqueue(
 /** Starts the next waiting render when nothing is running. */
 async function pump() {
   if (current || job || starting) return;
-  const next = rq.find((x) => x.state === "waiting");
+  const next = rq.find((x) => x.state === "waiting" && !x.held);
   if (!next) return;
   current = next;
   next.state = "running";
@@ -4481,7 +1579,7 @@ async function pump() {
 }
 
 /** Stops a render: takes a waiting one out of the queue, or interrupts the running one. */
-function cancelJob(j: QJob) {
+export function cancelJob(j: QJob) {
   if (j.state === "waiting") {
     j.state = "stopped";
     j.waiter?.reject(new Error("stopped"));
@@ -4494,8 +1592,8 @@ function cancelJob(j: QJob) {
 }
 
 /** Puts a failed or stopped render back in the queue, as it was (same settings and seed). */
-function retryJob(j: QJob) {
-  rq.push({ ...j, id: jobIds++, state: "waiting", pct: 0, status: "Waiting", error: undefined, result: undefined, took: undefined, added: Date.now(), waiter: undefined, note: "", cancelled: undefined });
+export function retryJob(j: QJob) {
+  rq.push({ ...j, id: jobIds++, state: "waiting", pct: 0, status: "Waiting", error: undefined, result: undefined, took: undefined, added: Date.now(), waiter: undefined, note: "", cancelled: undefined, promptId: undefined, started: undefined, held: undefined });
   renderQueue();
   pump();
 }
@@ -4527,8 +1625,9 @@ const queueListeners = new Set<() => void>();
 export const onQueueChange = (f: () => void) => queueListeners.add(f);
 
 /** The queue under the create bar, and the count on the Studio button. */
-function renderQueue() {
+export function renderQueue() {
   queueListeners.forEach((f) => f());
+  persistQueue();
   const live = rq.filter((j) => j.state === "waiting" || j.state === "running");
   const badge = document.getElementById("studio-count");
   if (badge) badge.textContent = live.length ? String(live.length) : "";
@@ -4546,6 +1645,17 @@ function renderQueue() {
     .join(" · ");
   const list = $("#rq-list");
   list.innerHTML = "";
+  const held = rq.filter((j) => j.held && j.state === "waiting").length;
+  if (held) {
+    const bar = document.createElement("div");
+    bar.className = "rq-held";
+    bar.innerHTML = `<span></span><button type="button" class="linkish">resume</button><button type="button" class="linkish">clear</button>`;
+    $("span", bar).textContent = `${held} render${held === 1 ? " was" : "s were"} waiting before Prestige reloaded.`;
+    const [go, drop] = bar.querySelectorAll("button");
+    go.addEventListener("click", () => releaseHeld(true));
+    drop.addEventListener("click", () => releaseHeld(false));
+    list.appendChild(bar);
+  }
   for (const j of rq) {
     const row = document.createElement("div");
     row.className = `rq-row ${j.state}`;
@@ -4553,7 +1663,9 @@ function renderQueue() {
     const status =
       j.state === "running"
         ? j.status
-        : j.state === "waiting"
+        : j.state === "waiting" && j.held
+          ? "Paused · from before the reload"
+          : j.state === "waiting"
           ? `Waiting · ${rq.filter((x) => (x.state === "waiting" || x.state === "running") && rq.indexOf(x) < rq.indexOf(j)).length} ahead`
           : j.state === "done"
             ? `Done in ${ago((j.took ?? 0) * 1000)}${j.result && j.result.length > 1 ? ` · ${j.result.length} files` : ""}`
@@ -4682,6 +1794,7 @@ async function submit(j: QJob) {
       throw new Error(why);
     }
     job = { id: body.prompt_id, mode: gm, started: Date.now(), prompt, nodes, outputs: [], seed, count };
+    Object.assign(j, { promptId: job.id, started: job.started });
     setJob(2, "Queued. Loading models…");
     render();
   } catch (e) {
@@ -4783,310 +1896,8 @@ async function finish(ok: boolean, why = "") {
   pump();
 }
 
-// ---------- used from chat ----------
-export type MediaKind = "image" | "video" | "audio";
-/** The workflow chat uses: the Studio's Image mode pick, LTX text-to-video, or an ACE-Step song. */
-const chatMode = (kind: MediaKind): GenMode => (kind === "audio" ? "song" : kind === "video" ? "video" : pictureMode());
-
-/** The model chat images (or videos) are made with ("Qwen-Image-2.1 → LTX-2.5" for a video from a reference). */
-export async function modelLabel(kind: MediaKind, withRef = false) {
-  await ensureWorkflows();
-  if (!withRef) return modeOf(chatMode(kind)).label;
-  const img = modeOf(refImageMode()).label;
-  if (kind !== "video") return img;
-  return chained("refvideo") ? `${img} → ${modeOf("refvideo").label}` : modeOf("refvideo").label;
-}
-
-/** Makes an image (or as many as the settings ask for) or a video and resolves with the saved files. With a
- *  reference, the picture's character or item goes into the scene (for a video, into its first frame). */
-export async function renderMedia(
-  kind: MediaKind,
-  prompt: string,
-  progress: (pct: number, label: string) => void,
-  r?: Reference,
-  kindOverride?: RefKind,
-): Promise<Asset[]> {
-  await ensureWorkflows();
-  if (!r) return run(chatMode(kind), prompt, null, {}, progress, { from: "chat" });
-  // The same choices as Studio's reference slot: Auto / Character / Item, and for a video its first frame
-  // (a character's face is always a Character).
-  const refKind = kindOverride ?? refPrefs().kind;
-  const gm = kind === "video" ? "refvideo" : refImageMode();
-  for (const need of chained(gm) ? (["refvideo", refImageMode()] as GenMode[]) : [gm])
-    if (!workflowOf(need)) throw new Error(`workflows\\${modeOf(need).file} wasn't found`);
-  if (chained(gm)) return refVideo(prompt, r, refKind, progress, "chat");
-  return run(gm, prompt, r, gm === "refvideo" ? {} : { kind: refKind }, progress, { from: "chat" });
-}
-
-/** Chat's /world: renders the world so far (a segment more than last time; ComfyUI reuses the earlier ones while they
- *  are still in its cache) and resolves with the video of all of it. */
-export async function renderWorld(w: WorldState, prompt: string, progress: (pct: number, label: string) => void, start?: Reference): Promise<Asset[]> {
-  await ensureWorkflows();
-  if (!workflows.world) throw new Error(`workflows\\${MODES.world.file} wasn't found (add the Explore a world pack)`);
-  if (start && !w.start) w.start = await uploadReference(start);
-  const n = w.json.segments.length;
-  return run("world", prompt, null, { world: w }, progress, { from: "chat", note: `${n} segment${n > 1 ? "s" : ""}, about ${Math.round((WORLD.secs * n) / 60) || 1} min · `, title: prompt });
-}
-
-/** Chat's /edit: changes a picture by instruction (the whole picture, keeping its size), with Qwen-Image-2.1 Edit or
- *  MOSS-Image (Edit with). `more`: up to two more attached pictures, as images 2 and 3. */
-export async function editMedia(prompt: string, r: Reference, progress: (pct: number, label: string) => void, more: Reference[] = []): Promise<Asset[]> {
-  await ensureWorkflows();
-  if (!workflows.edit) throw new Error(`workflows\\${MODES.edit.file} wasn't found`);
-  const extra = await Promise.all(more.slice(0, MOSS_EDIT.refs - 1).map((x) => uploadReference(x)));
-  return run("edit", prompt, r, { extra }, progress, { from: "chat" });
-}
-
-/** The label for chat's edits. */
-export const editLabel = () => (mossEdits("edit") ? "MOSS-Image Edit" : MODES.edit.label);
-
-/** Chat's /3d: a textured 3D model of the picture with Pixal3D. Resolves with the saved .glb. */
-export async function renderModel(r: Reference, progress: (pct: number, label: string) => void): Promise<Asset[]> {
-  return toModel(r, "chat", progress);
-}
-
-/** Talking characters: InfiniteTalk lip-syncs the picture (a render's path, or a reference picture) to the voice
- *  recording. `prompt` describes how they move ("smiling, nodding"); `title` is what the render queue shows (the line
- *  they say). Resolves with the saved video. */
-export async function renderTalk(
-  pic: Reference | string,
-  audio: Blob,
-  seconds: number,
-  prompt: string,
-  progress: (pct: number, label: string) => void,
-  from = "chat",
-  title?: string,
-): Promise<Asset[]> {
-  await ensureWorkflows();
-  if (!workflows.talk) throw new Error(`workflows\\${MODES.talk.file} wasn't found (update the Workstation and add the talk pack)`);
-  let src: Source;
-  if (typeof pic === "string") {
-    await refresh();
-    const a = items.find((x) => x.path === pic);
-    src = a ?? { path: pic, name: pic.split(/[\\/]/).pop() ?? "picture", kind: "image", mtime: 0, size: 0 };
-  } else src = pic;
-  const parts = talkParts(seconds);
-  const note = parts > 1 ? `${parts} parts, about ${Math.round(talkSecs(seconds) / 60)} min · ` : "";
-  return run("talk", prompt || TALK_PROMPT, src, { talk: { audio, seconds } }, progress, { from, note, title });
-}
-
-/** What InfiniteTalk is told when nothing else is said about how they move. */
-const TALK_PROMPT = "A person talking to the camera with natural expressions, blinking and slight head movement.";
-/** How long a talking video of this much speech takes, in seconds (measured on an RTX 3060 12 GB). */
-export const talkSecs = (seconds: number) => TALK_LOAD_SECS + TALK_PART_SECS * talkParts(seconds);
-
-/** Director: one shot of a music video, LTX-2.5 text-to-video at 768×512 for this long; `quality` is the saved Video
- *  quality unless given ("draft" skips the upscale pass). `title` is what the render queue shows. */
-export async function renderShot(
-  prompt: string,
-  seconds: number,
-  progress: (pct: number, label: string) => void,
-  how: { title?: string; note?: string; quality?: Quality; frame?: string; seed?: number; from?: string } = {},
-): Promise<Asset[]> {
-  await ensureWorkflows();
-  const video: Partial<VideoSettings> = { seconds, res: "768x512", fps: 24, ...(how.quality ? { quality: how.quality } : {}) };
-  const from = how.from ?? "Director";
-  // A storyboard shot with its frame drawn: LTX-2.5 image-to-video, starting on that frame.
-  if (how.frame) {
-    if (!workflows.shotvideo) throw new Error(`workflows\\${MODES.shotvideo.file} wasn't found (update the Workstation and add the video pack)`);
-    const src: Source = items.find((x) => x.path === how.frame) ?? { path: how.frame, name: how.frame.split(/[\\/]/).pop() ?? "frame", kind: "image", mtime: 0, size: 0 };
-    return run("shotvideo", prompt, src, { video, seed: how.seed }, progress, { from, title: how.title, note: how.note });
-  }
-  if (!workflows.video) throw new Error(`workflows\\${MODES.video.file} wasn't found (update the Workstation and add the video pack)`);
-  return run("video", prompt, null, { video, seed: how.seed }, progress, { from, title: how.title, note: how.note });
-}
-
-/** How long one LTX-2.5 shot this long takes at 768×512 ("draft" skips the upscale pass), in seconds. */
-export const shotSecs = (seconds: number, draft: boolean) => plan("video", null, undefined, undefined, { seconds, res: "768x512", fps: 24, quality: draft ? "draft" : "standard" }).secs;
-
-/** Storyboard: a shot's frame, one picture from the image model at the video's shape (3:2, drawn at 1152×768 so it
- *  stays sharp when LTX-2.5 starts from it). `title` is what the render queue shows. */
-export async function renderFrame(prompt: string, progress: (pct: number, label: string) => void, title?: string): Promise<Asset[]> {
-  await ensureWorkflows();
-  const gm = chatMode("image");
-  if (!workflowOf(gm)) throw new Error(`workflows\\${modeOf(gm).file} wasn't found`);
-  return run(gm, prompt, null, { override: { w: 1152, h: 768, count: 1 } }, progress, { from: "Storyboard", title });
-}
-
-/** The image model storyboard frames are drawn with. */
-export async function frameLabel() {
-  await ensureWorkflows();
-  return modeOf(chatMode("image")).label;
-}
-/** The saved Video quality ("draft" makes a Director's shots quicker). */
-export const videoQuality = () => settings().video.quality;
-
-/** Draws the create bar again (Film mode's list of films changed). */
-export const refreshCreate = () => renderCreate();
-
-// ---------- used from Film ----------
-/** A file as the gallery knows it (its size, prompt and model), or as a bare file when it isn't a render. */
-async function assetAt(path: string, kind: Asset["kind"]): Promise<Asset> {
-  await allowRenders();
-  let a = items.find((x) => x.path === path);
-  if (!a) {
-    await refresh();
-    a = items.find((x) => x.path === path);
-  }
-  return a ?? { path, name: path.split(/[\\/]/).pop() ?? kind, kind, mtime: 0, size: 0 };
-}
-
-/** Film: a shot's frame with a cast member in it. Qwen-Image puts the character from their picture into the scene, at
- *  the video's 3:2 shape like a storyboard frame. */
-export async function renderCastFrame(prompt: string, r: Reference, progress: (pct: number, label: string) => void, title?: string): Promise<Asset[]> {
-  await ensureWorkflows();
-  const gm = refImageMode();
-  if (!workflowOf(gm)) throw new Error(`workflows\\${modeOf(gm).file} wasn't found`);
-  return run(gm, prompt, r, { kind: "character", override: { w: 1152, h: 768, count: 1 } }, progress, { from: "Film", title });
-}
-
-/** Whether Film's shot actions have their workflows: a long take (Wan 2.2 SVI), a swap, an upscale and Foley sound. */
-export async function filmTools() {
-  await ensureWorkflows();
-  return { long: !!workflows.long, swap: !!workflows.swap, upscale: !!workflows.upvideo, sound: !!workflows.foley, talk: !!workflows.talk };
-}
-
-/** Film: a long take from the shot's frame with Wan 2.2 SVI, in the saved Long video settings (a "|" in the prompt
- *  splits it into its shots). Silent, at 48 fps. Resolves with the video's path. */
-export async function renderLongTake(prompt: string, frame: string, progress: (pct: number, label: string) => void, title?: string): Promise<string> {
-  await ensureWorkflows();
-  if (!workflows.long) throw new Error(`workflows\\${MODES.long.file} wasn't found`);
-  const out = await run("long", prompt, await assetAt(frame, "image"), {}, progress, { from: "Film", title });
-  const v = out.find((x) => x.kind === "video");
-  if (!v) throw new Error("no video came back");
-  return v.path;
-}
-
-/** How long a long take lasts, and takes to render, with the saved settings. */
-export function longTake(frame?: { width?: number | null; height?: number | null }) {
-  const s = settings().long;
-  return { seconds: sviSeconds(s.frames, s.shots), secs: plan("long", frame ? ({ path: "", name: "", kind: "image", mtime: 0, size: 0, ...frame } as Asset) : null).secs };
-}
-
-/** Film: SCAIL-2 swaps a cast member (their picture) in for `who` in a clip (one of the film's takes, or a video of
- *  your own). Resolves with the new video's path. */
-export async function swapClip(path: string, picture: Blob, who: string, q: SwapQuality, progress: (pct: number, label: string) => void): Promise<string> {
-  await ensureWorkflows();
-  if (!workflows.swap) throw new Error(`workflows\\${MODES.swap.file} wasn't found (add the Swap a character pack)`);
-  const info = await invoke<VideoInfo>("video_info", { path });
-  return swapInto(await assetAt(path, "video"), info, picture, who || "person", q, progress, "Film");
-}
-
-/** How long a swap of a clip this long takes, in seconds. */
-export const swapClipSecs = (seconds: number, q: SwapQuality) => swapSecs(Math.ceil(Math.min(seconds, SWAP.maxSeconds) * 24) + 1, q);
-
-/** Film: SeedVR2 sharpens a take to 1080p (its sound kept). Resolves with the new video's path. */
-export async function upscaleClip(path: string, progress: (pct: number, label: string) => void): Promise<string> {
-  await ensureWorkflows();
-  if (!workflows.upvideo) throw new Error(`workflows\\${MODES.upvideo.file} wasn't found (add the Upscale pack)`);
-  const a = await assetAt(path, "video");
-  const out = await run("upvideo", a.prompt || a.name, a, { upscale: 1080 }, progress, { from: "Film", title: `${a.name} to 1080p` });
-  const v = out.find((x) => x.kind === "video");
-  if (!v) throw new Error("no video came back");
-  return v.path;
-}
-
-/** How long an upscale to 1080p takes for a clip this long, in seconds. */
-export const upscaleClipSecs = (seconds: number) => MODES.upvideo.secs * Math.max(1, seconds);
-
-/** Film: LTX-2.3 Foley makes a take's sound effects from what's said should be heard (its first 15 s), on a copy of
- *  the take. Resolves with the new video's path. */
-export async function soundClip(path: string, seconds: number, what: string, progress: (pct: number, label: string) => void): Promise<string> {
-  await ensureWorkflows();
-  if (!workflows.foley) throw new Error(`workflows\\${MODES.foley.file} wasn't found (add the Add sound pack)`);
-  return foleyFor(await assetAt(path, "video"), seconds, what, progress, "Film");
-}
-
-export const soundClipSecs = (seconds: number) => foleySecs(seconds);
-
-/** Stops every render a film has waiting or running. */
-export function cancelFilm() {
-  for (const j of [...rq].reverse()) if (j.from === "Film" && (j.state === "waiting" || j.state === "running")) cancelJob(j);
-}
-
-export { ask as askLine };
-
-/** Chat's /song: a song in this style with these lyrics (empty: an instrumental). `song` sets its tempo, key or
- *  language for this one song; its length is the saved setting. Resolves with the saved file. */
-export async function renderSong(
-  style: string,
-  lyrics: string,
-  progress: (pct: number, label: string) => void,
-  song: Partial<MusicSettings> = {},
-): Promise<Asset[]> {
-  await ensureWorkflows();
-  if (!workflows.song) throw new Error(`workflows\\${MODES.song.file} wasn't found (update the Workstation and add the music pack)`);
-  return run("song", style, null, { lyrics, song }, progress, { from: "chat" });
-}
-
-/** A song's length in the settings (chat's songwriter writes about that much). */
-export const songSeconds = () => settings().music.seconds;
-
-/** The generation settings form for chat's popover (the same settings as Studio's). */
-export async function chatSettings(el: HTMLElement, kind: MediaKind) {
-  await ensureWorkflows();
-  const gm = chatMode(kind);
-  if (!workflowOf(gm)) {
-    el.innerHTML = `<p class="credit">workflows\\${esc(modeOf(gm).file)} wasn't found, so chat can't make ${kind === "video" ? "videos" : kind === "audio" ? "songs" : "images"} yet.</p>`;
-    return;
-  }
-  settingsForm(el, gm, true);
-}
-
-/** Stops chat's render: takes it out of the queue if it's still waiting, or stops it if it's running. */
-/** Stops chat's latest render (or the latest one from `from`, e.g. a Director's shot). */
-export async function cancelRender(from = "chat") {
-  const mine = [...rq].reverse().find((j) => j.from === from && (j.state === "waiting" || j.state === "running"));
-  if (mine) cancelJob(mine);
-}
-
-let allowed: Promise<void> | null = null;
-/** Lets the webview show files from ComfyUI's output folder (needed before showing a saved render in chat). */
-export function allowRenders() {
-  return (allowed ??= refresh());
-}
-
-/** Whether a file is one of Prestige's own renders, not one made from a photo brought in (after allowRenders). */
-export const isRender = (path: string) => !outside.has(path) && items.some((x) => x.path === path);
-
-/** Opens a render in the lightbox (Animate, Reuse prompt and Open in folder work from there). */
-export async function openRender(path: string) {
-  await allowRenders();
-  let a = items.find((x) => x.path === path);
-  if (!a) {
-    await refresh();
-    a = items.find((x) => x.path === path);
-  }
-  if (a) openLightbox(a);
-  else deps.toast("That image isn't in ComfyUI's output folder any more.", "warn");
-}
-
-/** The right-click menu for a render shown in chat. */
-export async function renderMenu(e: MouseEvent, path: string) {
-  e.preventDefault();
-  await allowRenders();
-  let a = items.find((x) => x.path === path);
-  if (!a) {
-    await refresh();
-    a = items.find((x) => x.path === path);
-  }
-  if (a) showMenu(e, a);
-  else deps.toast("That file isn't in ComfyUI's output folder any more.", "warn");
-}
-
-// ---------- the phone: Studio, Renders and the queue on a paired phone (main.ts passes its requests here) ----------
-// The phone keeps its own create bar (mode, picture, reference, prompt) and asks for what that would make; the
-// settings, the model picks and the reference choices are the PC's, shared with Studio and chat. Renders it starts go
-// into the same queue as the PC's, marked "phone".
-type PhoneMode = "image" | "video" | "music";
-interface PhoneCreate {
-  mode: PhoneMode;
-  src?: string | null; // a render to edit (Image) or animate (Video)
-  ref?: { w: number; h: number } | null; // a reference picture's size, when one is set
-}
-
 /** A render by path (looking again when it's new). */
-async function findItem(path: string) {
+export async function findItem(path: string) {
   let a = items.find((x) => x.path === path);
   if (!a) {
     await refresh();
@@ -5096,246 +1907,3 @@ async function findItem(path: string) {
   return a;
 }
 
-/** The workflow the phone's create bar runs, as currentMode() does for Studio's. */
-function phoneGm(c: PhoneCreate, src: Asset | null): GenMode {
-  if (c.mode === "music") return "song";
-  if (c.mode === "video") return src ? animatePick() : c.ref ? "refvideo" : "video";
-  if (src) return "edit";
-  if (c.ref) return refImageMode();
-  return pictureMode();
-}
-
-/** The render queue for phones: the last 20, newest last. */
-export function phoneQueue() {
-  const live = (j: QJob) => j.state === "waiting" || j.state === "running";
-  return rq.slice(-20).map((j) => ({
-    id: j.id,
-    prompt: j.prompt,
-    label: j.label,
-    from: j.from,
-    state: j.state,
-    pct: Math.round(j.pct),
-    status: j.state === "waiting" ? `Waiting · ${rq.filter((x) => live(x) && rq.indexOf(x) < rq.indexOf(j)).length} ahead` : j.status,
-    error: j.error ?? null,
-    took: j.took ?? null,
-    result: (j.result ?? []).map((a) => ({ path: a.path, kind: a.kind, mtime: a.mtime, name: a.name })),
-  }));
-}
-
-/** What the phone can do with a render, by what's installed. */
-function actsFor(a: Asset): string[] {
-  const out: string[] = [];
-  const short = a.width && a.height ? Math.min(a.width, a.height) : 0;
-  if (a.kind === "image") {
-    if (workflows.edit) out.push("edit");
-    if (workflows.animate || workflows.long) out.push("animate");
-    if (workflows.ref || workflows.reffast) out.push("reference");
-    if (workflows.upimage && short < 1080) out.push("up1080");
-    if (workflows.upimage && short < 2160) out.push("up4k");
-    const mp = a.width && a.height ? (a.width * a.height) / MP : 0;
-    if (workflows.redraw4 && mp && mp < 3.5) out.push("redraw4");
-    if (workflows.redraw4 && mp && mp < 7) out.push("redraw8");
-    if (workflows.model3d) out.push("model3d");
-    if (workflows.cutout) out.push("removebg");
-    if (workflows.talk) out.push("talk");
-  }
-  if (a.kind === "video") {
-    if (workflows.upvideo && short < 1080) out.push("up1080");
-    if (workflows.vidcut) out.push("vidcut");
-  }
-  if (a.seed != null && a.kind !== "model") out.push("seed");
-  out.push("delete");
-  return out;
-}
-
-/** A character's face, small, for the phone's picker (faces are up to 2048 px). */
-const faceThumbs = new Map<string, string>();
-export async function faceThumb(c: Parameters<typeof faceBlob>[0]) {
-  const key = `${c.id}:${c.face!.length}`;
-  let t = faceThumbs.get(key);
-  if (!t) {
-    const bmp = await createImageBitmap(faceBlob(c));
-    const k = Math.min(1, 160 / Math.max(bmp.width, bmp.height));
-    const cv = document.createElement("canvas");
-    cv.width = Math.round(bmp.width * k);
-    cv.height = Math.round(bmp.height * k);
-    cv.getContext("2d")!.drawImage(bmp, 0, 0, cv.width, cv.height);
-    bmp.close();
-    t = cv.toDataURL("image/jpeg", 0.8).split(",")[1];
-    faceThumbs.set(key, t);
-  }
-  return t;
-}
-
-/** What the phone's create bar would make: the model, the settings as chips and as a form, the warning, the words. */
-async function phoneInfo(c: PhoneCreate) {
-  await ensureWorkflows();
-  const src = c.src ? await findItem(c.src) : null;
-  const gm = phoneGm(c, src);
-  const m = modeOf(gm);
-  if ((m.family === "svi" || m.family === "wan") && !sviModels) await loadSviModels().catch(() => {});
-  // The picture it starts from, for sizes that follow it (only its size matters here).
-  const from: Source | null = src ?? (c.ref ? ({ path: "", name: "", kind: "image", mtime: 0, size: 0, width: c.ref.w, height: c.ref.h } as Asset) : null);
-  const chain = chained(gm);
-  const first = refImageMode();
-  const missing = !workflowOf(gm) ? m.file : chain && !workflows[first] ? modeOf(first).file : "";
-  const p = plan(gm, from);
-  const shown = chain ? { ...p, secs: p.secs + plan(first, from, frameSize()).secs } : p;
-  const key = settingsKey(gm);
-  return {
-    gm,
-    key,
-    label: chain ? `${modeOf(first).label} → ${m.label}` : m.label,
-    canPick: canPick(gm),
-    missing,
-    chips: missing ? [] : summary(gm, shown),
-    warn: p.warn,
-    cards: p.cards ?? "",
-    fields: settingsFields(gm, from),
-    seed: settings()[key].seed,
-    lastSeed: lastSeed(key) ?? null,
-    button: buttonText(gm),
-    placeholder: promptHint(gm),
-    refOk: !!(workflows.ref || workflows.reffast) && !src && c.mode !== "music",
-    refWhat: c.ref ? refWhat(gm) : "",
-    refPrefs: refPrefs(),
-    refVideo: gm === "refvideo",
-    consent: CONSENT,
-    faces: await Promise.all(
-      characters()
-        .filter((x) => x.face)
-        .map(async (x) => ({ id: x.id, name: x.name, thumb: await faceThumb(x).catch(() => "") })),
-    ),
-    srcWhat: src ? `${gm === "edit" ? "Editing" : "Animating"} this picture with ${m.label}` : "",
-    song: !!workflows.song,
-    queue: phoneQueue(),
-  };
-}
-
-/** Queues what the phone's create bar asked for. A reference is a base64 JPEG from the phone, or a character's face. */
-async function phoneGenerate(a: any) {
-  await ensureWorkflows();
-  const prompt = String(a.prompt ?? "").trim();
-  if (!prompt) throw new Error("Describe what to make first.");
-  const src = a.src ? await findItem(a.src) : null;
-  let r: Reference | null = null;
-  let kind: RefKind = refPrefs().kind;
-  if (!src && a.mode !== "music") {
-    if (a.ref) r = await referenceFromBase64(String(a.ref));
-    else if (a.character) {
-      const c = characterById(String(a.character));
-      if (!c?.face) throw new Error("That character has no face picture.");
-      r = await loadReference(faceBlob(c));
-      kind = "character"; // a character's face is always a Character
-    }
-  }
-  const gm = phoneGm({ mode: a.mode, ref: r ? { w: r.width, h: r.height } : null }, src);
-  for (const need of chained(gm) ? [gm, refImageMode()] : [gm]) if (!workflowOf(need)) throw new Error(`workflows\\${modeOf(need).file} wasn't found on the PC`);
-  const ahead = rq.filter((j) => j.state === "waiting" || j.state === "running").length;
-  if (chained(gm)) refVideo(prompt, r!, kind, undefined, "phone").catch(() => {}); // the queue shows how it went
-  else {
-    const from = gm === "ref" || gm === "reffast" || gm === "refvideo" ? r : src;
-    enqueue(gm, prompt, from, { kind, lyrics: gm === "song" ? String(a.lyrics ?? "") : undefined }, { from: "phone" });
-  }
-  return { ok: true, ahead, queue: phoneQueue() };
-}
-
-/** A render action from the phone's viewer: upscale, 3D, remove the background, cut out of a video, seed, delete. */
-async function phoneAct(path: string, what: string, text: string) {
-  await ensureWorkflows();
-  const a = await findItem(path);
-  const queued = (j: QJob) => ({ ok: true, queued: j.id, queue: phoneQueue() });
-  switch (what) {
-    case "redraw4":
-    case "redraw8":
-      if (!workflows[what]) throw new Error("Redraw needs the Qwen-Image edit workflow (the Workstation's images pack).");
-      return queued(enqueue(what, a.prompt || a.name, a, {}, { from: "phone", title: `${a.name} redrawn at ${REDRAW_MP[what]} MP` }));
-    case "up1080":
-    case "up4k": {
-      const size: UpscaleSize = what === "up4k" ? 2160 : 1080;
-      const video = a.kind === "video";
-      if (!workflows[video ? "upvideo" : "upimage"]) throw new Error("Upscaling needs the Workstation's upscale pack.");
-      return queued(enqueue(video ? "upvideo" : "upimage", a.prompt || a.name, a, { upscale: size }, { from: "phone", title: `${a.name} to ${size === 1080 ? "1080p" : "4K"}` }));
-    }
-    case "model3d":
-      if (!workflows.model3d) throw new Error("Picture to 3D needs the Workstation's 3d pack.");
-      return queued(enqueue("model3d", `3D model of ${a.name}`, a, {}, { from: "phone" }));
-    case "removebg":
-      if (!workflows.cutout) throw new Error("Remove background needs the Workstation's select pack.");
-      return queued(enqueue("cutout", `${a.name} without its background`, a, {}, { from: "phone" }));
-    case "vidcut":
-      if (!workflows.vidcut) throw new Error("Cutting out of a video needs the Workstation's select pack.");
-      if (!text.trim()) throw new Error("Say what should stay.");
-      return queued(enqueue("vidcut", text.trim(), a, {}, { from: "phone", title: `${text.trim()}, cut out of ${a.name}` }));
-    case "seed":
-      return { ok: true, message: fixSeed(a) };
-    case "delete":
-      await removeRender(a);
-      return { ok: true, message: `Moved ${a.name} to the Recycle Bin on the PC.` };
-  }
-  throw new Error(`unknown action ${what}`);
-}
-
-/** The gallery for phones, newest first, a page at a time. */
-async function phoneGallery(filter: string, offset: number, limit: number) {
-  if (offset === 0) await refresh();
-  const list = items.filter((a) => filter === "all" || a.kind === filter);
-  return {
-    total: list.length,
-    items: list.slice(offset, offset + limit).map((a) => ({ ...a, acts: actsFor(a) })),
-  };
-}
-
-/** A request from a paired phone (phone.rs → main.ts). Throws with words the phone shows. */
-export async function phoneStudio(action: string, a: any = {}): Promise<unknown> {
-  switch (action) {
-    case "info":
-      return phoneInfo(a);
-    case "set": {
-      const key = a.key as SettingsKey;
-      if (!(key in settings())) throw new Error("unknown settings");
-      if (a.reset) reset(key);
-      else if (a.k === "seed") {
-        const n = Math.floor(Number(a.value));
-        update(key, { seed: a.value === "last" ? (lastSeed(key) ?? null) : a.value == null || a.value === "" || !Number.isFinite(n) || n < 0 ? null : n });
-      } else {
-        const k = String(a.k);
-        if (!["aspect", "size", "quality", "count", "res", "seconds", "fps", "shots", "frames", "high", "low", "bpm", "key", "meter", "language", "lora", "fromPicture", "edits", "moss", "editModel", "sage", "transparent"].includes(k)) throw new Error(`unknown setting ${k}`);
-        update(k === "fromPicture" || k === "sage" ? "video" : key, { [k]: fieldValue(k, String(a.value ?? "")) } as any);
-      }
-      return phoneInfo(a.create ?? { mode: "image" });
-    }
-    case "pick":
-      flipModel(a.create?.mode === "video");
-      return phoneInfo(a.create ?? { mode: "image" });
-    case "refPrefs":
-      setRefPrefs({ ...(a.kind ? { kind: a.kind } : {}), ...(a.frame ? { frame: a.frame } : {}) });
-      return phoneInfo(a.create ?? { mode: "image" });
-    case "generate":
-      return phoneGenerate(a);
-    case "lyrics": {
-      const style = String(a.style ?? "").trim();
-      if (!style) throw new Error("Describe the song's style or what it's about first.");
-      return { lyrics: await deps.writeLyrics(style, settings().music.seconds, AbortSignal.timeout(280_000)) };
-    }
-    case "queue":
-      return { queue: phoneQueue() };
-    case "cancel":
-    case "retry":
-    case "clear": {
-      if (action === "clear") for (let i = rq.length - 1; i >= 0; i--) if (!["waiting", "running"].includes(rq[i].state)) rq.splice(i, 1);
-      const j = rq.find((x) => x.id === Number(a.id));
-      if (j && action === "cancel") cancelJob(j);
-      if (j && action === "retry" && (j.state === "failed" || j.state === "stopped")) retryJob(j);
-      renderQueue();
-      return { queue: phoneQueue() };
-    }
-    case "gallery":
-      return phoneGallery(String(a.filter ?? "all"), Math.max(0, Number(a.offset) || 0), Math.min(120, Math.max(1, Number(a.limit) || 48)));
-    case "act":
-      return phoneAct(String(a.path ?? ""), String(a.what ?? ""), String(a.text ?? ""));
-  }
-  throw new Error(`unknown Studio action ${action}`);
-}
-
-export type { Asset };

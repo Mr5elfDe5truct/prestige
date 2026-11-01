@@ -1027,6 +1027,8 @@ body:not(.translator) .translator-only { display: none; }
 .rq-t small { font: 10.5px var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rq-row.failed .rq-t small { color: #ff8a8a; }
 .rq-acts { display: flex; gap: 10px; }
+.rq-held { display: flex; align-items: baseline; gap: 10px; padding: 4px 6px; font-size: 12px; color: var(--gold); }
+.rq-held span { flex: 1; }
 .dock button { position: relative; }
 #studio-count { position: absolute; top: 2px; right: 6px; min-width: 16px; height: 16px; border-radius: 8px; background: var(--red); color: #fff; font: 600 10px/16px var(--mono); padding: 0 4px; }
 #studio-count:empty { display: none; }

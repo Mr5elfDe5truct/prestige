@@ -4,7 +4,8 @@
 // ComfyUI (studio.ts renderTalk), one 3.24 s part at a time.
 import { errMsg } from "./backends";
 import { audio, DEFAULT_VOICE, isVox, listVoices, synthesize } from "./speech";
-import { TALK_MAX_SECONDS, talkSecs } from "./studio";
+import { TALK_MAX_SECONDS } from "./modes";
+import { talkSecs } from "./renderapi";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
 
