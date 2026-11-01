@@ -258,6 +258,10 @@ pub fn catalog(ollama_gb: f64) -> Vec<Pack> {
             gguf("42ailab/Unlimited-OCR-GGUF", crate::ocr::MODEL, crate::ocr::MODEL),
             gguf("42ailab/Unlimited-OCR-GGUF", crate::ocr::MMPROJ, crate::ocr::MMPROJ),
         ], vram: 5.0, ram: 0.0, card: "llama" },
+        Pack { id: "quicktalk", title: "Quick talk", text: "LFM3-Audio 2B (llama.cpp, Liquid AI): Live's Quick mode, one small model that hears you and answers aloud in about 0.4 s (needs llama.cpp b11960 or newer; LFM Open License, free under $10M revenue)".into(), gb: 1.4, items: vec![
+            gguf("LiquidAI/LFM3-Audio-2B-GGUF", crate::quicktalk::MODEL, crate::quicktalk::MODEL),
+            gguf("LiquidAI/LFM3-Audio-2B-GGUF", crate::quicktalk::MMPROJ, crate::quicktalk::MMPROJ),
+        ], vram: 2.4, ram: 0.0, card: "llama" },
         Pack { id: "humanize", title: "Humanizer", text: "humanizer 12B (llama.cpp, Gemma 4): Make it sound human rewrites AI-written text, facts kept".into(), gb: 7.6, items: vec![
             gguf("jialinyyzz/humanizer", crate::humanize::MODEL, crate::humanize::MODEL),
         ], vram: 10.0, ram: 0.0, card: "llama" },

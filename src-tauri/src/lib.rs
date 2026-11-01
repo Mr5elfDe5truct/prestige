@@ -9,6 +9,7 @@ mod humanize;
 mod knowledge;
 mod models;
 mod ocr;
+mod quicktalk;
 mod packs;
 mod phone;
 mod prep;
@@ -619,6 +620,7 @@ pub fn run() {
             search::search_everything,
             ocr::ocr_status,
             ocr::ocr_read,
+            quicktalk::quick_talk_prepare,
             humanize::humanize_status,
             humanize::humanize,
             drama::drama_status,

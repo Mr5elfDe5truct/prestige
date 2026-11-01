@@ -167,6 +167,8 @@ VoxCPM2 runs at about 1.2× real time here, so it streams: each sentence starts 
 without a gap. Headphones work best; with speakers, echo cancellation keeps its own voice from interrupting it, and a
 transcript that's just its own words is ignored.
 
+**Quick mode.** The call's **Mode** picker switches to **Quick**: one small model, Liquid AI's **LFM3-Audio 2B**, hears you and answers aloud, with no Whisper, chat model or separate voice. Measured on the RTX 3060s: **0.9–1.3 s** from the end of your speech to the first sound (including the same 0.65 s wait; the model itself takes ~0.4 s), and ~2.4 GB of VRAM. It's quick but simple: one voice, English only, little reasoning, no camera, and Quick calls aren't saved to Past chats. It needs the **Quick talk** pack (1.4 GB) and llama.cpp **b11960 (v0.8.0)** or newer (Packs → Engines → Update). LFM3-Audio is under Liquid AI's LFM Open License v1.0, free to use for companies under $10M a year in revenue.
+
 ## 📸 Screenshots
 
 Real screenshots on the reference PC (RTX 3060 12 GB + RTX 2060 6 GB), Molded style with the Dragon theme.

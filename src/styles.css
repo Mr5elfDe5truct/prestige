@@ -640,6 +640,10 @@ body[data-live="error"] .live-status { color: var(--warn); }
 .live-voice { display: flex; flex-direction: column; gap: 3px; font-family: var(--display); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
 .live-voice select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; color: var(--fg); font: 13px var(--body); padding: 8px 10px; min-width: 150px; max-width: 220px; text-transform: none; letter-spacing: 0; }
 .live-credit { max-width: 640px; margin: 0; }
+/* Quick mode (quicktalk.ts): one voice and no camera, and its own credit line. */
+.live-quick-credit, body.live-quick .live-credit:not(.live-quick-credit) { display: none; }
+body.live-quick .live-quick-credit { display: block; }
+body.live-quick #live-cam, body.live-quick .live-voice:not(.live-mode) { display: none; }
 @media (max-width: 760px) {
   .live-self { width: 34%; }
   .live-ctl { min-width: 58px; }

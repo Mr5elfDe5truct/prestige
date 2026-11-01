@@ -17,6 +17,7 @@ import { addStache } from "./talk";
 import { themeRgb } from "./theme";
 import { snapshot } from "./camera";
 import type { MemoryConfig } from "./memory";
+import { openQuick, type QuickLink } from "./quicktalk";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
 
@@ -61,6 +62,10 @@ interface Deps {
   ended: () => void;
   /** Listen with Phonon-2 on the CPU (the Workstation's Phonon server) instead of Whisper on the GPU. */
   phonon: () => boolean;
+  /** Quick mode (quicktalk.ts): one small model hears and speaks, instead of Whisper, the Live model and a voice. */
+  getQuick: () => boolean;
+  setQuick: (on: boolean) => void;
+  root: () => string | null;
 }
 
 type State = "off" | "starting" | "listening" | "hearing" | "transcribing" | "thinking" | "speaking" | "error";
@@ -133,6 +138,8 @@ let turns: Turns | null = null;
 let tap: AudioWorkletNode | null = null;
 let ducked = false;
 let tygerEnd = 0;
+// Quick mode's link to LFM3-Audio, while a Quick call is on.
+let quick: QuickLink | null = null;
 
 export function initLive(d: Deps) {
   deps = d;
@@ -184,6 +191,14 @@ export function initLive(d: Deps) {
     }
     if (state === prev) setState(state);
   });
+  $("#live-mode").addEventListener("change", async () => {
+    deps.setQuick(($("#live-mode") as HTMLSelectElement).value === "quick");
+    // A call that's on starts again in the other mode.
+    if (state !== "off") {
+      end();
+      await startLive();
+    }
+  });
   $("#live-get-model").addEventListener("click", () => {
     end();
     deps.openCatalog();
@@ -230,6 +245,10 @@ export async function startLive() {
 
   model = null;
   $("#live-model").textContent = "";
+  const isQuick = deps.getQuick();
+  ($("#live-mode") as HTMLSelectElement).value = isQuick ? "quick" : "full";
+  document.body.classList.toggle("live-quick", isQuick);
+  if (isQuick) return startQuick();
   if (!deps.liveModels().length) {
     setState("error");
     setStatus("Live needs Qwen3.5 2B or 4B");
@@ -270,6 +289,51 @@ export async function startLive() {
   warmTimer = window.setInterval(() => warmVoice().catch(() => {}), 60_000);
   setState("listening");
   startTurns();
+}
+
+/** A Quick call: the mic, then LFM3-Audio through llama.cpp's router (loaded on the first connection). Not saved to
+ *  Past chats: the model hears the audio, so there are no words of yours to save. */
+async function startQuick() {
+  $("#live-model").textContent = "LFM3-Audio 2B · Quick";
+  $("#live-model").title = "Quick talk: one small model hears you and answers aloud. One voice, English only, and it doesn't think much.";
+  try {
+    await openMic();
+  } catch (e) {
+    const name = (e as DOMException)?.name;
+    setState("error");
+    setStatus(name === "NotFoundError" ? "No microphone found" : name === "NotAllowedError" ? "Microphone access is blocked (Windows Settings → Privacy → Microphone)" : `Mic error: ${errMsg(e)}`);
+    return;
+  }
+  setStatus("Loading Quick talk…");
+  try {
+    const link = await openQuick(deps.root(), {
+      onText: (t) => {
+        replyText += t;
+        const box = $("#live-reply");
+        box.textContent = replyText;
+        box.scrollTop = box.scrollHeight;
+      },
+      onFirstAudio: (at) => {
+        if (!turn || turn.audio) return;
+        turn.audio = at;
+        report();
+      },
+      onDone: () => {},
+      onError: (m) => deps.toast(`Quick talk: ${m}`, "warn"),
+    });
+    if (state === "off") return link.close();
+    quick = link;
+  } catch (e) {
+    if (state === "off") return;
+    setState("error");
+    setStatus(errMsg(e));
+    return;
+  }
+  callStart = performance.now();
+  clearInterval(timer);
+  timer = window.setInterval(tick, 1000);
+  tick();
+  setState("listening");
 }
 
 /** TYGER, when the turns pack is in and the voice card has room for it: loaded in the background (the call works
@@ -440,6 +504,9 @@ export function end() {
   utter = null;
   turn = null;
   callStart = 0;
+  const wasQuick = !!quick;
+  quick?.close();
+  quick = null;
   $("#live").hidden = true;
   delete document.body.dataset.live;
   // Give VoxCPM2's 6 GB back to the chat models (it reloads in a few seconds next time), and let the Live model
@@ -453,7 +520,7 @@ export function end() {
     }).catch(() => {});
   }
   replying = false;
-  if (hadCall) deps.ended();
+  if (hadCall && !wasQuick) deps.ended();
 }
 
 function unloadVox() {
@@ -542,7 +609,7 @@ const aiTurn = () => state === "thinking" || state === "speaking" || state === "
  *  (Run from the mic blocks, not the animation, which stops while the window is minimised.) */
 function syncState() {
   if (state !== "thinking" && state !== "speaking") return;
-  const next = speaker.busy ? "speaking" : replying ? "thinking" : "listening";
+  const next = (quick ? quick.speaking : speaker.busy) ? "speaking" : (quick ? quick.replying : replying) ? "thinking" : "listening";
   if (next !== state) setState(next);
 }
 
@@ -563,7 +630,7 @@ function onBlock(b: Float32Array) {
     // Learn the room's noise floor while nobody is talking.
     // While Prestige's voice is playing, what's left of it after echo cancellation mustn't count as the user, so
     // interrupting takes a louder, longer voice.
-    const echo = speaker.busy;
+    const echo = quick ? quick.speaking : speaker.busy;
     if (!aiTurn()) floor = floor * 0.97 + Math.min(rms, 0.04) * 0.03;
     ring.push(b);
     while (ring.length * blockMs > BARGE_PREROLL_SEC * 1000) ring.shift();
@@ -574,11 +641,14 @@ function onBlock(b: Float32Array) {
     if (recent.filter(Boolean).length >= rule.need) {
       recent = [];
       // Over its voice: quieter until it's clear whether that was an interruption. While it's still thinking, stop.
-      if (aiTurn() && speaker.busy) {
+      // (Quick mode has no words to tell an "mm-hm" from an interruption by, so talking over it stops it.)
+      if (aiTurn() && speaker.busy && !quick) {
         ducked = true;
         speaker.duck(true);
       } else if (aiTurn()) interrupt();
       utter = ring.slice(-Math.ceil(((echo ? BARGE_PREROLL_SEC : PREROLL_SEC) * 1000) / blockMs));
+      // Quick mode: the audio goes to the model as it's spoken, so it has heard it all when the turn ends.
+      quick?.append(utter, rate);
       ring = [];
       utterStart = now - utter.length * blockMs;
       lastVoiced = now;
@@ -589,6 +659,7 @@ function onBlock(b: Float32Array) {
   }
 
   utter.push(b);
+  quick?.append([b], rate);
   const keep = Math.max(0.009, floor * 2.2);
   if (rms > keep) {
     lastVoiced = now;
@@ -608,7 +679,8 @@ function onBlock(b: Float32Array) {
       else setState("listening");
       return;
     }
-    if (ducked) decideBarge(blocks, rate, lastVoiced, voicedMs);
+    if (quick) finishQuick(lastVoiced);
+    else if (ducked) decideBarge(blocks, rate, lastVoiced, voicedMs);
     else finishUtterance(blocks, rate, lastVoiced);
   }
 }
@@ -654,6 +726,11 @@ async function decideBarge(blocks: Float32Array[], rate: number, endedAt: number
 
 /** The user started talking over Prestige: silence it and drop the reply. */
 function interrupt() {
+  if (quick) {
+    quick.cancel();
+    turn = null;
+    return;
+  }
   const saidNothing = !turn?.audio;
   // What it was saying, to recognise its own voice if that's what set this off (see isEcho).
   if (!saidNothing) spoken = replyText;
@@ -664,6 +741,16 @@ function interrupt() {
     deps.stopReply();
   }
   turn = null;
+}
+
+/** Quick mode: the turn is what it has heard since the last one, and the answer starts. */
+function finishQuick(endedAt: number) {
+  turn = { end: endedAt };
+  $("#live-you").textContent = "";
+  $("#live-reply").textContent = "";
+  replyText = "";
+  setState("thinking");
+  quick?.respond();
 }
 
 async function finishUtterance(blocks: Float32Array[], rate: number, endedAt: number, heard?: string) {
@@ -814,6 +901,13 @@ function report() {
   const t = turn;
   if (!t?.audio) return;
   const total = t.audio - t.end;
+  if (quick) {
+    $("#live-lat").textContent = `${(total / 1000).toFixed(1)} s`;
+    $("#live-lat").title = `End of your speech → first sound: ${Math.round(total)} ms (includes ${HANGOVER_MS} ms of silence to know you'd finished; LFM3-Audio ${Math.round(total - HANGOVER_MS)} ms)`;
+    ((window as any).__liveTurns ??= []).push({ total: Math.round(total), hangover: HANGOVER_MS, quick: true });
+    console.info("[live] quick latency", Math.round(total));
+    return;
+  }
   const stt = t.stt ? t.stt - t.end : 0;
   const llm = t.token && t.stt ? t.token - t.stt : 0;
   const tts = t.token ? t.audio - t.token : 0;
