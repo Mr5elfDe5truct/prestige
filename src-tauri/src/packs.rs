@@ -1189,7 +1189,9 @@ mod tests {
                 assert!(!p.items.is_empty());
                 for i in &p.items {
                     if let Item::File { url, dest, .. } = i {
-                        let hf = url.starts_with("https://huggingface.co/") && url.contains("/resolve/main/");
+                        // A model whose own code runs (Unlimited-OCR-2) is pinned to a commit instead of main.
+                        let pinned = url.split("/resolve/").nth(1).and_then(|r| r.split('/').next()).is_some_and(|c| c.len() == 40 && c.chars().all(|x| x.is_ascii_hexdigit()));
+                        let hf = url.starts_with("https://huggingface.co/") && (url.contains("/resolve/main/") || pinned);
                         let release = url.starts_with("https://github.com/") && url.contains("/releases/download/");
                         assert!(hf || release, "{url}");
                         assert!(dest.starts_with(r"models\") && !dest.contains('/'), "{dest}");
