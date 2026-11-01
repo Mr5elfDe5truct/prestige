@@ -51,6 +51,7 @@ import { CONSENT, bindRefChoices, dragRender, dragVideo, hasFiles, hasRender, ha
 import { characterById, characters, faceBlob, onCharactersChange } from "./characters";
 import { initInpaint, openInpaint, type SelectQuery } from "./inpaint";
 import { initLaser, openLaser } from "./laser";
+import { loadJobs, saveJobs } from "./queuestore";
 import { editLayoutPrompt, layoutBoxes, layoutMask, layoutPrompt, layoutRefBox, boxWhat, onLayoutChange, openLayout, useLayout } from "./layout";
 import { attachZoom, type Zoom } from "./zoom";
 import { checkOcr, ocrReady, readText } from "./ocr";
@@ -1256,7 +1257,17 @@ let ref: Reference | null = null;
 let stepNote = "";
 const workflows: Partial<Record<GenMode, any>> = {};
 const active: Partial<Record<GenMode, Mode>> = {}; // the Mode (or fallback) each workflow was loaded from
-const clientId = `prestige-${Math.random().toString(36).slice(2, 10)}`;
+// Kept across a page reload: the app's websocket to ComfyUI outlives the page and keeps the id it was opened with, and
+// ComfyUI only tells that id how a render is going (a new one heard nothing, so a render after a reload never finished).
+const clientId = (() => {
+  try {
+    const id = localStorage.getItem("studio.clientId") || `prestige-${Math.random().toString(36).slice(2, 10)}`;
+    localStorage.setItem("studio.clientId", id);
+    return id;
+  } catch {
+    return `prestige-${Math.random().toString(36).slice(2, 10)}`;
+  }
+})();
 let job: { id: string; mode: GenMode; started: number; prompt: string; nodes: Record<string, string>; outputs: string[]; seed: number; count: number } | null = null;
 let starting = false; // freeing the GPU / uploading, before ComfyUI has the job
 let fresh = new Set<string>(); // names of the files the last render made
@@ -1360,6 +1371,7 @@ export function initStudio(d: Deps) {
     clearSelection();
   });
   listen<any>("comfy", (e) => onComfy(e.payload));
+  restoreQueue();
 }
 
 let holdersTimer: number | undefined;
@@ -4313,10 +4325,107 @@ interface QJob {
   waiter?: { progress: (pct: number, label: string) => void; resolve: (a: Asset[]) => void; reject: (e: Error) => void };
   cancelled?: boolean; // stopped while it was getting ready
   audio?: Blob; // a talking video's voice recording, uploaded with the picture
+  promptId?: string; // ComfyUI's id once it has the render, and when it started there
+  started?: number;
+  held?: boolean; // saved from before the page reloaded: waits for Resume
 }
 const rq: QJob[] = [];
 let current: QJob | null = null;
 let jobIds = 1;
+
+// ---------- the queue kept on disk (queuestore.ts) ----------
+let savedKey = "";
+let saving = Promise.resolve();
+/** Saves the waiting and running renders when that changes (not on every progress tick). */
+function persistQueue() {
+  const live = rq.filter((j) => j.state === "waiting" || j.state === "running");
+  const key = live.map((j) => `${j.id}${j.state}${j.promptId ?? ""}${j.held ? "h" : ""}`).join(",");
+  if (key === savedKey) return;
+  savedKey = key;
+  const rows = live.map((j, pos) => {
+    const { waiter: _w, result: _r, src, ...rest } = j;
+    // A reference's object URL dies with the page; its picture (the Blob) is kept and the URL made again.
+    return { ...rest, pos, src: src && "blob" in src ? { ...src, url: "" } : src };
+  });
+  saving = saving.then(() => saveJobs(rows)).catch(() => {});
+}
+
+/** After a reload: the render that was running is picked up from ComfyUI (still going, or already finished), or put
+ *  back first in the queue if ComfyUI lost it. The waiting ones come back paused, for Resume or Clear. */
+async function restoreQueue() {
+  let saved: (QJob & { pos: number })[] = [];
+  try {
+    saved = (await loadJobs<QJob & { pos: number }>()).sort((a, b) => a.pos - b.pos);
+  } catch {
+    return;
+  }
+  if (!saved.length) return;
+  for (const j of saved) {
+    if (j.src && "blob" in j.src) j.src.url = URL.createObjectURL(j.src.blob);
+    jobIds = Math.max(jobIds, j.id + 1);
+  }
+  const running = saved.find((j) => j.state === "running");
+  let picked = false;
+  if (running?.promptId) {
+    const where = await comfyHas(running.promptId);
+    if (where === "queued") {
+      current = running;
+      stepNote = running.note;
+      job = { id: running.promptId, mode: running.gm, started: running.started ?? Date.now(), prompt: running.prompt, nodes: running.nodes, outputs: [], seed: running.seed, count: running.count };
+      $("#job-what").textContent = running.prompt;
+      $("#job").hidden = false;
+      setJob(running.pct || 5, "Picked up after the reload…");
+      picked = true;
+    } else if (where === "done") {
+      await refresh();
+      const names = await comfyOutputs(running.promptId);
+      Object.assign(running, { state: "done", result: items.filter((a) => names.includes(a.name)), took: Math.round((Date.now() - (running.started ?? Date.now())) / 1000) });
+      picked = true;
+    }
+  }
+  for (const j of saved) {
+    if (j === running && picked) continue;
+    Object.assign(j, { state: "waiting", pct: 0, status: "Waiting", held: true, promptId: undefined });
+  }
+  rq.unshift(...saved);
+  if (picked && running) deps.toast(running.state === "done" ? `The render that was going finished while Prestige reloaded: ${running.prompt.slice(0, 60)}` : `Picked up the render that was going: ${running.prompt.slice(0, 60)}`);
+  renderQueue();
+  renderCreate();
+}
+
+/** Whether ComfyUI still has a render ("queued": running or waiting there), has finished it, or doesn't know it. */
+async function comfyHas(id: string): Promise<"queued" | "done" | "gone"> {
+  try {
+    const q = await (await http(`${COMFY}/queue`)).json();
+    const ids = [...(q.queue_running ?? []), ...(q.queue_pending ?? [])].map((x: any[]) => x[1]);
+    if (ids.includes(id)) return "queued";
+    return Object.keys(await (await http(`${COMFY}/history/${id}`)).json()).length ? "done" : "gone";
+  } catch {
+    return "gone";
+  }
+}
+
+/** The files a finished ComfyUI render saved. */
+async function comfyOutputs(id: string): Promise<string[]> {
+  try {
+    const h = (await (await http(`${COMFY}/history/${id}`)).json())[id];
+    if (h?.status?.status_str === "error") return [];
+    return Object.values<any>(h?.outputs ?? {}).flatMap((o) => Object.values<any>(o).flat()).filter((f) => f?.filename && f.type === "output").map((f) => f.filename);
+  } catch {
+    return [];
+  }
+}
+
+/** Resume (or Clear) the renders that came back from before the reload. */
+function releaseHeld(run: boolean) {
+  for (let i = rq.length - 1; i >= 0; i--) {
+    if (!rq[i].held) continue;
+    if (run) rq[i].held = false;
+    else rq.splice(i, 1);
+  }
+  renderQueue();
+  pump();
+}
 
 /** Renders whose workflow has no Studio settings (and so no seed setting of their own). */
 const NO_SETTINGS: Family[] = ["talk", "select", "cutout", "vidcut", "upscale", "songedit", "foley", "person", "world", "swap"];
@@ -4455,7 +4564,7 @@ function enqueue(
 /** Starts the next waiting render when nothing is running. */
 async function pump() {
   if (current || job || starting) return;
-  const next = rq.find((x) => x.state === "waiting");
+  const next = rq.find((x) => x.state === "waiting" && !x.held);
   if (!next) return;
   current = next;
   next.state = "running";
@@ -4495,7 +4604,7 @@ function cancelJob(j: QJob) {
 
 /** Puts a failed or stopped render back in the queue, as it was (same settings and seed). */
 function retryJob(j: QJob) {
-  rq.push({ ...j, id: jobIds++, state: "waiting", pct: 0, status: "Waiting", error: undefined, result: undefined, took: undefined, added: Date.now(), waiter: undefined, note: "", cancelled: undefined });
+  rq.push({ ...j, id: jobIds++, state: "waiting", pct: 0, status: "Waiting", error: undefined, result: undefined, took: undefined, added: Date.now(), waiter: undefined, note: "", cancelled: undefined, promptId: undefined, started: undefined, held: undefined });
   renderQueue();
   pump();
 }
@@ -4529,6 +4638,7 @@ export const onQueueChange = (f: () => void) => queueListeners.add(f);
 /** The queue under the create bar, and the count on the Studio button. */
 function renderQueue() {
   queueListeners.forEach((f) => f());
+  persistQueue();
   const live = rq.filter((j) => j.state === "waiting" || j.state === "running");
   const badge = document.getElementById("studio-count");
   if (badge) badge.textContent = live.length ? String(live.length) : "";
@@ -4546,6 +4656,17 @@ function renderQueue() {
     .join(" · ");
   const list = $("#rq-list");
   list.innerHTML = "";
+  const held = rq.filter((j) => j.held && j.state === "waiting").length;
+  if (held) {
+    const bar = document.createElement("div");
+    bar.className = "rq-held";
+    bar.innerHTML = `<span></span><button type="button" class="linkish">resume</button><button type="button" class="linkish">clear</button>`;
+    $("span", bar).textContent = `${held} render${held === 1 ? " was" : "s were"} waiting before Prestige reloaded.`;
+    const [go, drop] = bar.querySelectorAll("button");
+    go.addEventListener("click", () => releaseHeld(true));
+    drop.addEventListener("click", () => releaseHeld(false));
+    list.appendChild(bar);
+  }
   for (const j of rq) {
     const row = document.createElement("div");
     row.className = `rq-row ${j.state}`;
@@ -4553,7 +4674,9 @@ function renderQueue() {
     const status =
       j.state === "running"
         ? j.status
-        : j.state === "waiting"
+        : j.state === "waiting" && j.held
+          ? "Paused · from before the reload"
+          : j.state === "waiting"
           ? `Waiting · ${rq.filter((x) => (x.state === "waiting" || x.state === "running") && rq.indexOf(x) < rq.indexOf(j)).length} ahead`
           : j.state === "done"
             ? `Done in ${ago((j.took ?? 0) * 1000)}${j.result && j.result.length > 1 ? ` · ${j.result.length} files` : ""}`
@@ -4682,6 +4805,7 @@ async function submit(j: QJob) {
       throw new Error(why);
     }
     job = { id: body.prompt_id, mode: gm, started: Date.now(), prompt, nodes, outputs: [], seed, count };
+    Object.assign(j, { promptId: job.id, started: job.started });
     setJob(2, "Queued. Loading models…");
     render();
   } catch (e) {
