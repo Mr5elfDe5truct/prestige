@@ -18,6 +18,7 @@ import { initLaser } from "./laser";
 import { loadJobs, saveJobs } from "./queuestore";
 import { editLayoutPrompt, layoutBoxes, layoutMask, layoutPrompt, layoutRefBox, boxWhat, onLayoutChange, openLayout, useLayout } from "./layout";
 import { checkOcr } from "./ocr";
+import { checkIdol } from "./idol";
 import { checkTranslate } from "./translate";
 import { initTrain, openTrain, trainedLoras, type TrainedLora } from "./train";
 import { applyWanModels, diffusionModels } from "./uncensored";
@@ -243,6 +244,7 @@ export async function showStudio(on: boolean) {
   clearInterval(holdersTimer);
   if (!on) return;
   checkOcr();
+  checkIdol(deps.root());
   checkTranslate();
   // While Studio is open, a program starting or closing on ComfyUI's card updates the warnings (takenGB redraws).
   holdersTimer = window.setInterval(() => {

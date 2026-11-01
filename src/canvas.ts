@@ -239,7 +239,7 @@ function stopModel() {
   panel?.classList.remove("model");
 }
 
-/** Shows a 3D model file in the Canvas. `path` is the .glb on disk. */
+/** Shows a 3D model file in the Canvas. `path` is the .glb (or Idol's splat .ply) on disk. */
 export async function openModel(path: string, name: string) {
   closeCanvas();
   muted = false;
@@ -257,11 +257,16 @@ export async function openModel(path: string, name: string) {
   $("#canvas-stage").appendChild(view);
   try {
     const { mountViewer } = await import("./model3d");
-    const v = await mountViewer(view, convertFileSrc(path));
+    const splat = /\.ply$/i.test(path);
+    const v = await mountViewer(view, convertFileSrc(path), splat);
     if (!view.isConnected) return v.dispose(); // closed (or replaced) while it was loading
     modelView = v;
     const s = v.stats;
-    setStatus(`${s.triangles.toLocaleString()} triangles · ${s.textures} textures · drag to turn, scroll to zoom`);
+    setStatus(
+      splat
+        ? `${s.gaussians ? `${s.gaussians.toLocaleString()} Gaussians · ` : ""}a splat by Idol · drag to turn, scroll to zoom`
+        : `${s.triangles.toLocaleString()} triangles · ${s.textures} textures · drag to turn, scroll to zoom`,
+    );
   } catch (e) {
     view.remove();
     setStatus(`Couldn't show it: ${e instanceof Error ? e.message : e}`);
