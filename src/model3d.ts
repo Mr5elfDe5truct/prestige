@@ -1,6 +1,7 @@
 // The 3D viewer for Picture to 3D: a textured .glb (Pixal3D's output) in the Canvas panel, drawn with three.js bundled
 // into Prestige (so it works offline). The file loads through the asset protocol like a render; drag to turn it, scroll
 // to zoom, right-drag to move. It turns slowly until it's touched. Loaded on demand, so three.js isn't in the main bundle.
+// Idol's Gaussian splats (.ply) are drawn by Spark (World Labs, MIT) in the same scene and controls.
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
@@ -9,11 +10,13 @@ import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment
 export interface ModelStats {
   triangles: number;
   textures: number;
+  gaussians?: number; // a splat's, instead of triangles
   size: [number, number, number]; // the bounding box, in the model's units
 }
 
-/** Shows the model in `el`; resolves with its stats and a function that stops and frees the viewer. */
-export async function mountViewer(el: HTMLElement, url: string): Promise<{ stats: ModelStats; dispose: () => void }> {
+/** Shows the model in `el` (`splat`: a Gaussian splat .ply); resolves with its stats and a function that stops and
+ *  frees the viewer. */
+export async function mountViewer(el: HTMLElement, url: string, splat = false): Promise<{ stats: ModelStats; dispose: () => void }> {
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -30,11 +33,31 @@ export async function mountViewer(el: HTMLElement, url: string): Promise<{ stats
   controls.autoRotateSpeed = 1.2;
   controls.addEventListener("start", () => (controls.autoRotate = false));
 
-  const gltf = await new GLTFLoader().loadAsync(url);
-  const model = gltf.scene;
-  scene.add(model);
+  let model: THREE.Object3D;
+  let box: THREE.Box3;
+  let gaussians: number | undefined;
+  let freeSplat = () => {};
+  if (splat) {
+    const { SparkRenderer, SplatMesh } = await import("@sparkjsdev/spark");
+    const spark = new SparkRenderer({ renderer });
+    scene.add(spark);
+    const mesh = new SplatMesh({ url });
+    // 3D Gaussian splat files are y-down; turned over so the object stands upright.
+    mesh.quaternion.set(1, 0, 0, 0);
+    await mesh.initialized;
+    scene.add(mesh);
+    model = mesh;
+    mesh.updateMatrixWorld(true);
+    box = mesh.getBoundingBox(true).applyMatrix4(mesh.matrixWorld);
+    gaussians = (mesh as any).packedSplats?.numSplats;
+    freeSplat = () => mesh.dispose();
+  } else {
+    const gltf = await new GLTFLoader().loadAsync(url);
+    model = gltf.scene;
+    scene.add(model);
+    box = new THREE.Box3().setFromObject(model);
+  }
   // Fit: centre the model and back the camera off until it fills about two thirds of the view.
-  const box = new THREE.Box3().setFromObject(model);
   const size = box.getSize(new THREE.Vector3());
   const centre = box.getCenter(new THREE.Vector3());
   model.position.sub(centre);
@@ -86,7 +109,7 @@ export async function mountViewer(el: HTMLElement, url: string): Promise<{ stats
   loop();
 
   return {
-    stats: { triangles: Math.round(triangles), textures: textures.size, size: [size.x, size.y, size.z] },
+    stats: { triangles: Math.round(triangles), textures: textures.size, gaussians, size: [size.x, size.y, size.z] },
     dispose: () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
@@ -98,6 +121,7 @@ export async function mountViewer(el: HTMLElement, url: string): Promise<{ stats
         for (const mat of ([] as THREE.Material[]).concat(m.material)) mat.dispose();
       });
       textures.forEach((t) => t.dispose());
+      freeSplat();
       pmrem.dispose();
       renderer.dispose();
       renderer.domElement.remove();

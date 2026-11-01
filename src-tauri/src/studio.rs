@@ -18,7 +18,7 @@ use std::os::windows::process::CommandExt;
 
 const IMAGE_EXT: &[&str] = &["png", "jpg", "jpeg", "webp", "gif"];
 const VIDEO_EXT: &[&str] = &["mp4", "webm", "mov"];
-const MODEL_EXT: &[&str] = &["glb"]; // Picture to 3D (Pixal3D)
+const MODEL_EXT: &[&str] = &["glb", "ply"]; // Picture to 3D: Pixal3D's meshes, Idol's Gaussian splats
 const AUDIO_EXT: &[&str] = &["mp3", "flac", "opus", "ogg", "wav"];
 const THUMB_SIZE: u32 = 360;
 

@@ -278,6 +278,13 @@ pub fn catalog(ollama_gb: f64) -> Vec<Pack> {
             }
             v
         }, vram: 7.3, ram: 0.0, card: "llama" },
+        Pack { id: "idol", title: "Picture to 3D · splat", text: "Idol (Speridlabs, Apache-2.0): one picture to a 3D Gaussian splat, sides it never saw included (~2 min a picture on an RTX 3060). Needs a Hugging Face token with the DINOv3 and FLUX.2-dev licences accepted; FLUX.2-dev's VAE is non-commercial. The first run downloads 6.4 GB more".into(), gb: 11.5, items: vec![
+            Item::Env { name: "idol".into(), probe: r"envs\idol\Scripts\python.exe".into(), steps: vec![
+                uv(&["venv", r"envs\idol", "--python", "3.11", "-q"]),
+                uv(&["pip", "install", "-p", r"envs\idol", "torch==2.13.0", "torchvision", "--index-url", "https://download.pytorch.org/whl/cu130", "-q"]),
+                uv(&["pip", "install", "-p", r"envs\idol", "-r", r"requirements\idol.txt", "-q"]),
+            ] },
+        ], vram: 6.5, ram: 0.0, card: "comfyui" },
         Pack { id: "humanize", title: "Humanizer", text: "humanizer 12B (llama.cpp, Gemma 4): Make it sound human rewrites AI-written text, facts kept".into(), gb: 7.6, items: vec![
             gguf("jialinyyzz/humanizer", crate::humanize::MODEL, crate::humanize::MODEL),
         ], vram: 10.0, ram: 0.0, card: "llama" },
