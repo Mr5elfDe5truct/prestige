@@ -4334,7 +4334,8 @@ let current: QJob | null = null;
 let jobIds = 1;
 
 // ---------- the queue kept on disk (queuestore.ts) ----------
-let savedKey = "";
+// Not "" (an empty queue): the first save always writes, so what was restored and has since finished is cleared.
+let savedKey: string | null = null;
 let saving = Promise.resolve();
 /** Saves the waiting and running renders when that changes (not on every progress tick). */
 function persistQueue() {
