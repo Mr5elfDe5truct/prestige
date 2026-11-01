@@ -1,6 +1,7 @@
 // Read the text: Unlimited-OCR (ocr.rs, the Read documents pack) turns a picture of a page (a photo of a letter, a
 // scan, a screenshot, a receipt) into Markdown with its headings and tables. Studio's right-click menu opens it on a
-// picture; the result can be copied, or the picture added to Knowledge so chats can answer from it.
+// picture; the result can be copied, or the picture added to Knowledge so chats can answer from it. With the Read whole
+// documents pack, "Read again, carefully" reads it with Unlimited-OCR-2: much better on a full page of text, but slower.
 import { invoke } from "@tauri-apps/api/core";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
@@ -16,6 +17,7 @@ interface Deps {
 
 let deps: Deps;
 let installed = false;
+let accurate = false; // the Read whole documents pack (Unlimited-OCR-2) is there
 let reading = 0;
 
 /** Whether the Read documents pack is there (checked at start and when Studio opens). */
@@ -23,20 +25,30 @@ export const ocrReady = () => installed;
 
 export async function checkOcr() {
   try {
-    installed = (await invoke<{ installed: boolean }>("ocr_status", { root: deps.root() })).installed;
+    const s = await invoke<{ installed: boolean; accurate: boolean }>("ocr_status", { root: deps.root() });
+    installed = s.installed;
+    accurate = s.accurate;
   } catch {
     installed = false;
+    accurate = false;
   }
 }
 
-/** Reads the text of the picture at `path` and shows it. */
-export async function readText(path: string, name: string) {
+/** Reads the text of the picture at `path` and shows it; `careful` with Unlimited-OCR-2. */
+export async function readText(path: string, name: string, careful = false) {
   const dlg = $("#ocr") as HTMLDialogElement;
   const body = $("#ocr-body");
   const mine = ++reading;
   let markdown = "";
   $("#ocr-name").textContent = name;
-  $("#ocr-note").textContent = "Reading the page… The first time takes a little longer while llama.cpp loads Unlimited-OCR.";
+  const by = careful ? "Unlimited-OCR-2" : "Unlimited-OCR";
+  $("#ocr-note").textContent = careful
+    ? "Reading it carefully with Unlimited-OCR-2… This takes 20 to 90 seconds (about 15 more the first time)."
+    : "Reading the page… The first time takes a little longer while llama.cpp loads Unlimited-OCR.";
+  const again = $("#ocr-again") as HTMLButtonElement;
+  again.hidden = careful || !accurate;
+  again.disabled = true;
+  again.onclick = () => readText(path, name, true);
   body.innerHTML = `<div class="spinner"></div>`;
   ($("#ocr-copy") as HTMLButtonElement).disabled = true;
   ($("#ocr-kb") as HTMLButtonElement).disabled = true;
@@ -54,17 +66,21 @@ export async function readText(path: string, name: string) {
   };
   if (!dlg.open) dlg.showModal();
   try {
-    const r = await invoke<{ markdown: string; secs: number }>("ocr_read", { root: deps.root(), path });
+    const r = await invoke<{ markdown: string; secs: number }>("ocr_read", { root: deps.root(), path, accurate: careful });
     if (mine !== reading) return;
     markdown = r.markdown;
     body.innerHTML = markdown.trim() ? DOMPurify.sanitize(marked.parse(markdown, { async: false, gfm: true }) as string) : `<p class="muted">No text was found in this picture.</p>`;
-    $("#ocr-note").textContent = `Read in ${r.secs < 10 ? r.secs.toFixed(1) : Math.round(r.secs)} s by Unlimited-OCR on this PC. Check names and numbers before you rely on them.`;
+    $("#ocr-note").textContent =
+      `Read in ${r.secs < 10 ? r.secs.toFixed(1) : Math.round(r.secs)} s by ${by} on this PC. Check names and numbers before you rely on them.` +
+      (careful || !accurate ? "" : " Text missing or repeated? Read again, carefully.");
+    again.disabled = false;
     ($("#ocr-copy") as HTMLButtonElement).disabled = !markdown.trim();
     ($("#ocr-kb") as HTMLButtonElement).disabled = !markdown.trim();
   } catch (e) {
     if (mine !== reading) return;
     body.innerHTML = "";
     $("#ocr-note").textContent = `Couldn't read it: ${errMsg(e)}.`;
+    again.disabled = false;
   }
 }
 

@@ -173,7 +173,23 @@ fn read_pages(path: &Path) -> Result<(Vec<String>, bool), String> {
             // Scanned pages have a picture instead of text: Unlimited-OCR reads them. A PDF that's all scans says
             // what it needs; one with a scanned page or two is still read without it.
             let scanned: Vec<usize> = (0..pages.len()).filter(|&i| pages[i].trim().len() < SCANNED).collect();
-            if !scanned.is_empty() && (crate::ocr::installed(&crate::ocr::current_root()) || scanned.len() == pages.len()) {
+            let root = crate::ocr::current_root();
+            // With the Read whole documents pack, Unlimited-OCR-2 reads the scanned pages together (much better on
+            // full pages of text); v1 page by page if that fails.
+            if !scanned.is_empty() && crate::ocr::installed2(&root) {
+                let imgs: Vec<(u32, Vec<u8>)> = crate::ocr::pdf_page_images(&bytes).into_iter().filter(|(n, _)| scanned.contains(&(*n as usize - 1))).collect();
+                let pics: Vec<Vec<u8>> = imgs.iter().map(|(_, b)| b.clone()).collect();
+                match crate::ocr::read_document(&root, &pics) {
+                    Ok(md) => {
+                        for ((n, _), text) in imgs.iter().zip(md) {
+                            pages[*n as usize - 1] = text;
+                        }
+                        return Ok((pages, true));
+                    }
+                    Err(e) => eprintln!("Unlimited-OCR-2 couldn't read {}: {e}; reading it with v1", path.display()),
+                }
+            }
+            if !scanned.is_empty() && (crate::ocr::installed(&root) || scanned.len() == pages.len()) {
                 for (n, img) in crate::ocr::pdf_page_images(&bytes) {
                     let i = n as usize - 1;
                     if scanned.contains(&i) {
