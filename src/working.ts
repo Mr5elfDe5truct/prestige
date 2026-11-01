@@ -82,6 +82,7 @@ export function toolDoing(name: string, args: any): string {
     }
   };
   if (name === "plan") return "Planning the searches…";
+  if (name === "load_tools") return `Getting the ${a.group ?? "more"} tools…`;
   if (name === "web_search" || name === "search") return `Searching the web${q(a.query ?? first)}…`;
   if (name === "search_past_chats") return `Looking through past chats${q(a.query ?? first)}…`;
   if (name === "search_my_files") return `Searching your files${q(a.query ?? first)}…`;
