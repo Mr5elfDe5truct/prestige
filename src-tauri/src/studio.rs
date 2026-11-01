@@ -290,11 +290,12 @@ pub async fn thumbnail(app: AppHandle, path: String, mtime: f64) -> Result<Strin
 /// The cached JPEG of a picture, or a video's frame at 0.5 s, made if it isn't there yet.
 pub(crate) fn make_thumb(app: &AppHandle, path: &str, mtime: f64) -> Result<PathBuf, String> {
     let src = PathBuf::from(path);
-    let dir = data_dir(app, "thumbs")?;
-    let key = format!("{:x}", fxhash(&format!("{path}|{mtime}")));
-    let out = dir.join(format!("{key}.jpg"));
+    let out = thumb_path(app, path, mtime)?;
     if out.exists() {
         return Ok(out);
+    }
+    if MODEL_EXT.contains(&ext_of(&src).as_str()) {
+        return Err("no picture of this 3D model yet".into()); // the gallery draws one (thumbnail_save)
     }
     if VIDEO_EXT.contains(&ext_of(&src).as_str()) {
         let status = hidden(&mut Command::new("ffmpeg"))
@@ -313,6 +314,29 @@ pub(crate) fn make_thumb(app: &AppHandle, path: &str, mtime: f64) -> Result<Path
         t.save_with_format(&out, image::ImageFormat::Jpeg).map_err(|e| e.to_string())?;
     }
     Ok(out)
+}
+
+/// A 3D model's thumbnail: the frontend draws the model (Rust can't render a .glb or a splat) and hands the JPEG over;
+/// it's kept in the same cache as the others, so the gallery and the phone find it with `thumbnail` from then on.
+#[tauri::command]
+pub fn thumbnail_save(app: AppHandle, path: String, mtime: f64, jpeg: String) -> Result<String, String> {
+    use base64::Engine;
+    if !MODEL_EXT.contains(&ext_of(Path::new(&path)).as_str()) {
+        return Err("only 3D models get their thumbnail this way".into());
+    }
+    let b64 = jpeg.split_once(',').map_or(jpeg.as_str(), |(_, b)| b); // a data: URL or bare base64
+    let bytes = base64::engine::general_purpose::STANDARD.decode(b64.trim()).map_err(|e| e.to_string())?;
+    if bytes.len() < 4 || bytes[..3] != [0xFF, 0xD8, 0xFF] {
+        return Err("not a JPEG".into());
+    }
+    let out = thumb_path(&app, &path, mtime)?;
+    fs::write(&out, bytes).map_err(|e| e.to_string())?;
+    Ok(out.to_string_lossy().into_owned())
+}
+
+fn thumb_path(app: &AppHandle, path: &str, mtime: f64) -> Result<PathBuf, String> {
+    let dir = data_dir(app, "thumbs")?;
+    Ok(dir.join(format!("{:x}.jpg", fxhash(&format!("{path}|{mtime}")))))
 }
 
 fn fxhash(s: &str) -> u64 {

@@ -642,6 +642,7 @@ pub fn run() {
             train::train_pick,
             studio::gallery_list,
             studio::thumbnail,
+            studio::thumbnail_save,
             studio::reveal,
             studio::mux_foley,
             studio::mux_swap,
