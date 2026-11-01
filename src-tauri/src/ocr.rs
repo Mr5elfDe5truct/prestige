@@ -4,13 +4,21 @@
 // takes 2-3 s once it's loaded.
 //
 // Studio's "Read the text" and Knowledge (photos of pages, and scanned PDFs, whose pages are pictures) use it.
+//
+// Unlimited-OCR-2 (Baidu, MIT; the ocr2 pack, "Read whole documents") reads every page of a document in one go, and is
+// far better on a full page of text: on a dense test page it got 98.7% of the words where v1 got 7.7% (it fell into a
+// loop). It has no llama.cpp support yet, so it runs through transformers in its own environment (tools\ocr2.py), at
+// ~8 tokens a second on an RTX 3060: a short page in ~20 s, a full one in ~90 s, plus ~15 s to load and ~7.3 GB of
+// VRAM. Scanned PDFs in Knowledge use it when the pack is there; "Read the text" offers it as a second, slower read.
+// v1 stays the fallback.
 
 use base64::Engine;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::Mutex;
 
-use crate::stack_root;
+use crate::{hidden, stack_root};
 
 const ID: &str = "unlimited-ocr";
 pub(crate) const MODEL: &str = "Unlimited-OCR-3B-Q4_K_M.gguf";
@@ -92,6 +100,108 @@ fn prepared(bytes: &[u8]) -> Result<(Vec<u8>, &'static str), String> {
     let mut out = std::io::Cursor::new(Vec::new());
     small.to_rgb8().write_to(&mut out, image::ImageFormat::Png).map_err(|e| e.to_string())?;
     Ok((out.into_inner(), "image/png"))
+}
+
+// ---------- Unlimited-OCR-2 ----------
+
+/// Where the ocr2 pack puts the model (its files at a fixed revision: the model's own code runs from here).
+pub(crate) const OCR2_DIR: &str = r"models\unlimited-ocr-2";
+
+pub(crate) fn installed2(root: &Path) -> bool {
+    root.join("envs").join("ocr2").join("Scripts").join("python.exe").exists()
+        && root.join(OCR2_DIR).join("model-00002-of-00002.safetensors").exists()
+        && root.join("tools").join("ocr2.py").exists()
+}
+
+/// Every page of a document, read together by Unlimited-OCR-2, as Markdown (one string a page).
+pub(crate) fn read_document(root: &Path, pages: &[Vec<u8>]) -> Result<Vec<String>, String> {
+    if !installed2(root) {
+        return Err("reading whole documents needs the Read whole documents pack (Unlimited-OCR-2): add it in Packs".into());
+    }
+    // The pictures go to a folder of their own for the run (as PNG or JPEG, no bigger than needed).
+    let dir = std::env::temp_dir().join(format!("prestige-ocr2-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let mut files = Vec::new();
+    for (i, p) in pages.iter().enumerate() {
+        let (img, mime) = prepared(p)?;
+        let f = dir.join(format!("page-{:03}.{}", i + 1, if mime == "image/jpeg" { "jpg" } else { "png" }));
+        fs::write(&f, img).map_err(|e| e.to_string())?;
+        files.push(f);
+    }
+    // The chat model and the other llama.cpp models make room on the GPU first.
+    free_llama();
+    let out = hidden(&mut Command::new(root.join("envs").join("ocr2").join("Scripts").join("python.exe")))
+        .arg(root.join("tools").join("ocr2.py"))
+        .arg(root.join(OCR2_DIR))
+        .args(&files)
+        .current_dir(root)
+        .env("PYTHONIOENCODING", "utf-8")
+        // The model's code is cached by its folder's name; a cache of its own keeps another copy's from clashing.
+        .env("HF_MODULES_CACHE", root.join("data").join("ocr2-modules"))
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| format!("couldn't start Unlimited-OCR-2: {e}"));
+    let _ = fs::remove_dir_all(&dir);
+    let out = out?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let line = stdout.lines().rev().find(|l| l.trim_start().starts_with('{')).unwrap_or("");
+    let v: serde_json::Value = serde_json::from_str(line).map_err(|_| {
+        let err = String::from_utf8_lossy(&out.stderr);
+        format!("Unlimited-OCR-2 ended without a result: {}", err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("no message"))
+    })?;
+    if let Some(e) = v["error"].as_str() {
+        return Err(e.to_string());
+    }
+    let mut md = pages_to_markdown(v["text"].as_str().unwrap_or(""));
+    // One string a page, whatever the model's page marks said.
+    md.resize(pages.len(), String::new());
+    Ok(md)
+}
+
+/// Unloads what llama.cpp's router has loaded, so Unlimited-OCR-2's ~7.3 GB fits.
+fn free_llama() {
+    let Ok(r) = ureq::get(&format!("{}/v1/models", router())).timeout(std::time::Duration::from_secs(3)).call() else { return };
+    let v: serde_json::Value = serde_json::from_str(&r.into_string().unwrap_or_default()).unwrap_or_default();
+    for m in v["data"].as_array().into_iter().flatten() {
+        if m["status"]["value"].as_str().is_some_and(|s| s != "unloaded") {
+            let body = serde_json::json!({ "model": m["id"] }).to_string();
+            let _ = ureq::post(&format!("{}/models/unload", router())).timeout(std::time::Duration::from_secs(30)).set("Content-Type", "application/json").send_string(&body);
+        }
+    }
+}
+
+/// Unlimited-OCR-2's output: `<PAGE>` before each page, then `<BLOCK>kind<LEVELn>[x0, y0, x1, y1]<FORK>content`
+/// blocks in reading order (tables as HTML).
+pub(crate) fn pages_to_markdown(raw: &str) -> Vec<String> {
+    let raw = raw.replace("<｜end▁of▁sentence｜>", "").replace("<|end▁of▁sentence|>", "");
+    raw.split("<PAGE>").skip(usize::from(raw.trim_start().starts_with("<PAGE>"))).map(page_markdown).collect()
+}
+
+fn page_markdown(page: &str) -> String {
+    let mut blocks: Vec<String> = Vec::new();
+    for part in page.split("<BLOCK>") {
+        let Some((head, body)) = part.split_once("<FORK>") else {
+            if !part.trim().is_empty() {
+                blocks.push(part.trim().to_string());
+            }
+            continue;
+        };
+        let body = body.trim();
+        if body.is_empty() {
+            continue;
+        }
+        let kind = head.split(['<', '[']).next().unwrap_or("text").trim().to_ascii_lowercase();
+        let level = head.split("<LEVEL").nth(1).and_then(|r| r.split('>').next()).and_then(|n| n.parse::<usize>().ok()).unwrap_or(1).clamp(1, 4);
+        blocks.push(match kind.as_str() {
+            "title" | "doc_title" | "paragraph_title" | "section_title" | "sub_title" => format!("{} {body}", "#".repeat(level)),
+            "table" => html_table(body),
+            "equation" | "formula" | "interline_equation" => format!("$$\n{}\n$$", body.trim_matches('$').trim()),
+            "page_number" | "page_header" | "page_footer" | "header" | "footer" | "image" | "figure" | "chart" | "seal" => continue,
+            _ => body.to_string(),
+        });
+    }
+    blocks.join("\n\n")
 }
 
 /// The text of a picture of a page, as Markdown.
@@ -235,16 +345,21 @@ fn raw_to_png(doc: &lopdf::Document, img: &lopdf::xobject::PdfImage) -> Option<V
 #[tauri::command]
 pub fn ocr_status(root: Option<String>) -> serde_json::Value {
     let root = root_of(root);
-    serde_json::json!({ "installed": installed(&root), "configured": configured(&root) })
+    serde_json::json!({ "installed": installed(&root), "configured": configured(&root), "accurate": installed2(&root) })
 }
 
-/// The text of a picture (a render, or a file from the PC), as Markdown, and how long it took.
+/// The text of a picture (a render, or a file from the PC), as Markdown, and how long it took. `accurate`: read
+/// it with Unlimited-OCR-2 (slower, better on a full page of text).
 #[tauri::command]
-pub async fn ocr_read(root: Option<String>, path: String) -> Result<serde_json::Value, String> {
+pub async fn ocr_read(root: Option<String>, path: String, accurate: Option<bool>) -> Result<serde_json::Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let bytes = fs::read(&path).map_err(|e| format!("{path}: {e}"))?;
         let t0 = std::time::Instant::now();
-        let markdown = read_image(root, &bytes)?;
+        let markdown = if accurate == Some(true) {
+            read_document(&root_of(root), &[bytes])?.remove(0)
+        } else {
+            read_image(root, &bytes)?
+        };
         Ok(serde_json::json!({ "markdown": markdown, "secs": t0.elapsed().as_secs_f64() }))
     })
     .await
@@ -269,6 +384,15 @@ mod tests {
         let t = html_table("<table><tr><th>A</th><th>B</th></tr><tr><td>1 &amp; 2</td></tr></table>");
         assert_eq!(t, "| A | B |\n| --- | --- |\n| 1 & 2 |  |");
         assert_eq!(html_table("<table><tr><td>x|y</td></tr></table>"), "| x\\|y |\n| --- |");
+    }
+
+    #[test]
+    fn whole_documents_become_markdown() {
+        let raw = "<PAGE><BLOCK>title<LEVEL1>[88, 72, 335, 96]<FORK>Cabin Project Report\n<BLOCK>text[86, 126, 474, 142]<FORK>Prepared by R.G. Studios.\n<BLOCK>page_number[475, 932, 560, 948]<FORK>Page 1 of 3\n<PAGE><BLOCK>title<LEVEL2>[84, 76, 167, 97]<FORK>Budget\n<BLOCK>table[84, 167, 830, 306]<FORK><table><tr><td>Item</td><td>Cost</td></tr><tr><td>Windows</td><td>6,480</td></tr></table>";
+        assert_eq!(
+            pages_to_markdown(raw),
+            vec!["# Cabin Project Report\n\nPrepared by R.G. Studios.".to_string(), "## Budget\n\n| Item | Cost |\n| --- | --- |\n| Windows | 6,480 |".to_string()]
+        );
     }
 
     #[test]

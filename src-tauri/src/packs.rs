@@ -258,6 +258,33 @@ pub fn catalog(ollama_gb: f64) -> Vec<Pack> {
             gguf("42ailab/Unlimited-OCR-GGUF", crate::ocr::MODEL, crate::ocr::MODEL),
             gguf("42ailab/Unlimited-OCR-GGUF", crate::ocr::MMPROJ, crate::ocr::MMPROJ),
         ], vram: 5.0, ram: 0.0, card: "llama" },
+        Pack { id: "quicktalk", title: "Quick talk", text: "LFM3-Audio 2B (llama.cpp, Liquid AI): Live's Quick mode, one small model that hears you and answers aloud in about 0.4 s (needs llama.cpp b11960 or newer; LFM Open License, free under $10M revenue)".into(), gb: 1.4, items: vec![
+            gguf("LiquidAI/LFM3-Audio-2B-GGUF", crate::quicktalk::MODEL, crate::quicktalk::MODEL),
+            gguf("LiquidAI/LFM3-Audio-2B-GGUF", crate::quicktalk::MMPROJ, crate::quicktalk::MMPROJ),
+        ], vram: 2.4, ram: 0.0, card: "llama" },
+        Pack { id: "ocr2", title: "Read whole documents", text: "Unlimited-OCR-2 3B (Baidu, MIT; transformers): reads every page of a scanned PDF together, far better than Read documents on full pages of text, but slower (a page in 20-90 s on an RTX 3060)".into(), gb: 10.5, items: {
+            // The model's own Python code runs from these files, so they're fetched at a fixed revision.
+            const REV: &str = "c14071b549f4fcab10909f3c4acc6a2edb366947";
+            let mut v = vec![Item::Env { name: "ocr2".into(), probe: r"envs\ocr2\Scripts\python.exe".into(), steps: vec![
+                uv(&["venv", r"envs\ocr2", "--python", "3.10", "-q"]),
+                uv(&["pip", "install", "-p", r"envs\ocr2", "torch==2.13.0", "torchvision", "--index-url", "https://download.pytorch.org/whl/cu130", "-q"]),
+                uv(&["pip", "install", "-p", r"envs\ocr2", "-r", r"requirements\ocr2.txt", "-q"]),
+            ] }];
+            for f in ["config.json", "generation_config.json", "model.safetensors.index.json", "special_tokens_map.json", "tokenizer.json", "tokenizer_config.json",
+                "_sparse_base_impl.py", "configuration_deepseek_v2.py", "conversation.py", "dash_attention.py", "deepencoder.py", "modeling_deepseekv2.py",
+                "modeling_unlimitedocr.py", "packing_patch.py", "sparse_gather_e2e_triton.py", "sparse_gather_triton.py",
+                "model-00001-of-00002.safetensors", "model-00002-of-00002.safetensors"] {
+                v.push(Item::File { url: format!("https://huggingface.co/baidu/Unlimited-OCR-2/resolve/{REV}/{f}"), dest: format!(r"{}\{f}", crate::ocr::OCR2_DIR), alts: vec![] });
+            }
+            v
+        }, vram: 7.3, ram: 0.0, card: "llama" },
+        Pack { id: "idol", title: "Picture to 3D · splat", text: "Idol (Speridlabs, Apache-2.0): one picture to a 3D Gaussian splat, sides it never saw included (~2 min a picture on an RTX 3060). Needs a Hugging Face token with the DINOv3 and FLUX.2-dev licences accepted; FLUX.2-dev's VAE is non-commercial. The first run downloads 6.4 GB more".into(), gb: 11.5, items: vec![
+            Item::Env { name: "idol".into(), probe: r"envs\idol\Scripts\python.exe".into(), steps: vec![
+                uv(&["venv", r"envs\idol", "--python", "3.11", "-q"]),
+                uv(&["pip", "install", "-p", r"envs\idol", "torch==2.13.0", "torchvision", "--index-url", "https://download.pytorch.org/whl/cu130", "-q"]),
+                uv(&["pip", "install", "-p", r"envs\idol", "-r", r"requirements\idol.txt", "-q"]),
+            ] },
+        ], vram: 6.5, ram: 0.0, card: "comfyui" },
         Pack { id: "humanize", title: "Humanizer", text: "humanizer 12B (llama.cpp, Gemma 4): Make it sound human rewrites AI-written text, facts kept".into(), gb: 7.6, items: vec![
             gguf("jialinyyzz/humanizer", crate::humanize::MODEL, crate::humanize::MODEL),
         ], vram: 10.0, ram: 0.0, card: "llama" },
@@ -1173,7 +1200,9 @@ mod tests {
                 assert!(!p.items.is_empty());
                 for i in &p.items {
                     if let Item::File { url, dest, .. } = i {
-                        let hf = url.starts_with("https://huggingface.co/") && url.contains("/resolve/main/");
+                        // A model whose own code runs (Unlimited-OCR-2) is pinned to a commit instead of main.
+                        let pinned = url.split("/resolve/").nth(1).and_then(|r| r.split('/').next()).is_some_and(|c| c.len() == 40 && c.chars().all(|x| x.is_ascii_hexdigit()));
+                        let hf = url.starts_with("https://huggingface.co/") && (url.contains("/resolve/main/") || pinned);
                         let release = url.starts_with("https://github.com/") && url.contains("/releases/download/");
                         assert!(hf || release, "{url}");
                         assert!(dest.starts_with(r"models\") && !dest.contains('/'), "{dest}");

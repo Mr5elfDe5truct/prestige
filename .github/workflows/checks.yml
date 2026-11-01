@@ -1,6 +1,6 @@
 # Quick checks on every pull request and every push to main: types, unit tests, the web build, and the Rust side.
 # No installer is built here (that's build-installer.yml). Run the same checks on the PC with:
-#   npm run check; npm test; npx vite build; cd src-tauri; cargo clippy
+#   npm run check; npm test; npx vite build; cd src-tauri; cargo clippy; cargo test
 name: Checks
 
 on:
@@ -52,3 +52,7 @@ jobs:
       - name: Rust check
         working-directory: src-tauri
         run: cargo clippy --all-targets
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test

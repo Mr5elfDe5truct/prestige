@@ -175,6 +175,7 @@ interface Settings {
   phone?: boolean; // phone access is on (phone.rs)
   phonePort?: number; // its port, 8765 unless set
   liveStt?: "phonon"; // Live calls listen with Phonon-2 (CPU, :8891) instead of Whisper
+  liveQuick?: boolean; // Live calls use Quick mode: LFM3-Audio hears and speaks (quicktalk.ts)
   computerModel?: string; // the model that drives the PC for /do (its key); undefined = the best one there
   autoUpdate?: boolean; // look for a new version on GitHub without being asked (undefined = on)
 }
@@ -1738,6 +1739,12 @@ async function main() {
     memCfg,
     liveModels,
     phonon: () => settings.liveStt === "phonon",
+    getQuick: () => !!settings.liveQuick,
+    setQuick: (on) => {
+      settings.liveQuick = on || undefined;
+      saveSettings();
+    },
+    root: () => settings.stackRoot ?? null,
     beginChat: beginLiveChat,
     send: (text, images, model, hooks) => {
       send(text, { images, hooks, live: model });

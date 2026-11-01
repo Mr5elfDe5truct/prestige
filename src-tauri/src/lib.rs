@@ -6,9 +6,11 @@ mod background;
 mod canvas;
 mod computer;
 mod humanize;
+mod idol;
 mod knowledge;
 mod models;
 mod ocr;
+mod quicktalk;
 mod packs;
 mod phone;
 mod prep;
@@ -617,8 +619,11 @@ pub fn run() {
             search::search_index,
             search::search_status,
             search::search_everything,
+            idol::idol_status,
+            idol::idol_run,
             ocr::ocr_status,
             ocr::ocr_read,
+            quicktalk::quick_talk_prepare,
             humanize::humanize_status,
             humanize::humanize,
             drama::drama_status,

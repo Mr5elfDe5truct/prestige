@@ -1,12 +1,28 @@
 import { ocrReady, readText } from "./ocr";
 import { openTranslate, translateReady } from "./translate";
 import { swapCharacter } from "./swap";
-import { $, $$, deps, isInstrumental, starred, workflows } from "./studio";
+import { $, $$, current, deps, isInstrumental, job, outside, starred, starting, workflows } from "./studio";
 import { type Asset } from "./modes";
 import { useAsReference } from "./refslot";
 import { closeLightbox, makeModel, openLightbox, toggleStar } from "./gallery";
+import { idolReady, makeSplat } from "./idol";
+import { refresh } from "./cards";
 import { addSound, laser, makeManga, newAngle, paintToChange, personCutout, removeBackground, restorePhoto, songEditItems, startFrom, tryOnOutfit, upscaleItems, videoCutout } from "./renderactions";
 import { deleteRender, fileAction, reusePrompt, reuseSeed, revealFile, saveAs } from "./fileactions";
+
+/** Picture to 3D as a splat (idol.ts): a photo from outside in Idol's "real" mode, a render in its "synthetic" one. */
+function splat(a: Asset) {
+  closeLightbox();
+  makeSplat(a.path, outside.has(a.path), {
+    root: deps.root,
+    toast: deps.toast,
+    rendering: () => !!(job || current || starting),
+    done: async (ply) => {
+      await refresh();
+      deps.openModel(ply, ply.split(/[\\/]/).pop() ?? "3D splat");
+    },
+  });
+}
 
 // ---------- right-click menu ----------
 export type MenuItem = { label: string; run: () => void; key?: string; danger?: boolean } | "-";
@@ -49,6 +65,7 @@ export function showMenu(e: MouseEvent, a: Asset) {
     ...(image && (workflows.animate || workflows.long) ? [{ label: "Animate (image → video)…", run: () => startFrom(a, "video") }] : []),
     ...(image && (workflows.ref || workflows.reffast) ? [{ label: "Use as reference image", run: () => useAsReference(a) }] : []),
     ...(image && workflows.model3d ? [{ label: "Make a 3D model", run: () => makeModel(a), key: "Pixal3D" }] : []),
+    ...(image && idolReady() ? [{ label: "Make a 3D splat", run: () => splat(a), key: "Idol" }] : []),
     ...(image && workflows.talk ? [{ label: "Make it talk…", run: () => deps.makeTalk(a.path), key: "InfiniteTalk" }] : []),
     ...(image && workflows.song ? [{ label: "Make a song about it", run: () => deps.songFromPicture(a.path), key: "in chat" }] : []),
     ...(image ? [{ label: "Make a laser file…", run: () => laser(a), key: "engrave or cut" }] : []),
