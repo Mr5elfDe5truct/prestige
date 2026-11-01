@@ -194,6 +194,61 @@ export function groupsWithin(tools: ToolDef[], groups: Set<string>, budget: numb
   return { keep, dropped };
 }
 
+// ---------- loading tools only when needed ----------
+// Every tool's description went with every message: Ryan's ten groups (102 tools) were ~15.5k prompt tokens, and a
+// one-line question took ~22 s to start answering on Qwen3.8 27B instead of ~1 s. Now only Prestige's own small groups
+// go in full; the rest are one line each in load_tools, and a group's tools are added once the model asks for it
+// (or straight away when the message clearly needs it).
+
+/** Always sent in full: a few small tools each. */
+const CORE = new Set(["web", "history", "knowledge"]);
+export const LOAD_TOOLS = "load_tools";
+
+/** Words that mean a message needs a group's tools before the model has asked. */
+const WANTS: Record<string, RegExp> = {
+  filesystem: /\b(files?|folders?|director(y|ies)|documents?)\b|\.(txt|md|json|csv|py|ts|js|log|ini|pdf|docx?)\b|\b[a-z]:\\/i,
+  desktop: /\b(powershell|terminal|command|cmd|process(es)?|running programs?|task manager|disk space|install(ed)?)\b/i,
+  browser: /\b(browser|chrome|log ?in|sign ?in|click|fill (in|out)|open (the |a )?(site|website|page))\b/i,
+  workstation: /\b(reddit|hugging ?face|github|webcam|camera|scout|video jobs?|make (me )?(an? )?(image|picture|photo|video|clip)|draw)\b/i,
+};
+
+/** Whether a message names a group: its own words above, or its id or menu label (a tool store group's "YouTube"). */
+export function wanted(group: string, text: string) {
+  if (WANTS[group]?.test(text)) return true;
+  const label = GROUPS.find((g) => g.id === group)?.label ?? group;
+  const word = (w: string) => w.length > 2 && new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(text);
+  return word(group) || word(label);
+}
+
+/** Splits the switched-on groups into those sent in full now and those offered by name through load_tools. */
+export function splitGroups(tools: ToolDef[], groups: Set<string>, text: string, loaded: Set<string>) {
+  const full = new Set<string>();
+  const later: string[] = [];
+  for (const g of groups) {
+    if (!tools.some((t) => t.group === g)) continue;
+    if (CORE.has(g) || loaded.has(g) || wanted(g, text)) full.add(g);
+    else later.push(g);
+  }
+  return { full, later };
+}
+
+/** The load_tools tool: its description is the catalog, one line per group not loaded yet. */
+export function loadToolsSpec(tools: ToolDef[], later: string[]) {
+  const lines = later.map((id) => {
+    const g = GROUPS.find((x) => x.id === id);
+    const n = tools.filter((t) => t.group === id).length;
+    return `- ${id}: ${g?.hint ?? g?.label ?? id} (${n} tool${n === 1 ? "" : "s"})`;
+  });
+  return {
+    type: "function",
+    function: {
+      name: LOAD_TOOLS,
+      description: `More tools, not loaded yet to keep this short. Call this with a group to get its tools, then call them.\n${lines.join("\n")}`,
+      parameters: { type: "object", properties: { group: { type: "string", enum: later, description: "Which group to load" } }, required: ["group"] },
+    },
+  };
+}
+
 const MAX_RESULT = 8000;
 
 /** Rounds of tool calls in one reply. A model that still wants more after these gets one more turn without tools,

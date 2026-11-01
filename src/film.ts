@@ -19,27 +19,7 @@ import { SHOT_SECONDS, planVideo } from "./director";
 import { aboutTime } from "./gensettings";
 import { CONSENT, loadReference } from "./reference";
 import { listVoices, synthesize } from "./speech";
-import {
-  allowRenders,
-  askLine,
-  cancelFilm,
-  filmTools,
-  longTake,
-  refreshCreate,
-  renderCastFrame,
-  renderFrame,
-  renderLongTake,
-  renderShot,
-  renderSong,
-  renderTalk,
-  shotSecs,
-  soundClip,
-  soundClipSecs,
-  swapClip,
-  swapClipSecs,
-  upscaleClip,
-  upscaleClipSecs,
-} from "./studio";
+import { allowRenders, askLine, cancelFilm, filmTools, longTake, refreshCreate, renderCastFrame, renderFrame, renderLongTake, renderShot, renderSong, renderTalk, shotSecs, soundClip, soundClipSecs, swapClip, swapClipSecs, upscaleClip, upscaleClipSecs } from "./renderapi";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
 const $$ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => Array.from(r.querySelectorAll(s)) as T[];
