@@ -50,7 +50,7 @@ import {
 import { bestFor, capsFor, chipsHtml, nameHints, supportsTools } from "./caps";
 import { initCatalog, openCatalog, phoneCatalog } from "./catalog";
 import { checkForUpdates, initUpdates } from "./updates";
-import { GROUPS, LAST_ROUND, TOOL_ROUNDS, describeCall, fitToolResults, groupsWithin, withoutToolCalls, loadTools, runTool, toolContext, tokensIn, toolSpecs, type ToolDef, type ToolStep } from "./tools";
+import { GROUPS, LAST_ROUND, LOAD_TOOLS, TOOL_ROUNDS, describeCall, fitToolResults, groupsWithin, withoutToolCalls, loadTools, loadToolsSpec, runTool, splitGroups, toolContext, tokensIn, toolSpecs, type ToolDef, type ToolStep } from "./tools";
 import { ctxOf, errMsg, freeLlamaVram, http, nameFor, listModels, ping, streamChat, OLLAMA, LLAMA, type ChatMessage, type ModelInfo, type StreamStats } from "./backends";
 import { initMemoryWriter, pauseMemoryWrite, queueMemoryWrite } from "./memwriter";
 import { addFact, memoryContext, factCount, listFacts, listOwui, syncFromOwui, rememberRequest, DEFAULT_OWUI, type MemoryConfig } from "./memory";
@@ -925,6 +925,11 @@ const TOOLS_HINT =
   "You can call tools to look things up or act on this PC. Use a tool when it actually helps; otherwise just answer. " +
   "For current events or facts you aren't sure of, use web_search, then fetch to read a page. " +
   "Never invent tool results, and say which tool you used when it matters.";
+
+const LOAD_HINT = "More tools are listed in load_tools: when you need one of those groups, call load_tools first.";
+
+/** The tool groups load_tools has added in each chat (by chat id), which stay loaded for its later replies. */
+const loadedGroups = new Map<string, Set<string>>();
 
 function enabledGroups(): Set<string> {
   return new Set(settings.toolGroups ?? GROUPS.filter((g) => g.defaultOn).map((g) => g.id));
@@ -2617,21 +2622,46 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
     let toolDefs: ToolDef[] = [];
     let specs: any[] | undefined;
     // (Not in a call: tool rounds and "Allow?" cards don't work by voice, and they'd hold up the answer.)
+    // A group's full tools are sent once the model asks for it with load_tools (or the message clearly needs it), and
+    // stay for the rest of this chat. `later` is what's still offered by name.
+    let allTools: ToolDef[] = [];
+    let later: string[] = [];
+    let offer = new Set<string>();
+    const loaded = loadedGroups.get(replyChat) ?? new Set<string>();
+    loadedGroups.set(replyChat, loaded);
+    const toolBudget = Math.round(ctxOf(model) / 3);
+    const offerTools = () => {
+      toolDefs = allTools.filter((x) => offer.has(x.group));
+      const list = toolSpecs(allTools, offer);
+      if (later.length) list.push(loadToolsSpec(allTools, later));
+      specs = list.length ? list : undefined;
+    };
     if (!live && groups.size && (await supportsTools(model))) {
       const t = await loadTools();
+      allTools = t.tools;
+      const split = canvasTurn ? { full: new Set([...groups].filter((g) => CANVAS_TOOLS.has(g))), later: [] } : splitGroups(t.tools, groups, text, loaded);
       // A third of the context at most, so the chat and the answer keep the rest.
-      const fit = groupsWithin(t.tools, canvasTurn ? new Set([...groups].filter((g) => CANVAS_TOOLS.has(g))) : groups, Math.round(ctxOf(model) / 3));
-      const offer = fit.keep;
-      if (fit.dropped.length) {
-        const names = fit.dropped.map((d) => GROUPS.find((g) => g.id === d.id)?.label ?? d.id);
-        const k = Math.round(fit.dropped.reduce((a, d) => a + d.tokens, 0) / 1024);
-        toast(`Left out ${names.join(", ")} for this reply: their tool descriptions would take ~${k}k of ${model.name}'s ${Math.round(ctxOf(model) / 1024)}k context.`, "warn");
-      }
-      toolDefs = t.tools.filter((x) => offer.has(x.group));
-      specs = toolDefs.length ? toolSpecs(t.tools, offer) : undefined;
-      if (specs) messages[0].content += "\n\n" + TOOLS_HINT;
-      if (toolDefs.some((d) => d.server === "workstation" && RENDER_TOOL.test(d.op))) messages[0].content += " " + RENDER_HINT;
+      const fit = groupsWithin(t.tools, split.full, toolBudget);
+      offer = fit.keep;
+      // Left out for room: still loadable by name, if a smaller group goes first.
+      later = [...split.later, ...fit.dropped.map((d) => d.id)];
+      offerTools();
+      if (specs) messages[0].content += "\n\n" + TOOLS_HINT + (later.length ? " " + LOAD_HINT : "");
+      if (t.tools.some((d) => d.server === "workstation" && RENDER_TOOL.test(d.op) && (offer.has(d.group) || later.includes(d.group)))) messages[0].content += " " + RENDER_HINT;
     }
+    /** load_tools: adds a group's tools for the next round (and the rest of the chat), if they fit. */
+    const loadGroup = (id: string) => {
+      const label = GROUPS.find((g) => g.id === id)?.label ?? id;
+      if (offer.has(id)) return `${label} is already loaded.`;
+      if (!later.includes(id)) return `There's no tool group called ${id}. Groups you can load: ${later.join(", ") || "none"}.`;
+      const fit = groupsWithin(allTools, new Set([...offer, id]), toolBudget);
+      if (!fit.keep.has(id)) return `${label}'s tools don't fit in ${model.name}'s context next to the ones already loaded. Tell the user.`;
+      offer.add(id);
+      loaded.add(id);
+      later = later.filter((g) => g !== id);
+      offerTools();
+      return `Loaded ${label}: ${allTools.filter((x) => x.group === id).map((x) => x.name).join(", ")}. Call them now.`;
+    };
     // A reply can open with [react: 😂]: that becomes a reaction on the user's message and is never shown or spoken.
     reacts = reactFilter(
       (t) => {
@@ -2679,13 +2709,20 @@ async function send(text: string, opts: { images?: string[]; vision?: string; ho
       if (last || !res.toolCalls.length || !busy || busy.signal.aborted) break;
       messages.push({ role: "assistant", content: reply.content.slice(before), tool_calls: res.toolCalls });
       for (const call of res.toolCalls) {
+        // A tool from a group that isn't loaded yet, called by name anyway: its group is loaded and the call runs.
+        const unloaded = !toolDefs.some((d) => d.name === call.name) && allTools.find((d) => d.name === call.name && later.includes(d.group));
+        if (unloaded) loadGroup(unloaded.group);
         const def = toolDefs.find((d) => d.name === call.name);
         const step: ToolStep = { name: call.name, args: call.arguments, by: model.name };
         (reply.tools ??= []).push(step);
         renderToolStep(bubble, step);
         stepWork("reply", toolDoing(call.name, call.arguments), undefined, call.name);
         let result: string;
-        if (!def) {
+        if (call.name === LOAD_TOOLS) {
+          result = loadGroup(String(call.arguments?.group ?? ""));
+          step.ok = result.startsWith("Loaded") || result.endsWith("already loaded.");
+          step.ms = 0;
+        } else if (!def) {
           result = `There is no tool called ${call.name}.`;
           step.ok = false;
         } else if (def.server === "workstation" && RENDER_TOOL.test(def.op)) {
